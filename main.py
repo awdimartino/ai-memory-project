@@ -35,7 +35,8 @@ def stream_query(memories, query, conversation):
                   response += content
                   for char in content:
                         print(char, end='', flush=True)
-      print() # Add a newline at the end
+      print()
+      print()
       return response
 
 def get_embedding(text):
@@ -63,14 +64,15 @@ def fetch_memories(cursor, data):
             category = memory_entry.get("category")
             claim = memory_entry.get("claim")
 
-            print(f"Fetching: Category - {category}, Claim - {claim}")
+            if(DEBUG_MODE): print(f"Fetching: Category - {category}, Claim - {claim}")
             embedded_claim = get_embedding(claim)
             results = fetch_memory(cursor, category, embedded_claim)
             memories += f"{str(results)}\n"
-            #if results:
-            #      print(f'Found: "{results}" in memory')
-            #else:
-            #      print(f'"No match found for: {results}"')
+            if(DEBUG_MODE):
+                  if results:
+                        print(f"Found: '{results}' in memory\n")
+                  else:
+                        print(f"No match found for: '{results}'\n")
       return memories
 
 def add_memories(cursor, data):
@@ -78,11 +80,12 @@ def add_memories(cursor, data):
             category = memory_entry.get("category")
             claim = memory_entry.get("claim")
             result = create_memory(cursor, category, claim, get_embedding(claim))
-            print(f"Saving: Category - {category}, Claim - {claim}")
-            #if (result):
-            #      print(f'"{claim}" saved to memory')
-            #else:
-            #      print(f'Failed to save "{claim}" to memory')
+            if(DEBUG_MODE): print(f"Saving: Category - {category}, Claim - {claim}")
+            if(DEBUG_MODE):
+                  if (result):
+                        print(f"'{claim}' saved to memory\n")
+                  else:
+                        print(f"Failed to save '{claim}' to memory\n")
       return
 
 
@@ -98,9 +101,18 @@ def main():
 
       while True:
             query = input(f"[{str(datetime.datetime.now())}] {USER_NAME}: \n")
-            if query == "exit":
+            print()
+
+            if query == "/exit":
                   print(f"\nAverage Response Time: {overall_time / overall_cycles:.2f} seconds")
                   break
+
+            if query == "/reset":
+                  conversation = []
+                  drop_table(cursor, "memories")
+                  create_table(cursor, "memories")
+                  print("Conversation reset.\n")
+                  continue
 
             start_time = time.perf_counter()
             last_time = start_time
@@ -110,14 +122,14 @@ def main():
 
             user_results = classify_memories(f"{USER_NAME}: {query}")
             now = time.perf_counter()
-            print(f"User Memory Classification: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"User Memory Classification: {now - last_time:.2f}s")
             last_time = now
 
             user_memories = fetch_memories(cursor, user_results)
             now = time.perf_counter()
-            print(f"User Memory Fetch: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"User Memory Fetch: {now - last_time:.2f}s")
             last_time = now
-            
+
             print(f"[{str(datetime.datetime.now())}] {BOT_NAME}: ")
             # ---- MODEL RESPONSE ----
             bot_response = stream_query(
@@ -127,12 +139,12 @@ def main():
             )
 
             now = time.perf_counter()
-            print(f"Streaming: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"Streaming: {now - last_time:.2f}s")
             last_time = now
 
             add_memories(cursor, user_results)
             now = time.perf_counter()
-            print(f"User Memory Saving: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"User Memory Saving: {now - last_time:.2f}s")
             last_time = now
 
             # ---- ASSISTANT TURN ----
@@ -140,12 +152,12 @@ def main():
 
             bot_results = classify_memories(f"{BOT_NAME}: + {bot_response}")
             now = time.perf_counter()
-            print(f"Bot Memory Classification: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"Bot Memory Classification: {now - last_time:.2f}s")
             last_time = now
 
             add_memories(cursor, bot_results)
             now = time.perf_counter()
-            print(f"Bot Memory Saving: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"Bot Memory Saving: {now - last_time:.2f}s")
 
             # ---- TRIM CONTEXT ----
             if len(conversation) > MAX_TURNS * 2:
@@ -154,11 +166,9 @@ def main():
             total_time = now - start_time
             overall_time += total_time 
             overall_cycles += 1
-            print(f"Total time: {total_time:.2f}s\n")
+            if(DEBUG_MODE): print(f"Total time: {total_time:.2f}s\n")
 
       cursor.close()
-
-
 
 if __name__ == "__main__":
     main()

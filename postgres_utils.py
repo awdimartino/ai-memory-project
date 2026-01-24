@@ -34,6 +34,16 @@ def create_table(cursor, name):
      except Exception as e:
           print(e)
           return False
+     
+def drop_table(cursor, name):
+     sql = f"DROP TABLE IF EXISTS {name};"
+
+     try:
+          cursor.execute(sql)
+          return True
+     except Exception as e:
+          print(e)
+          return False
     
 def create_memory(cursor, category, memory, embedding):
      sql = f"""
