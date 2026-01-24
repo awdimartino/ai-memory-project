@@ -23,7 +23,7 @@ def stream_query(memories, query, emotion, conversation):
             model=BOT_MODEL,
             messages=[
                   {"role": "system", "content": BOT_PROMPT}, 
-                  {"role": "user", "content": ("Current Time: " + str(datetime.datetime.now()) + "\nRecent Conversation: " + str(conversation) + "\nMemories: " + str(memories) + "\n" + "Current Emotion: " + emotion + "\n" + USER_NAME + ": " + query)}], # FORMAT NEEDS TO BE CHANGED
+                  {"role": "user", "content": ("/no_think\nCurrent Time: " + str(datetime.datetime.now()) + "\nRecent Conversation: " + str(conversation) + "\nMemories: " + str(memories) + "\n" + "Current Emotion: " + emotion + "\n" + USER_NAME + ": " + query)}], # FORMAT NEEDS TO BE CHANGED
             stream=True # Enable streaming
       )
       response = ""
@@ -46,12 +46,12 @@ def get_embedding(text):
       )
       return response.data[0].embedding
 
-def classify_memories(query):
+def classify_memories(conversation, query):
       response = client.chat.completions.create(
             model=BRAIN_MODEL,
             messages=[
                   {"role": "system", "content": BRAIN_PROMPT},
-                  {"role": "user", "content": query}],
+                  {"role": "user", "content": f"Previous conversation context: {conversation}\nQuery: {query}"}],
             response_format=BRAIN_RESPONSE_FORMAT
             )
       results = json.loads(response.choices[0].message.content)
@@ -129,7 +129,7 @@ def main():
             # ---- USER TURN ----
             conversation.append({"role": "user", "content": query, "datetime": str(datetime.datetime.now())})
 
-            user_results = classify_memories(f"{USER_NAME}: {query}")
+            user_results = classify_memories(conversation, f"{USER_NAME}: {query}")
             now = time.perf_counter()
             if(DEBUG_MODE): print(f"User Memory Classification: {now - last_time:.2f}s\n")
             last_time = now
@@ -165,7 +165,7 @@ def main():
             # ---- ASSISTANT TURN ----
             conversation.append({"role": "assistant", "content": bot_response, "datetime": str(datetime.datetime.now())})
 
-            bot_results = classify_memories(f"{BOT_NAME}: + {bot_response}")
+            bot_results = classify_memories(conversation, f"{BOT_NAME}: + {bot_response}")
             now = time.perf_counter()
             if(DEBUG_MODE): print(f"Bot Memory Classification: {now - last_time:.2f}s\n")
             last_time = now
