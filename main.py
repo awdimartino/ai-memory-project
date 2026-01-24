@@ -12,6 +12,8 @@ import datetime
 from postgres_utils import *
 from config import *
 
+DEBUG_MODE = True
+
 # Connect to LM Studio
 client = oai(
     base_url=AI_BASE_URL,
@@ -46,11 +48,11 @@ def get_embedding(text):
       )
       return response.data[0].embedding
 
-def classify_memories(conversation, query):
+def classify_memories(type, conversation, query):
       response = client.chat.completions.create(
             model=BRAIN_MODEL,
             messages=[
-                  {"role": "system", "content": BRAIN_PROMPT},
+                  {"role": "system", "content": type},
                   {"role": "user", "content": f"Previous conversation context: {conversation}\nQuery: {query}"}],
             response_format=BRAIN_RESPONSE_FORMAT
             )
@@ -101,7 +103,7 @@ def analyze_emotion(query):
 def main():
       connection, cursor = create_connection()
       create_table(cursor, "memories")
-
+      
       conversation = []
       MAX_TURNS = 6
 
@@ -112,15 +114,21 @@ def main():
             query = input(f"[{str(datetime.datetime.now())}] {USER_NAME}: \n")
             print()
 
-            if query == "/exit":
+            if query.strip().lower() == "/exit":
                   print(f"\nAverage Response Time: {overall_time / overall_cycles:.2f} seconds")
                   break
 
-            if query == "/reset":
+            if query.strip().lower() == "/reset":
                   conversation = []
                   drop_table(cursor, "memories")
                   create_table(cursor, "memories")
                   print("Conversation reset.\n")
+                  continue
+
+            if query.strip().lower() == "/debug":
+                  global DEBUG_MODE
+                  DEBUG_MODE = not DEBUG_MODE
+                  print(f"Debug mode set to {DEBUG_MODE}\n")
                   continue
 
             start_time = time.perf_counter()
@@ -129,7 +137,7 @@ def main():
             # ---- USER TURN ----
             conversation.append({"role": "user", "content": query, "datetime": str(datetime.datetime.now())})
 
-            user_results = classify_memories(conversation, f"{USER_NAME}: {query}")
+            user_results = classify_memories(BRAIN_PROMPT_USER, conversation, f"{USER_NAME}: {query}")
             now = time.perf_counter()
             if(DEBUG_MODE): print(f"User Memory Classification: {now - last_time:.2f}s\n")
             last_time = now
@@ -165,7 +173,7 @@ def main():
             # ---- ASSISTANT TURN ----
             conversation.append({"role": "assistant", "content": bot_response, "datetime": str(datetime.datetime.now())})
 
-            bot_results = classify_memories(conversation, f"{BOT_NAME}: + {bot_response}")
+            bot_results = classify_memories(BRAIN_PROMPT_BOT, conversation, f"{BOT_NAME}: + {bot_response}")
             now = time.perf_counter()
             if(DEBUG_MODE): print(f"Bot Memory Classification: {now - last_time:.2f}s\n")
             last_time = now
