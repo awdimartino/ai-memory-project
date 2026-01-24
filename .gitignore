@@ -2,3 +2,4 @@
 /system_prompts.py
 /__pycache__
 /config.py
+/prompt_backup.py

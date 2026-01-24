@@ -10,7 +10,6 @@ import datetime
 
 # Files
 from postgres_utils import *
-from system_prompts import *
 from config import *
 
 # Connect to LM Studio
@@ -19,12 +18,12 @@ client = oai(
     api_key=AI_API_KEY # Value does not matter on localhost
 )
 
-def stream_query(memories, query, conversation):
+def stream_query(memories, query, emotion, conversation):
       stream = client.chat.completions.create(
             model=BOT_MODEL,
             messages=[
                   {"role": "system", "content": BOT_PROMPT}, 
-                  {"role": "user", "content": ("Current Time: " + str(datetime.datetime.now()) + "\nRecent Conversation: " + str(conversation) + "\nMemories: " + str(memories) + "\n" + USER_NAME + ": " + query)}], # FORMAT NEEDS TO BE CHANGED
+                  {"role": "user", "content": ("Current Time: " + str(datetime.datetime.now()) + "\nRecent Conversation: " + str(conversation) + "\nMemories: " + str(memories) + "\n" + "Current Emotion: " + emotion + "\n" + USER_NAME + ": " + query)}], # FORMAT NEEDS TO BE CHANGED
             stream=True # Enable streaming
       )
       response = ""
@@ -88,6 +87,16 @@ def add_memories(cursor, data):
                         print(f"Failed to save '{claim}' to memory\n")
       return
 
+def analyze_emotion(query):
+      response = client.chat.completions.create(
+            model=BRAIN_MODEL,
+            messages=[
+                  {"role": "system", "content": EMOTION_PROMPT},
+                  {"role": "user", "content": query}],
+            )
+      emotion = response.choices[0].message.content.strip()
+      if(DEBUG_MODE): print(f"Detected Emotion: {emotion}\n")
+      return emotion
 
 def main():
       connection, cursor = create_connection()
@@ -122,12 +131,17 @@ def main():
 
             user_results = classify_memories(f"{USER_NAME}: {query}")
             now = time.perf_counter()
-            if(DEBUG_MODE): print(f"User Memory Classification: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"User Memory Classification: {now - last_time:.2f}s\n")
             last_time = now
 
             user_memories = fetch_memories(cursor, user_results)
             now = time.perf_counter()
-            if(DEBUG_MODE): print(f"User Memory Fetch: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"User Memory Fetch: {now - last_time:.2f}s\n")
+            last_time = now
+
+            emotion = analyze_emotion(query)
+            now = time.perf_counter()
+            if(DEBUG_MODE): print(f"Sentiment Analysis: {now - last_time:.2f}s\n")
             last_time = now
 
             print(f"[{str(datetime.datetime.now())}] {BOT_NAME}: ")
@@ -135,16 +149,17 @@ def main():
             bot_response = stream_query(
                   memories=user_memories,
                   conversation=conversation,
+                  emotion=emotion,
                   query=query
             )
 
             now = time.perf_counter()
-            if(DEBUG_MODE): print(f"Streaming: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"Streaming: {now - last_time:.2f}s\n")
             last_time = now
 
             add_memories(cursor, user_results)
             now = time.perf_counter()
-            if(DEBUG_MODE): print(f"User Memory Saving: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"User Memory Saving: {now - last_time:.2f}s\n")
             last_time = now
 
             # ---- ASSISTANT TURN ----
@@ -152,7 +167,7 @@ def main():
 
             bot_results = classify_memories(f"{BOT_NAME}: + {bot_response}")
             now = time.perf_counter()
-            if(DEBUG_MODE): print(f"Bot Memory Classification: {now - last_time:.2f}s")
+            if(DEBUG_MODE): print(f"Bot Memory Classification: {now - last_time:.2f}s\n")
             last_time = now
 
             add_memories(cursor, bot_results)
