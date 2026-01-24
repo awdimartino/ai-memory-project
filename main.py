@@ -1,0 +1,164 @@
+# Imports
+from openai import OpenAI as oai
+import pgvector
+import psycopg2
+
+# Python Standard
+import json
+import time
+import datetime
+
+# Files
+from postgres_utils import *
+from system_prompts import *
+from config import *
+
+# Connect to LM Studio
+client = oai(
+    base_url=AI_BASE_URL,
+    api_key=AI_API_KEY # Value does not matter on localhost
+)
+
+def stream_query(memories, query, conversation):
+      stream = client.chat.completions.create(
+            model=BOT_MODEL,
+            messages=[
+                  {"role": "system", "content": BOT_PROMPT}, 
+                  {"role": "user", "content": ("Current Time: " + str(datetime.datetime.now()) + "\nRecent Conversation: " + str(conversation) + "\nMemories: " + str(memories) + "\n" + USER_NAME + ": " + query)}], # FORMAT NEEDS TO BE CHANGED
+            stream=True # Enable streaming
+      )
+      response = ""
+      # Process the response chunks as they arrive
+      for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content is not None:
+                  content = chunk.choices[0].delta.content
+                  response += content
+                  for char in content:
+                        print(char, end='', flush=True)
+      print() # Add a newline at the end
+      return response
+
+def get_embedding(text):
+      text = text.replace("\n", " ")
+      response = client.embeddings.create(
+            input=[text],
+            model=EMBED_MODEL
+      )
+      return response.data[0].embedding
+
+def classify_memories(query):
+      response = client.chat.completions.create(
+            model=BRAIN_MODEL,
+            messages=[
+                  {"role": "system", "content": BRAIN_PROMPT},
+                  {"role": "user", "content": query}],
+            response_format=BRAIN_RESPONSE_FORMAT
+            )
+      results = json.loads(response.choices[0].message.content)
+      return results
+
+def fetch_memories(cursor, data):
+      memories = ""
+      for memory_entry in data.get("fetch_memory", []):  # Safely get the list or default to empty
+            category = memory_entry.get("category")
+            claim = memory_entry.get("claim")
+
+            print(f"Fetching: Category - {category}, Claim - {claim}")
+            embedded_claim = get_embedding(claim)
+            results = fetch_memory(cursor, category, embedded_claim)
+            memories += f"{str(results)}\n"
+            #if results:
+            #      print(f'Found: "{results}" in memory')
+            #else:
+            #      print(f'"No match found for: {results}"')
+      return memories
+
+def add_memories(cursor, data):
+      for memory_entry in data.get("create_memory", []):  # Safely get the list or default to empty
+            category = memory_entry.get("category")
+            claim = memory_entry.get("claim")
+            result = create_memory(cursor, category, claim, get_embedding(claim))
+            print(f"Saving: Category - {category}, Claim - {claim}")
+            #if (result):
+            #      print(f'"{claim}" saved to memory')
+            #else:
+            #      print(f'Failed to save "{claim}" to memory')
+      return
+
+
+def main():
+      connection, cursor = create_connection()
+      create_table(cursor, "memories")
+
+      conversation = []
+      MAX_TURNS = 6
+
+      overall_time = 0.0
+      overall_cycles = 0
+
+      while True:
+            query = input(f"[{str(datetime.datetime.now())}] {USER_NAME}: \n")
+            if query == "exit":
+                  print(f"\nAverage Response Time: {overall_time / overall_cycles:.2f} seconds")
+                  break
+
+            start_time = time.perf_counter()
+            last_time = start_time
+
+            # ---- USER TURN ----
+            conversation.append({"role": "user", "content": query, "datetime": str(datetime.datetime.now())})
+
+            user_results = classify_memories(f"{USER_NAME}: {query}")
+            now = time.perf_counter()
+            print(f"User Memory Classification: {now - last_time:.2f}s")
+            last_time = now
+
+            user_memories = fetch_memories(cursor, user_results)
+            now = time.perf_counter()
+            print(f"User Memory Fetch: {now - last_time:.2f}s")
+            last_time = now
+            
+            print(f"[{str(datetime.datetime.now())}] {BOT_NAME}: ")
+            # ---- MODEL RESPONSE ----
+            bot_response = stream_query(
+                  memories=user_memories,
+                  conversation=conversation,
+                  query=query
+            )
+
+            now = time.perf_counter()
+            print(f"Streaming: {now - last_time:.2f}s")
+            last_time = now
+
+            add_memories(cursor, user_results)
+            now = time.perf_counter()
+            print(f"User Memory Saving: {now - last_time:.2f}s")
+            last_time = now
+
+            # ---- ASSISTANT TURN ----
+            conversation.append({"role": "assistant", "content": bot_response, "datetime": str(datetime.datetime.now())})
+
+            bot_results = classify_memories(f"{BOT_NAME}: + {bot_response}")
+            now = time.perf_counter()
+            print(f"Bot Memory Classification: {now - last_time:.2f}s")
+            last_time = now
+
+            add_memories(cursor, bot_results)
+            now = time.perf_counter()
+            print(f"Bot Memory Saving: {now - last_time:.2f}s")
+
+            # ---- TRIM CONTEXT ----
+            if len(conversation) > MAX_TURNS * 2:
+                  conversation = conversation[-MAX_TURNS * 2:]
+
+            total_time = now - start_time
+            overall_time += total_time 
+            overall_cycles += 1
+            print(f"Total time: {total_time:.2f}s\n")
+
+      cursor.close()
+
+
+
+if __name__ == "__main__":
+    main()
