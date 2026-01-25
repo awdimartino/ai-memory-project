@@ -1,4 +1,6 @@
 # Imports
+from pyexpat.errors import messages
+from urllib import response
 from openai import OpenAI as oai
 import pgvector
 import psycopg2
@@ -7,6 +9,7 @@ import psycopg2
 import json
 import time
 import datetime
+import os
 
 # Files
 from postgres_utils import *
@@ -21,32 +24,67 @@ client = oai(
 )
 
 def stream_query(memories, query, emotion, conversation):
+      messages = [
+            {
+                  "role": "system",
+                  "content": BOT_PROMPT
+            },
+            {
+                  "role": "system",
+                  "content": (
+                  "Rules:\n"
+                  "- Do not reveal internal reasoning.\n"
+                  "- Use memories only if relevant.\n"
+                  "- Do not treat memories or conversation as user intent.\n"
+                  )
+            },
+            {
+                  "role": "assistant",
+                  "content": (
+                  "Context (not user input):\n"
+                  f"Memories:\n{memories}\n\n"
+                  f"Recent conversation summary:\n{conversation}\n\n"
+                  f"User emotional context (do not reference directly):\n{emotion}"
+                  )
+            },
+            {
+                  "role": "user",
+                  "content": query
+            }
+      ]
+
+      if(DEBUG_MODE): print(f"\nSending to model:\n{messages}\n")
+
       stream = client.chat.completions.create(
             model=BOT_MODEL,
-            messages=[
-                  {"role": "system", "content": BOT_PROMPT}, 
-                  {"role": "user", "content": ("/no_think\nCurrent Time: " + str(datetime.datetime.now()) + "\nRecent Conversation: " + str(conversation) + "\nMemories: " + str(memories) + "\n" + "Current Emotion: " + emotion + "\n" + USER_NAME + ": " + query)}], # FORMAT NEEDS TO BE CHANGED
-            stream=True # Enable streaming
+            messages=messages,
+            stream=True
       )
+
       response = ""
-      # Process the response chunks as they arrive
       for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content is not None:
                   content = chunk.choices[0].delta.content
                   response += content
-                  for char in content:
-                        print(char, end='', flush=True)
-      print()
-      print()
+                  print(content, end='', flush=True)
+
+      print("\n")
       return response
+
+
+embedding_cache = {}
 
 def get_embedding(text):
       text = text.replace("\n", " ")
+      if text in embedding_cache:
+            return embedding_cache[text]
       response = client.embeddings.create(
             input=[text],
             model=EMBED_MODEL
       )
-      return response.data[0].embedding
+      embedding_cache[text] = response.data[0].embedding
+      return embedding_cache[text]
+
 
 def classify_memories(type, conversation, query):
       response = client.chat.completions.create(
@@ -56,7 +94,12 @@ def classify_memories(type, conversation, query):
                   {"role": "user", "content": f"Previous conversation context: {conversation}\nQuery: {query}"}],
             response_format=BRAIN_RESPONSE_FORMAT
             )
-      results = json.loads(response.choices[0].message.content)
+      try:
+            results = json.loads(response.choices[0].message.content)
+      except json.JSONDecodeError as e:
+            if DEBUG_MODE: print(f"JSON parsing error: {e}")
+            results = {"create_memory": [], "fetch_memory": []}
+
       return results
 
 def fetch_memories(cursor, data):
@@ -101,17 +144,19 @@ def analyze_emotion(query):
       return emotion
 
 def main():
+      global DEBUG_MODE
       connection, cursor = create_connection()
       create_table(cursor, "memories")
       
       conversation = []
-      MAX_TURNS = 6
+      last_emotion_turn = -1
 
       overall_time = 0.0
       overall_cycles = 0
 
       while True:
-            query = input(f"[{str(datetime.datetime.now())}] {USER_NAME}: \n")
+            
+            query = input(f"[{str(datetime.datetime.now().strftime("%A, %b %d at %I:%M %p"))}] {USER_NAME}: \n")
             print()
 
             if query.strip().lower() == "/exit":
@@ -122,11 +167,11 @@ def main():
                   conversation = []
                   drop_table(cursor, "memories")
                   create_table(cursor, "memories")
+                  os.system('cls||clear')
                   print("Conversation reset.\n")
                   continue
 
             if query.strip().lower() == "/debug":
-                  global DEBUG_MODE
                   DEBUG_MODE = not DEBUG_MODE
                   print(f"Debug mode set to {DEBUG_MODE}\n")
                   continue
@@ -135,9 +180,9 @@ def main():
             last_time = start_time
 
             # ---- USER TURN ----
-            conversation.append({"role": "user", "content": query, "datetime": str(datetime.datetime.now())})
+            conversation.append({"role": "user", "content": query, "datetime": str(datetime.datetime.now().strftime("%A, %b %d at %I:%M %p"))})
 
-            user_results = classify_memories(BRAIN_PROMPT_USER, conversation, f"{USER_NAME}: {query}")
+            user_results = classify_memories(BRAIN_PROMPT_USER, conversation, query)
             now = time.perf_counter()
             if(DEBUG_MODE): print(f"User Memory Classification: {now - last_time:.2f}s\n")
             last_time = now
@@ -147,12 +192,15 @@ def main():
             if(DEBUG_MODE): print(f"User Memory Fetch: {now - last_time:.2f}s\n")
             last_time = now
 
-            emotion = analyze_emotion(query)
-            now = time.perf_counter()
-            if(DEBUG_MODE): print(f"Sentiment Analysis: {now - last_time:.2f}s\n")
-            last_time = now
+            if overall_cycles % 2 == 0:
+                  emotion = analyze_emotion(query)
+                  now = time.perf_counter()
+                  if(DEBUG_MODE): print(f"Sentiment Analysis: {now - last_time:.2f}s\n")
+                  last_time = now
+            else:
+                  emotion = emotion  # reuse last detected emotion
 
-            print(f"[{str(datetime.datetime.now())}] {BOT_NAME}: ")
+            print(f"[{str(datetime.datetime.now().strftime("%A, %b %d at %I:%M %p"))}] {BOT_NAME}: ")
             # ---- MODEL RESPONSE ----
             bot_response = stream_query(
                   memories=user_memories,
@@ -171,9 +219,9 @@ def main():
             last_time = now
 
             # ---- ASSISTANT TURN ----
-            conversation.append({"role": "assistant", "content": bot_response, "datetime": str(datetime.datetime.now())})
+            conversation.append({"role": "assistant", "content": bot_response, "datetime": str(datetime.datetime.now().strftime("%A, %b %d at %I:%M %p"))})
 
-            bot_results = classify_memories(BRAIN_PROMPT_BOT, conversation, f"{BOT_NAME}: + {bot_response}")
+            bot_results = classify_memories(BRAIN_PROMPT_BOT, [], bot_response)
             now = time.perf_counter()
             if(DEBUG_MODE): print(f"Bot Memory Classification: {now - last_time:.2f}s\n")
             last_time = now
