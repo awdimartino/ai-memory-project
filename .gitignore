@@ -3,3 +3,7 @@
 /__pycache__
 /config.py
 /prompt_backup.py
+/ggml-base.en.bin
+/speech_recognition.py
+/vosk-model-small-en-us-0.15
+/vosk-model-en-us-0.22
