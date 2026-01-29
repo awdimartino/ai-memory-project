@@ -17,17 +17,12 @@ from speaker import *
 DEBUG_MODE = True
 
 class Chatbot:
-      def __init__(self):
+      def __init__(self, client):
             self.speaker = Speaker()
-            self.memory_manager = MemoryManager()
-            self.embedding_manager = EmbeddingManager()
-            self.sentiment_analyzer = SentimentAnalyzer()
+            self.memory_manager = MemoryManager(client)
+            self.sentiment_analyzer = SentimentAnalyzer(client)
             
-            self.client = oai(
-                  base_url=AI_BASE_URL,
-                  api_key=AI_API_KEY # Value does not matter on localhost
-            )
-
+            self.client = client
 
       def stream_query(self, memories, query, emotion, conversation):
             speech_buffer = SpeechBuffer()
@@ -86,11 +81,8 @@ class Chatbot:
             return response
 
 class EmbeddingManager:
-      def __init__(self):
-            self.client = oai(
-                  base_url=AI_BASE_URL,
-                  api_key=AI_API_KEY # Value does not matter on localhost
-            )
+      def __init__(self, client):
+            self.client = client
             self.embedding_cache = {}
 
       def get_embedding(self, text):
@@ -105,13 +97,10 @@ class EmbeddingManager:
             return self.embedding_cache[text]
 
 class MemoryManager:
-      def __init__(self):
-            self.client = oai(
-                  base_url=AI_BASE_URL,
-                  api_key=AI_API_KEY #
-            )
-            embedding_manger = EmbeddingManager()
-            self.get_embedding = embedding_manger.get_embedding
+      def __init__(self, client):
+            self.client = client
+            self.embedding_manager = EmbeddingManager(client)
+            self.get_embedding = self.embedding_manager.get_embedding
 
       def classify_memories(self, type, conversation, query):
             response = self.client.chat.completions.create(
@@ -160,11 +149,8 @@ class MemoryManager:
             return
 
 class SentimentAnalyzer:
-      def __init__(self):
-            self.client = oai(
-                  base_url=AI_BASE_URL,
-                  api_key=AI_API_KEY #
-            )
+      def __init__(self, client):
+            self.client = client
 
       def analyze_emotion(self, query):
             response = self.client.chat.completions.create(
@@ -182,8 +168,11 @@ def main():
 
       db = Database()
       db.create_memory_table("memories")
-
-      chatbot = Chatbot()
+      client = oai(
+                  base_url=AI_BASE_URL,
+                  api_key=AI_API_KEY # Value does not matter on localhost
+            )
+      chatbot = Chatbot(client)
       
       conversation = []
       last_emotion_turn = -1
@@ -279,4 +268,4 @@ def main():
       db.close_connection()
 
 if __name__ == "__main__":
-    main()
+      main()
