@@ -1,6 +1,7 @@
 # Imports
 from concurrent.futures import ThreadPoolExecutor
 import threading
+from urllib import response
 
 from openai import OpenAI as oai
 
@@ -15,21 +16,6 @@ from emotions import Emotions
 from memories import Memories
 from database import Database
 from ticks import TickSystem
-
-import logging
-
-logging.basicConfig(
-      filename='debug.log',
-      filemode='w',
-      level=logging.DEBUG,
-      format='%(asctime)s %(message)s',
-      datefmt='%H:%M:%S'
-)
-
-def log(msg):
-      if DEBUG_MODE:
-            print(msg)
-            logging.debug(msg)
 
 class Chatbot:
       def __init__(self, client):
@@ -64,24 +50,22 @@ class Chatbot:
             ]
 
             if DEBUG_MODE:
-                  lines = []
-                  lines.append(f"\n{'='*60}")
+                  print(f"\n{'='*60}")
                   recent = messages[-3:]
-                  lines.append(f"OUTGOING MESSAGES (showing {len(recent)} of {len(messages)} total)")
-                  lines.append(f"{'='*60}")
+                  print(f"OUTGOING MESSAGES (showing {len(recent)} of {len(messages)} total)")
+                  print(f"{'='*60}")
                   for i, msg in enumerate(recent):
                         role = msg['role'].upper()
                         content = msg['content']
-                        lines.append(f"\n[{i}] {role}")
-                        lines.append(f"{'-'*40}")
-                        lines.append(content)
-                  lines.append(f"\n{'='*60}")
-                  lines.append("EMOTIONAL STATE")
-                  lines.append(f"{'-'*40}")
+                        print(f"\n[{i}] {role}")
+                        print(f"{'-'*40}")
+                        print(content)
+                  print(f"\n{'='*60}")
+                  print("EMOTIONAL STATE")
+                  print(f"{'-'*40}")
                   for channel, value in self.emotions.state.items():
-                        lines.append(f"{channel:<12} {self.emotions.value_to_word(value)} ({value:.2f})")
-                  lines.append(f"{'='*60}\n")
-                  log("\n".join(lines))
+                        print(f"{channel:<12} {self.emotions.value_to_word(value)} ({value:.2f})")
+                  print(f"{'='*60}\n")
 
             stream = self.client.chat.completions.create(
                   model=BOT_MODEL,
@@ -114,13 +98,16 @@ def main():
       )
       chatbot = Chatbot(client)
       conversation = []
-      lock = threading.Lock()
+      # Create a lock for synchronizing access to shared resources
+      lock = threading.Lock()  
+      # Initialize background tick system
       tick_system = TickSystem(chatbot, db, conversation, interval=30, lock=lock)
       tick_system.start()
       executor = ThreadPoolExecutor(max_workers=2)
       
       while True:
             query = input(f"[{datetime.datetime.now().strftime('%A, %b %d at %I:%M %p')}] {USER_NAME}: \n")
+            # Update last_interaction whenever user sends a message
             tick_system.last_user_interaction = time.time()
             tick_system.last_any_interaction = time.time()
             print()
@@ -144,21 +131,23 @@ def main():
             # ---- USER TURN ----
             with lock:
                   user_results = chatbot.memory_manager.classify_memories(BRAIN_PROMPT_USER, conversation[-10:], query)
-                  log(f"User classification: {user_results}\n")
+                  if DEBUG_MODE: print(f"User classification: {user_results}\n")
 
                   user_memories = chatbot.memory_manager.fetch_memories(db, user_results)
 
                   print(f"[{datetime.datetime.now().strftime('%A, %b %d at %I:%M %p')}] {BOT_NAME}: ")
 
                   # ---- MODEL RESPONSE ----
-                  chatbot.emotions.react(query)
+                  chatbot.emotions.react(query)  # Update emotional state based on user input
                   bot_response = chatbot.stream_query(query, conversation, memories=user_memories, last_thought=tick_system.last_thought)
-                  tick_system.last_thought = ""
-                  chatbot.emotions.react(bot_response)
+                  tick_system.last_thought = ""  # Clear the last thought after sharing it with the user
+                  chatbot.emotions.react(bot_response)  # Update emotional state based on bot response
                   chatbot.memory_manager.add_memories(db, user_results, source_text=query)
 
+                  
+
                   executor.submit(
-                        TickSystem._classify_and_save_bot,
+                        TickSystem._classify_and_save_bot, 
                         chatbot, db, bot_response, conversation[:-10]
                   )
 
