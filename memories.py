@@ -33,6 +33,7 @@ class Memories:
       def classify_memories(self, type, conversation, query):
             response = self.client.chat.completions.create(
                   model=BRAIN_MODEL,
+                  temperature=BRAIN_TEMPERATURE,
                   messages=[
                         {"role": "system", "content": type},
                         {"role": "user", "content": f"Previous conversation context: {conversation}\nQuery: {query}"}],
@@ -63,11 +64,24 @@ class Memories:
                               print(f"No match found for: '{claim}'\n")
             return memories
 
-      def add_memories(self, db, data):
+      # Added simple filtering to prevent adding memories that are likely hallucinated or irrelevant based on the source text of the conversation. 
+      def add_memories(self, db, data, source_text=""):
+            source_words = set(source_text.lower().split()) if source_text else set()
+            stopwords = {"is", "are", "the", "a", "an", "and", "of", "to", "in", "on", "at", "for", "with", "has", "have", "was", "were"}
+
             for memory_entry in data.get("create_memory", []):
                   owner = memory_entry.get("owner")
                   category = memory_entry.get("category")
                   claim = memory_entry.get("claim")
+
+                  # Reject hallucinated memories
+                  if source_words:
+                        claim_words = set(claim.lower().split())
+                        invented = claim_words - source_words - stopwords
+                        if len(invented) > 3:
+                              if DEBUG_MODE: print(f"Rejected hallucination: '{claim}'\n")
+                              continue
+
                   embedding = self.get_embedding(claim)
 
                   if db.memory_exists(embedding, owner, category):

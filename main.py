@@ -1,4 +1,5 @@
 # Imports
+from concurrent.futures import ThreadPoolExecutor
 import threading
 from urllib import response
 
@@ -48,9 +49,10 @@ class Chatbot:
 
             if DEBUG_MODE:
                   print(f"\n{'='*60}")
-                  print(f"OUTGOING MESSAGES ({len(messages)} total)")
+                  recent = messages[-3:]
+                  print(f"OUTGOING MESSAGES (showing {len(recent)} of {len(messages)} total)")
                   print(f"{'='*60}")
-                  for i, msg in enumerate(messages):
+                  for i, msg in enumerate(recent):
                         role = msg['role'].upper()
                         content = msg['content']
                         print(f"\n[{i}] {role}")
@@ -60,6 +62,7 @@ class Chatbot:
 
             stream = self.client.chat.completions.create(
                   model=BOT_MODEL,
+                  temperature=BOT_TEMPERATURE,
                   messages=messages,
                   stream=True
             )
@@ -92,6 +95,7 @@ def main():
       # Initialize background tick system
       tick_system = TickSystem(chatbot, db, conversation, interval=30, lock=lock)
       tick_system.start()
+      executor = ThreadPoolExecutor(max_workers=2)
       
       while True:
             query = input(f"[{datetime.datetime.now().strftime('%A, %b %d at %I:%M %p')}] {USER_NAME}: \n")
@@ -118,7 +122,7 @@ def main():
 
             # ---- USER TURN ----
             with lock:
-                  user_results = chatbot.memory_manager.classify_memories(BRAIN_PROMPT_USER, conversation, query)
+                  user_results = chatbot.memory_manager.classify_memories(BRAIN_PROMPT_USER, conversation[-10:], query)
                   if DEBUG_MODE: print(f"User classification: {user_results}\n")
 
                   user_memories = chatbot.memory_manager.fetch_memories(db, user_results)
@@ -129,12 +133,14 @@ def main():
                   chatbot.emotions.react(query)  # Update emotional state based on user input
                   bot_response = chatbot.stream_query(query, conversation, memories=user_memories)
                   chatbot.emotions.react(bot_response)  # Update emotional state based on bot response
-                  chatbot.memory_manager.add_memories(db, user_results)
+                  chatbot.memory_manager.add_memories(db, user_results, source_text=query)
 
-                  bot_results = chatbot.memory_manager.classify_memories(BRAIN_PROMPT_BOT, [], bot_response)
-                  if DEBUG_MODE: print(f"Bot classification: {bot_results}\n")
+                  
 
-                  chatbot.memory_manager.add_memories(db, bot_results)
+                  executor.submit(
+                        TickSystem._classify_and_save_bot, 
+                        chatbot, db, bot_response, conversation[:-10]
+                  )
 
                   conversation.append({"role": "user", "content": query})
                   conversation.append({"role": "assistant", "content": bot_response})

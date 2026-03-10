@@ -98,7 +98,7 @@ class Database:
                return False
 
      # Fetch memories from the memories table based on category and embedding similarity     
-     def fetch_memory(self, query_embedding, owner=None, category=None, threshold=0.7, limit=3):
+     def fetch_memory(self, query_embedding, owner=None, category=None, threshold=0.0, limit=3):
           conditions = ["1 - (embedding <=> %s) > %s"]
           params = [str(query_embedding), threshold]
 

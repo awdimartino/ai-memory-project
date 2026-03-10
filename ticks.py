@@ -74,3 +74,9 @@ class TickSystem:
             print(f"\n[{BOT_NAME}]: {response}\n")
             self.conversation.append({"role": "assistant", "content": response})
             self.last_interaction = time.time()
+
+    @staticmethod
+    def _classify_and_save_bot(chatbot, db, bot_response, conversation):
+        bot_results = chatbot.memory_manager.classify_memories(BRAIN_PROMPT_BOT, conversation, bot_response)
+        if DEBUG_MODE: print(f"Bot classification: {bot_results}\n")
+        chatbot.memory_manager.add_memories(db, bot_results, source_text=bot_response)
