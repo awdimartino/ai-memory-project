@@ -1,5 +1,4 @@
 # Imports
-from openai import OpenAI as oai
 import psycopg2
 import datetime
 
@@ -28,18 +27,25 @@ class Database:
           self.cursor.close()
           self.connection.close()
 
-     # Create a new memory table
-     def create_memory_table(self, name):
-          sql = f"""
-          CREATE TABLE IF NOT EXISTS {name} (
-          id SERIAL PRIMARY KEY,
-          category TEXT,
-          memory TEXT,
-          timestamp TIMESTAMP,
-          embedding VECTOR(1024)
+     # Create the memory table
+     def create_memory_table(self):
+          sql = """
+          CREATE TABLE IF NOT EXISTS memories (
+               id              SERIAL PRIMARY KEY,
+               owner           TEXT NOT NULL,
+               category        TEXT NOT NULL,
+               memory          TEXT NOT NULL,
+               embedding       VECTOR(1024),
+               importance      FLOAT DEFAULT 0.5,
+               access_count    INT DEFAULT 0,
+               timestamp       TIMESTAMPTZ DEFAULT NOW(),
+               last_accessed   TIMESTAMPTZ
           );
+          CREATE INDEX IF NOT EXISTS memories_embedding_idx
+               ON memories USING ivfflat (embedding vector_cosine_ops);
+          CREATE INDEX IF NOT EXISTS memories_owner_category_idx
+               ON memories (owner, category);
           """
-
           try:
                self.cursor.execute(sql)
                return True
@@ -47,10 +53,9 @@ class Database:
                print(e)
                return False
      
-     # Drop a table by name
-     def drop_table(self, name):
-          sql = f"DROP TABLE IF EXISTS {name};"
-
+     # Drop the memory table
+     def drop_table(self):
+          sql = "DROP TABLE IF EXISTS memories;"
           try:
                self.cursor.execute(sql)
                return True
@@ -59,28 +64,63 @@ class Database:
                return False
      
      # Create a new memory entry in the memories table
-     def create_memory(self, category, memory, embedding):
-          sql = f"""
-          INSERT INTO memories (category, memory, timestamp, embedding) VALUES (%s, %s, %s, %s)"""
+     def create_memory(self, owner, category, memory, embedding, importance=0.5):
+          sql = """
+          INSERT INTO memories (owner, category, memory, embedding, importance)
+          VALUES (%s, %s, %s, %s, %s)
+          """
           try:
-               self.cursor.execute(sql, (category, memory, datetime.datetime.now(), embedding))
+               self.cursor.execute(sql, (owner, category, memory, str(embedding), importance))
                return True
+          except Exception as e:
+               print(e)
+               return False
+          
+     # Search if a memory exists
+     def memory_exists(self, query_embedding, owner=None, category=None, threshold=0.92):
+          conditions = ["1 - (embedding <=> %s) > %s"]
+          params = [str(query_embedding), threshold]
+
+          if owner:
+               conditions.append("owner = %s")
+               params.append(owner)
+          if category:
+               conditions.append("category = %s")
+               params.append(category)
+
+          where = " AND ".join(conditions)
+          sql = f"SELECT EXISTS (SELECT 1 FROM memories WHERE {where});"
+          try:
+               self.cursor.execute(sql, params)
+               return self.cursor.fetchone()[0]
           except Exception as e:
                print(e)
                return False
 
      # Fetch memories from the memories table based on category and embedding similarity     
-     def fetch_memory(self, category, query_embedding):
+     def fetch_memory(self, query_embedding, owner=None, category=None, threshold=0.7, limit=3):
+          conditions = ["1 - (embedding <=> %s) > %s"]
+          params = [str(query_embedding), threshold]
+
+          if owner:
+               conditions.append("owner = %s")
+               params.append(owner)
+          if category:
+               conditions.append("category = %s")
+               params.append(category)
+
+          where = " AND ".join(conditions)
           sql = f"""
-          SELECT memory, timestamp
+          SELECT memory, owner, category
           FROM memories
-          WHERE category = '{category}'
+          WHERE {where}
           ORDER BY embedding <=> %s
-          LIMIT 10;
+          LIMIT %s;
           """
+          params += [str(query_embedding), limit]
           try:
-               self.cursor.execute(sql, (str(query_embedding),))
+               self.cursor.execute(sql, params)
                return self.cursor.fetchall()
           except Exception as e:
                print(e)
-               return False
+               return []
