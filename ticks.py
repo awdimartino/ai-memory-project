@@ -2,7 +2,7 @@ import threading
 import time
 import datetime
 import random
-from config import *
+from config_old import *
 
 class TickSystem:
     def __init__(self, chatbot, db, conversation, interval=30, lock=None):
@@ -70,7 +70,7 @@ class TickSystem:
             f"If nothing feels worth saying, respond with exactly: [SKIP]"
         )
         
-        response = self.chatbot.stream_query(prompt, self.conversation, memories="")
+        response = self.chatbot.stream_query(prompt, self.conversation, memories="", display=False)
         
         if "[SKIP]" not in response:
             print(f"\n[{BOT_NAME}]: {response}\n")
@@ -79,22 +79,19 @@ class TickSystem:
 
     def think_tick(self):
         prompt = (
-            f"You are {BOT_NAME}. You are alone with your thoughts.\n"
-            f"Your last thought was '{self.last_thought}'\n"
-            f"Based on your recent conversation, thoughts, and emotional state, "
-            f"reflect privately. What are you thinking about? "
-            f"Your thoughts don't have to be about {USER_NAME} — they can be about anything on your mind.\n"
-            f"Respond in first person as an internal monologue, 2-3 sentences max. "
-            f"Do not reference any events, conflicts, or history not present in the conversation above. "
-            f"If the conversation is short or neutral, your thoughts should reflect that — not manufacture drama. \n"
-            f"If you don't have any meaningful thoughts, respond with exactly this, and nothing else: '[SKIP]'"
+            f"What have you been thinking about lately, unrelated to {USER_NAME}? "
+            f"What's something that's been on your mind today? "
+            f"What do you actually think about the last conversation you had? "
+            f"What are you curious about right now? "
+            f"If you don't want to think about anything, just say [SKIP]. "
+            f"YOU ARE NOT TALKING TO {USER_NAME} — this is just for you to reflect and process your own thoughts and feelings. "
         )
         if random.random() < 0.20:  # Only think 40% of the time to avoid overloading with thoughts
             return
         thought = self.chatbot.stream_query(prompt, conversation=self.conversation, memories="", display=False)
 
         if not thought or "SKIP" in thought:
-            return
+            return 
 
         if DEBUG_MODE: print(f"\n[THINK] {thought}\n")
 
@@ -111,4 +108,4 @@ class TickSystem:
     def _classify_and_save_bot(chatbot, db, bot_response, conversation):
         bot_results = chatbot.memory_manager.classify_memories(BRAIN_PROMPT_BOT, conversation, bot_response)
         if DEBUG_MODE: print(f"Bot classification: {bot_results}\n")
-        chatbot.memory_manager.add_me#mories(db, bot_results, source_text=bot_response) 
+        chatbot.memory_manager.add_memories(db, bot_results, source_text=bot_response) 

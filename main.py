@@ -11,8 +11,8 @@ import os
 import time
 
 # Files
-from config import *
-from emotions import Emotions
+from config_old import *
+from core.emotions import Emotions
 from memories import Memories
 from database import Database
 from ticks import TickSystem
@@ -22,8 +22,8 @@ class Chatbot:
             self.client = client
             self.memory_manager = Memories(client)
             self.emotions = Emotions()
-
-      def stream_query(self, query, conversation, memories="", last_thought="", display=True):
+            
+      def stream_query(self, query, conversation, memories="", last_thought="", display=True, speak=False):
             messages = [
             {
                   "role": "system",
@@ -49,24 +49,6 @@ class Chatbot:
             }
             ]
 
-            if DEBUG_MODE:
-                  print(f"\n{'='*60}")
-                  recent = messages[-3:]
-                  print(f"OUTGOING MESSAGES (showing {len(recent)} of {len(messages)} total)")
-                  print(f"{'='*60}")
-                  for i, msg in enumerate(recent):
-                        role = msg['role'].upper()
-                        content = msg['content']
-                        print(f"\n[{i}] {role}")
-                        print(f"{'-'*40}")
-                        print(content)
-                  print(f"\n{'='*60}")
-                  print("EMOTIONAL STATE")
-                  print(f"{'-'*40}")
-                  for channel, value in self.emotions.state.items():
-                        print(f"{channel:<12} {self.emotions.value_to_word(value)} ({value:.2f})")
-                  print(f"{'='*60}\n")
-
             stream = self.client.chat.completions.create(
                   model=BOT_MODEL,
                   temperature=BOT_TEMPERATURE,
@@ -75,13 +57,18 @@ class Chatbot:
             )
 
             response = ""
+            if speak:
+                  self.tts.feed(content)
             for chunk in stream:
                   if chunk.choices and chunk.choices[0].delta.content is not None:
                         content = chunk.choices[0].delta.content
                         response += content
                         if display:
                               print(content, end='', flush=True)
-
+                        if speak:
+                              self.tts.feed(content)
+            if speak:
+                  self.tts.finish()
             print("\n")
             return response
 
@@ -123,15 +110,9 @@ def main():
                   print("Conversation reset.\n")
                   continue
 
-            if query.strip().lower() == "/debug":
-                  DEBUG_MODE = not DEBUG_MODE
-                  print(f"Debug mode set to {DEBUG_MODE}\n")
-                  continue
-
             # ---- USER TURN ----
             with lock:
                   user_results = chatbot.memory_manager.classify_memories(BRAIN_PROMPT_USER, conversation[-10:], query)
-                  if DEBUG_MODE: print(f"User classification: {user_results}\n")
 
                   user_memories = chatbot.memory_manager.fetch_memories(db, user_results)
 
@@ -139,7 +120,7 @@ def main():
 
                   # ---- MODEL RESPONSE ----
                   chatbot.emotions.react(query)  # Update emotional state based on user input
-                  bot_response = chatbot.stream_query(query, conversation, memories=user_memories, last_thought=tick_system.last_thought)
+                  bot_response = chatbot.stream_query(query, conversation, memories=user_memories, last_thought=tick_system.last_thought, speak=True)
                   tick_system.last_thought = ""  # Clear the last thought after sharing it with the user
                   chatbot.emotions.react(bot_response)  # Update emotional state based on bot response
                   chatbot.memory_manager.add_memories(db, user_results, source_text=query)

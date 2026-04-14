@@ -6,7 +6,7 @@ import json
 
 # Files
 from database import *
-from config import *
+from config_old import *
 
 class Embedder:
       def __init__(self, client):

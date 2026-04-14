@@ -7,3 +7,5 @@
 /speech_recognition.py
 /vosk-model-small-en-us-0.15
 /vosk-model-en-us-0.22
+/config_old.py
+/infrastructure/config.py

@@ -3,7 +3,7 @@ import psycopg2
 import datetime
 
 # Files
-from config import *
+from config_old import *
 
 # Database Class for PostgreSQL interactions
 class Database:

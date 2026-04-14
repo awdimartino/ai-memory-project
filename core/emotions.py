@@ -2,7 +2,7 @@ from transformers import pipeline
 import transformers
 import logging
 import os
-from config import *
+from config_old import *
 os.environ["HF_TOKEN"] = HF_TOKEN
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 transformers.logging.set_verbosity_error()
@@ -74,7 +74,7 @@ BASELINE_STATE = {
 }
 
 
-class Emotions():
+class EmotionService():
     def __init__(self):
         self.classifier = pipeline(
             "text-classification",
