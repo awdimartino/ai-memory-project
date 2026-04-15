@@ -1,6 +1,7 @@
 import psycopg2
 import infrastructure.config as config
 from pgvector.psycopg2 import register_vector
+from psycopg2.extras import RealDictCursor
 
 
 class DatabaseConnection:
@@ -29,7 +30,7 @@ class DatabaseConnection:
     def fetch_all(self, query, params=None):
         """Execute a SELECT query and return all rows."""
         try:
-            with self.conn.cursor() as cursor:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(query, params)
                 return cursor.fetchall()
         except Exception as e:
@@ -40,7 +41,7 @@ class DatabaseConnection:
     def fetch_one(self, query, params=None):
         """Execute a SELECT query and return one row."""
         try:
-            with self.conn.cursor() as cursor:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(query, params)
                 return cursor.fetchone()
         except Exception as e:

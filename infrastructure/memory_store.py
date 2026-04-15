@@ -6,6 +6,8 @@ from core.models import MemoryRecord
 from infrastructure.database import DatabaseConnection
 from infrastructure.embedder import Embedder
 
+from openai import OpenAI as oai
+
 class MemoryStore:
     """Responsible for interfacing with the database to store and retrieve memories."""
     def __init__(self):
@@ -99,7 +101,7 @@ class MemoryStore:
         where = " AND ".join(conditions)
         sql = f"SELECT EXISTS (SELECT 1 FROM memories WHERE {where});"
         row = self.database.fetch_one(sql, params)
-        return row[0] if row else False
+        return row if row else False
         
     def fetch(self, query_embedding, source=None, category=None, threshold=0.92, limit=5):
         """Fetch memories from the database based on embedding similarity and optional filters."""
@@ -125,19 +127,52 @@ class MemoryStore:
         params.append(limit)
         try:
             results = self.database.fetch_all(sql, params)
-            return [MemoryRecord(
-                id=row[0],
-                content=row[1],
-                memory_type=row[2],
-                source=row[3],
-                category=row[4],
-                embedding=row[5],
-                emotion_snapshot=row[6] if isinstance(row[6], dict) else json.loads(row[6]),
-                importance=row[7],
-                access_count=row[8],
-                timestamp=row[9]
-            ) for row in results ]
+            return [
+                MemoryRecord(
+                    id=row["id"],
+                    content=row["content"],
+                    memory_type=row["memory_type"],
+                    source=row["source"],
+                    category=row["category"],
+                    embedding=row["embedding"],
+                    emotion_snapshot=row["emotion_snapshot"],
+                    importance=row["importance"],
+                    access_count=row.get("access_count", 0),
+                    timestamp=row["timestamp"]
+                )
+                for row in results ]
         except Exception as e:
             print(e)
             return []
         
+
+# Testing functionality
+store = MemoryStore()
+store.setup()
+
+client = oai(
+            base_url=config.AI_BASE_URL,
+            api_key=config.AI_API_KEY
+        )
+
+# Example usage
+embedder = Embedder(client)  # Pass your embedding client here
+embedding = embedder.get_embedding("This is a test memory.")
+
+record = MemoryRecord(
+    content="This is a test memory.",
+    memory_type="episode",
+    source="user_turn",
+    category="event",
+    embedding=embedding,
+    emotion_snapshot={"happiness": 0.8, "sadness": 0.1},
+    importance=0.7
+)
+
+store.create(record)
+
+exists = store.exists(embedding, source="user_turn", category="event")
+print(f"Memory exists: {exists}")
+
+fetched_memories = store.fetch(embedding, source="user_turn", category="event")
+print(f"Fetched memories: {fetched_memories}")
