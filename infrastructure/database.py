@@ -1,5 +1,7 @@
 import psycopg2
 import infrastructure.config as config
+from pgvector.psycopg2 import register_vector
+
 
 class DatabaseConnection:
     def __init__(self):
@@ -10,21 +12,41 @@ class DatabaseConnection:
             password=config.PG_PASSWORD,
             port=config.PG_PORT
         )
-        self.cursor = self.conn.cursor()
+        self.conn.autocommit = False  # explicit control
 
     def execute(self, query, params=None):
-        """Execute a SQL query with optional parameters."""
-        self.cursor.execute(query, params)
+        """Execute a write query (INSERT/UPDATE/DELETE)."""
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(query, params)
+            self.conn.commit()
+            return True
+        except Exception as e:
+            self.conn.rollback()
+            print(e)
+            return False
 
-    def fetchall(self):
-        """Fetch all results from the last executed query."""
-        return self.cursor.fetchall()
+    def fetch_all(self, query, params=None):
+        """Execute a SELECT query and return all rows."""
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(query, params)
+                return cursor.fetchall()
+        except Exception as e:
+            self.conn.rollback()
+            print(e)
+            return []
 
-    def commit(self):
-        """Commit the current transaction."""
-        self.conn.commit()
+    def fetch_one(self, query, params=None):
+        """Execute a SELECT query and return one row."""
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(query, params)
+                return cursor.fetchone()
+        except Exception as e:
+            self.conn.rollback()
+            print(e)
+            return None
 
     def close(self):
-        """Close the cursor and connection."""
-        self.cursor.close()
         self.conn.close()

@@ -9,3 +9,4 @@
 /vosk-model-en-us-0.22
 /config_old.py
 /infrastructure/config.py
+**/__pycache__/

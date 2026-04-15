@@ -1,6 +1,7 @@
 import infrastructure.config as config
 
 class Embedder:
+    """Responsible for generating and caching embeddings for text inputs."""
     def __init__(self, client):
         self.client = client
         self.embedding_cache = {}
@@ -12,7 +13,7 @@ class Embedder:
                 return self.embedding_cache[text]
         response = self.client.embeddings.create(
                 input=[text],
-                model=config.EMBEDDING_MODEL
+                model=config.EMBED_MODEL
         )
         self.embedding_cache[text] = response.data[0].embedding
         return self.embedding_cache[text]

@@ -3,9 +3,8 @@ import infrastructure.config as config
 # Library imports
 from openai import OpenAI as oai
 
-
-
 class LLMClient:
+    """Responsible for interfacing with the OpenAI API to generate responses and embeddings."""
     def __init__(self, client):
         self.client = client
 
