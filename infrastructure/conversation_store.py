@@ -21,7 +21,7 @@ class ConversationStore:
         CREATE TABLE IF NOT EXISTS conversations (
             id UUID PRIMARY KEY,
             created_at TIMESTAMPTZ DEFAULT NOW(),
-            last_active TIMESTAMPTZ DEFAULT NOW(),
+            last_active TIMESTAMPTZ DEFAULT NOW()
         );
 
         CREATE INDEX IF NOT EXISTS conversations_last_active_idx
@@ -64,11 +64,19 @@ class ConversationStore:
         return self.get_conversation(conversation_id)
 
     def store_message(self, conversation_record, message_record):
+        """Store a message in the database linked to a specific conversation."""
         sql = """
         INSERT INTO messages (conversation_id, role, content)
         VALUES (%s, %s, %s)
         """
         self.database.execute(sql, (conversation_record.id, message_record.role, message_record.content))
+
+        sql = """
+        UPDATE conversations
+        SET last_active = NOW()
+        WHERE id = %s
+        """
+        self.database.execute(sql, (conversation_record.id,))
 
     def get_conversation(self, conversation_id):
         """Retrieve a conversation from the database."""
@@ -116,7 +124,7 @@ class ConversationStore:
         sql = """
         SELECT id, created_at, last_active
         FROM conversations
-        WHERE last_active >= NOW() - INTERVAL '%s hours'
+        WHERE last_active >= NOW() - (%s * INTERVAL '1 hour')
         ORDER BY last_active DESC
         LIMIT %s
         """

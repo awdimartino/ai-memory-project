@@ -7,6 +7,8 @@ class ConversationManager:
         self.current_conversation = None
         self.database = database
         self.conversation_store = conversation_store.ConversationStore(database)
+        self.conversation_store.setup_conversations()
+        self.conversation_store.setup_messages()
 
     def start_conversation(self):
         """Start a new conversation and set it as the current conversation."""

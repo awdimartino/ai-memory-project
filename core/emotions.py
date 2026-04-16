@@ -1,12 +1,17 @@
 from transformers import pipeline
-import transformers
+from transformers.utils import logging as hf_logging
 import logging
 import os
 from deprecated.config_old import *
 os.environ["HF_TOKEN"] = HF_TOKEN
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-transformers.logging.set_verbosity_error()
+logging.getLogger("transformers").setLevel(logging.ERROR)
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+
+hf_logging.set_verbosity_error()
+hf_logging.disable_progress_bar()
+from tqdm import tqdm
+tqdm.disable = True
 
 CHANNEL_MAP = {
     # irritation

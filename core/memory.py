@@ -7,6 +7,7 @@ class MemoryManager:
         self.database = database
         self.embedder = embedder.Embedder(client)
         self.memory_store = memory_store.MemoryStore(database)
+        self.memory_store.setup()
 
     def save_memory(self, memory):
         """Save a memory to the memory store."""
