@@ -5,6 +5,7 @@ from core.memory import MemoryManager
 from core.emotions import EmotionManager
 from core.conversation import ConversationManager
 from infrastructure.database import DatabaseConnection
+from core.prompt_builder import PromptBuilder
 
 class Companion:
     def __init__(self, client):
@@ -15,9 +16,15 @@ class Companion:
         self.memory_service = MemoryManager.MemoryManager(self.database)
         self.conversation_manager = ConversationManager(self.database)
         self.emotion_service = EmotionManager.EmotionManager()
+        self.prompt_builder = PromptBuilder()
 
-    def respond(self):
-        # Placeholder for response generation logic
+    def respond(self, query):
+        messages = self.prompt_builder.build_response_prompt(
+            query=query,
+            conversation=self.conversation_manager.get_conversation(),
+            emotions=self.emotion_service.get_emotions(),
+            memories=self.memory_service.get_memories()
+        )
         pass
 
     def think(self):

@@ -11,3 +11,4 @@
 /infrastructure/config.py
 **/__pycache__/
 /deprecated
+/.vscode

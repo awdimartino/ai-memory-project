@@ -52,6 +52,7 @@ class ConversationStore:
         self.database.execute(sql)
 
     def new_conversation(self):
+        """"Create a new conversation in the database and return it as a ConversationRecord."""
         conversation_id = str(uuid.uuid4())
 
         sql = """
@@ -60,7 +61,7 @@ class ConversationStore:
         """
 
         self.database.execute(sql, (conversation_id,))
-        return conversation_id
+        return self.get_conversation(conversation_id)
 
     def store_message(self, conversation_record, message_record):
         sql = """
@@ -68,3 +69,67 @@ class ConversationStore:
         VALUES (%s, %s, %s)
         """
         self.database.execute(sql, (conversation_record.id, message_record.role, message_record.content))
+
+    def get_conversation(self, conversation_id):
+        """Retrieve a conversation from the database."""
+        conversation_sql = """
+        SELECT id, created_at, last_active
+        FROM conversations
+        WHERE id = %s
+        """
+
+        conversation_result = self.database.query(conversation_sql, (conversation_id,))
+        if not conversation_result:
+            return None
+
+        conversation_data = conversation_result[0]
+        conversation_record = ConversationRecord(
+            id=conversation_data["id"],
+            created_at=conversation_data["created_at"],
+            last_active=conversation_data["last_active"]
+        )
+        return conversation_record
+
+    def get_messages(self, conversation_record):
+        """Retrieve messages for a specific conversation from the database."""
+        sql = """
+        SELECT role, content, timestamp
+        FROM messages
+        WHERE conversation_id = %s
+        ORDER BY timestamp ASC
+        """
+        results = self.database.query(sql, (conversation_record.id,))
+        message_records = []
+        for message_data in results:
+            message_record = MessageRecord(
+                role=message_data["role"],
+                content=message_data["content"],
+                conversation_id=conversation_record.id,
+                timestamp=message_data["timestamp"]
+            )
+            message_records.append(message_record)
+
+        return message_records
+    
+    def get_recent_conversations(self, hours=2, limit=10):
+        """Get recent conversations active within the last specified hours, ordered by last active time."""
+        sql = """
+        SELECT id, created_at, last_active
+        FROM conversations
+        WHERE last_active >= NOW() - INTERVAL '%s hours'
+        ORDER BY last_active DESC
+        LIMIT %s
+        """
+
+        results = self.database.query(sql, (hours, limit))
+
+        conversations = []
+        for conversation_data in results:
+            conversation_record = ConversationRecord(
+                id=conversation_data["id"],
+                created_at=conversation_data["created_at"],
+                last_active=conversation_data["last_active"]
+            )
+            conversations.append(conversation_record)
+
+        return conversations
