@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
+import uuid
 
 @dataclass
 class MemoryRecord:
@@ -27,6 +28,12 @@ class MessageRecord:
     conversation_id: str
     timestamp: datetime = field(default_factory=datetime.now)
     id: int = None
+
+@dataclass
+class ConversationRecord:
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=datetime.now)
+    last_active: datetime = field(default_factory=datetime.now)
 
 @dataclass
 class PromptConfig:
