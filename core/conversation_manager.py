@@ -17,29 +17,31 @@ class ConversationManager:
         self.current_conversation= self.conversation_store.new_conversation()
         return self.current_conversation
 
-    def resume_conversation(self):
-        """Resume most recent conversation, or return None if no conversations exist."""
-        # Check if the current conversation is still active 
-        timeout_hours = 2
-        now = datetime.now()
+    def check_conversation(self, timeout_hours=2):
+        """Returns active conversation or resumes recent one."""
 
         if self.current_conversation:
-            if self.current_conversation.last_active > now - timedelta(hours=timeout_hours):
+            cutoff = datetime.now() - timedelta(hours=timeout_hours)
+
+            # local cache check (fast path)
+            if self.last_active() > cutoff:
                 return self.current_conversation
-            
-        recent = self.conversation_store.get_recent_conversations(hours=timeout_hours)
+
+        recent = self.conversation_store.get_recent_conversations(
+            hours=timeout_hours,
+            limit=1
+        )
 
         if not recent:
             return None
 
         self.current_conversation = recent[0]
-
         return self.current_conversation
 
     def get_active_messages(self):
         """Get the current active conversation messages, or None if no conversation is active."""
         if not self.current_conversation:
-            return None
+            return []
 
         messages = self.conversation_store.get_messages(self.current_conversation)
 
@@ -58,4 +60,42 @@ class ConversationManager:
             content=content,
             conversation_id=self.current_conversation.id
         )
+        
+        if role is "user":
+            self.current_conversation.user_last_active = message_record.timestamp
+        else:
+            self.current_conversation.bot_last_active = message_record.timestamp
+
         self.conversation_store.store_message(self.current_conversation, message_record)
+
+    def last_active(self):
+        """Return the timestamp of the last activity in the current conversation."""
+        if not self.current_conversation:
+            return None
+        return max(self.current_conversation.user_last_active, self.current_conversation.bot_last_active)
+
+    def minutes_since_user_interaction(self):
+        """Get the number of minutes since the last user interaction in the current conversation."""
+        if not self.current_conversation:
+            return None
+        
+        last_user_active = self.current_conversation.user_last_active
+        if not last_user_active:
+            return None
+        
+        now = datetime.now()
+        delta = now - last_user_active
+        return delta.total_seconds() / 60
+    
+    def minutes_since_any_interaction(self):
+        """Get the number of minutes since the last user or bot interaction in the current conversation."""
+        if not self.current_conversation:
+            return None
+        
+        last_active = self.last_active()
+        if not last_active:
+            return None
+        
+        now = datetime.now()
+        delta = now - last_active
+        return delta.total_seconds() / 60

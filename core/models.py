@@ -9,7 +9,7 @@ class MemoryRecord:
     memory_type: str
     category: str
 
-    origin_type: str            # message / tool / reflection / document
+    origin_type: str
     origin_id: str | None = None
 
     conversation_id: str | None = None
@@ -33,7 +33,8 @@ class MessageRecord:
 class ConversationRecord:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = field(default_factory=datetime.now)
-    last_active: datetime = field(default_factory=datetime.now)
+    user_last_active: datetime = field(default_factory=datetime.now)
+    bot_last_active: datetime = field(default_factory=datetime.now)
 
 @dataclass
 class PromptConfig:

@@ -23,19 +23,21 @@ class Companion:
 
     def respond(self, query: str):
         """Generate a response to a user query by building a prompt and streaming the LLM's response."""
+        conversation_history = self.conversation_manager.get_active_messages()
+        # Add the user message to the conversation
+        self.conversation_manager.add_message(role="user", content=query)
         # React to user input and build prompt
         self.emotion_manager.react(query)
             
         messages = self.prompt_builder.build_response_prompt(
             query=query,
-            conversation=self.conversation_manager.get_active_messages(),
+            conversation=conversation_history,
             emotions=self.emotion_manager.as_prompt()
         )
         # Stream the response
         response = self.llm_client.stream(messages)
 
         # Add the user message to the conversation
-        self.conversation_manager.add_message("user", query)
         self.conversation_manager.add_message("assistant", response)
         return response
 

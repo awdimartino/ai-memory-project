@@ -19,18 +19,11 @@ class ChatLoop():
 
         while True:
             # Check for existing conversation or start a new one
-            conversation = self.companion.conversation_manager.resume_conversation()
+            conversation = self.companion.conversation_manager.check_conversation()
             if not conversation:
                 conversation = self.companion.conversation_manager.start_conversation()
-            messages = self.companion.conversation_manager.get_active_messages()
 
             # Get user input
             query = input("You: ")
-            self.tick_system.last_user_interaction = datetime.now()
-            self.tick_system.last_any_interaction = datetime.now()
-            
-            if query.strip().lower() == "/exit":
-                break
-
             response = self.companion.respond(query)
 
