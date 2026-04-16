@@ -13,15 +13,12 @@ from core.prompt_builder import PromptBuilder
 from openai import OpenAI as oai
 
 class Companion:
-    def __init__(self, client):
-        self.client = client
-        self.database = DatabaseConnection()
-
-        self.llm_client = LLMClient(self.client)
-        self.memory_manager = MemoryManager(self.client, self.database)
-        self.conversation_manager = ConversationManager(self.database)
-        self.emotion_manager = EmotionManager()
-        self.prompt_builder = PromptBuilder()
+    def __init__(self, llm_client, memory_manager, conversation_manager, emotion_manager, prompt_builder):
+        self.llm_client = llm_client
+        self.memory_manager = memory_manager
+        self.conversation_manager = conversation_manager
+        self.emotion_manager = emotion_manager
+        self.prompt_builder = prompt_builder
 
     def respond(self, query):
         messages = self.prompt_builder.build_response_prompt(
@@ -67,11 +64,3 @@ class Companion:
             # Add the user message to the conversation
             self.conversation_manager.add_message("user", query)
             self.conversation_manager.add_message("assistant", response)
-
-
-client = oai(
-            base_url=config.AI_BASE_URL,
-            api_key=config.AI_API_KEY
-        )
-companion = Companion(client)
-companion.chat()

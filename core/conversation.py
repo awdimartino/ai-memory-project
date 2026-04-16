@@ -3,10 +3,9 @@ from infrastructure.database import DatabaseConnection
 from core.models import ConversationRecord, MessageRecord
 
 class ConversationManager:
-    def __init__(self, database: DatabaseConnection):
+    def __init__(self, conversation_store: conversation_store.ConversationStore):
         self.current_conversation = None
-        self.database = database
-        self.conversation_store = conversation_store.ConversationStore(database)
+        self.conversation_store = conversation_store
         self.conversation_store.setup_conversations()
         self.conversation_store.setup_messages()
 
