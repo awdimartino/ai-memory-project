@@ -3,6 +3,7 @@ from infrastructure.database import DatabaseConnection
 from core.models import ConversationRecord, MessageRecord
 
 class ConversationManager:
+    """Responsible for managing conversations, including starting new conversations, resuming existing ones, and adding messages to conversations."""
     def __init__(self, conversation_store: conversation_store.ConversationStore):
         self.current_conversation = None
         self.conversation_store = conversation_store

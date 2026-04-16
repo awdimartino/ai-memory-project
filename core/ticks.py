@@ -3,12 +3,11 @@ import time
 import datetime
 import random
 from deprecated.config_old import *
+from core.companion import Companion
 
 class TickSystem:
-    def __init__(self, chatbot, db, conversation, interval=30, lock=None):
-        self.chatbot = chatbot
-        self.db = db
-        self.conversation = conversation
+    def __init__(self, companion: Companion, interval=30, lock=None):
+        self.companion = companion
         self.interval = interval  # seconds between ticks
         self.last_user_interaction = time.time()   # only updated when user sends a message
         self.last_any_interaction = time.time()    # updated when either party speaks   
@@ -17,24 +16,27 @@ class TickSystem:
         self.last_thought = ""
 
     def start(self):
+        """Start the background tick system in a separate thread."""
         self.running = True
         thread = threading.Thread(target=self._loop, daemon=True)
         thread.start()
 
     def stop(self):
+        """Stop the background tick system."""
         self.running = False
 
     def _loop(self):
+        """Main loop for the tick system."""
         while self.running:
             time.sleep(self.interval)
             self.tick()
 
     def tick(self):
-        if not self.lock.acquire(blocking=False):  # skip tick if main loop is busy
-            if DEBUG_MODE: print("[TICK] Skipped — main loop active\n")
+        """Perform a tick, which may involve emotional decay, thinking, or sending an unprompted message based on timing and probabilities."""
+        # If locked, skip this tick
+        if not self.lock.acquire(blocking=False):
             return
         try:
-            if DEBUG_MODE: print("[TICK] Tick triggered\n")
             self.emotion_decay_tick()
             self.think_tick()
             self.unprompted_message_tick()
@@ -42,7 +44,8 @@ class TickSystem:
             self.lock.release()
 
     def emotion_decay_tick(self):
-        self.chatbot.emotions.decay()
+        """Decay the bot's emotional state over time."""
+        self.companion.emotion_manager.decay()
 
     def unprompted_message_tick(self):
         minutes_since_user = (time.time() - self.last_user_interaction) / 60
@@ -93,8 +96,6 @@ class TickSystem:
         if not thought or "SKIP" in thought:
             return 
 
-        if DEBUG_MODE: print(f"\n[THINK] {thought}\n")
-
         # Update emotional state based on the thought
         self.last_thought = thought
         self.chatbot.emotions.react(thought)
@@ -103,9 +104,3 @@ class TickSystem:
         embedding = self.chatbot.memory_manager.get_embedding(thought)
         if not self.db.memory_exists(embedding, owner="bot", category="belief"):
             self.db.create_memory("bot", "belief", thought, embedding)
-
-    @staticmethod
-    def _classify_and_save_bot(chatbot, db, bot_response, conversation):
-        bot_results = chatbot.memory_manager.classify_memories(BRAIN_PROMPT_BOT, conversation, bot_response)
-        if DEBUG_MODE: print(f"Bot classification: {bot_results}\n")
-        chatbot.memory_manager.add_memories(db, bot_results, source_text=bot_response) 

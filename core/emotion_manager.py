@@ -80,6 +80,7 @@ BASELINE_STATE = {
 
 
 class EmotionManager():
+    """Manages the emotional state of the AI companion based on user interactions and internal decay over time."""
     def __init__(self):
         self.classifier = pipeline(
             "text-classification",
@@ -92,8 +93,9 @@ class EmotionManager():
         # State is reduced from 28 emotions to 6 core dimensions for easier management
         self.state = dict(BASELINE_STATE)
 
-    def react(self, text):
-        results = self.classifier(text)
+    def react(self, query):
+        """Update emotional state based on the user's query."""
+        results = self.classifier(query)
         
         for emotion in results[0]:
             if emotion['score'] < 0.05:  # noise threshold

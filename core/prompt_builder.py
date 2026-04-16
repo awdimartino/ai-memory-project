@@ -1,6 +1,7 @@
 import datetime
 from infrastructure import config
 
+
 class PromptBuilder:
     @staticmethod
     def build_response_prompt(
