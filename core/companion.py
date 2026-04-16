@@ -1,4 +1,5 @@
 
+import os
 from pyexpat.errors import messages
 
 import infrastructure.config as config
@@ -17,17 +18,17 @@ class Companion:
         self.database = DatabaseConnection()
 
         self.llm_client = LLMClient(self.client)
-        self.memory_service = MemoryManager(self.client, self.database)
+        self.memory_manager = MemoryManager(self.client, self.database)
         self.conversation_manager = ConversationManager(self.database)
-        self.emotion_service = EmotionManager()
+        self.emotion_manager = EmotionManager()
         self.prompt_builder = PromptBuilder()
 
     def respond(self, query):
         messages = self.prompt_builder.build_response_prompt(
             query=query,
             conversation=self.conversation_manager.get_conversation(),
-            emotions=self.emotion_service.get_emotions(),
-            memories=self.memory_service.get_memories()
+            emotions=self.emotion_manager.get_emotions(),
+            memories=self.memory_manager.get_memories()
         )
         pass
 
@@ -37,14 +38,37 @@ class Companion:
     
     def chat(self):
         while True:
+            # Check for existing conversation or start a new one
             conversation = self.conversation_manager.resume_conversation()
             if not conversation:
                 conversation = self.conversation_manager.start_conversation()
             messages = self.conversation_manager.get_active_messages()
+
+            # Get user input
+            query = input("You: ")
             
-            break
-        print(conversation.id)
-        # Placeholder for chat loop logic
+            if query.strip().lower() == "/exit":
+                break
+
+            # React to user input and build prompt
+            self.emotion_manager.react(query)
+            
+            messages = self.prompt_builder.build_response_prompt(
+                query=query,
+                conversation=self.conversation_manager.get_active_messages(),
+                emotions=self.emotion_manager.as_prompt()
+            )
+
+            for message in messages:
+                print(f"{message}")
+
+            response = self.llm_client.stream(messages)
+
+            # Add the user message to the conversation
+            self.conversation_manager.add_message("user", query)
+            self.conversation_manager.add_message("assistant", response)
+
+
 client = oai(
             base_url=config.AI_BASE_URL,
             api_key=config.AI_API_KEY

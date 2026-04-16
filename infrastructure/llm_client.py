@@ -20,6 +20,7 @@ class LLMClient:
             for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content is not None:
                         content = chunk.choices[0].delta.content
+                        print(content, end='', flush=True)
                         response += content
             print("\n")
             return response

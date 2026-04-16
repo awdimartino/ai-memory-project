@@ -31,4 +31,21 @@ class ConversationManager:
         if not self.current_conversation:
             return None
 
-        return self.conversation_store.get_messages(self.current_conversation)
+        messages = self.conversation_store.get_messages(self.current_conversation)
+
+        return [
+            {"role": m.role, "content": m.content}
+            for m in messages
+        ]
+    
+    def add_message(self, role, content):
+        """Add a message to the current conversation."""
+        if not self.current_conversation:
+            raise ValueError("No active conversation to add messages to.")
+        
+        message_record = MessageRecord(
+            role=role,
+            content=content,
+            conversation_id=self.current_conversation.id
+        )
+        self.conversation_store.store_message(self.current_conversation, message_record)
