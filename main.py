@@ -50,6 +50,7 @@ def main():
     # Create the chat loop with the companion and tick system
     tick_system = TickSystem(companion, interval=30, lock=threading.Lock())
     chat_loop = ChatLoop(companion, tick_system)
+    chat_loop.start()
 
 
 if __name__ == "__main__":

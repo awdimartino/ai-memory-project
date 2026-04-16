@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from infrastructure import conversation_store
 from infrastructure.database import DatabaseConnection
@@ -21,7 +21,7 @@ class ConversationManager:
         """Returns active conversation or resumes recent one."""
 
         if self.current_conversation:
-            cutoff = datetime.now() - timedelta(hours=timeout_hours)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
 
             # local cache check (fast path)
             if self.last_active() > cutoff:
@@ -61,7 +61,7 @@ class ConversationManager:
             conversation_id=self.current_conversation.id
         )
         
-        if role is "user":
+        if role == "user":
             self.current_conversation.user_last_active = message_record.timestamp
         else:
             self.current_conversation.bot_last_active = message_record.timestamp
@@ -83,7 +83,7 @@ class ConversationManager:
         if not last_user_active:
             return None
         
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         delta = now - last_user_active
         return delta.total_seconds() / 60
     
@@ -96,6 +96,7 @@ class ConversationManager:
         if not last_active:
             return None
         
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         delta = now - last_active
         return delta.total_seconds() / 60
+    

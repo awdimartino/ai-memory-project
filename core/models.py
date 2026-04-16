@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 @dataclass
@@ -17,24 +17,28 @@ class MemoryRecord:
 
     emotion_snapshot: dict = field(default_factory=dict)
     importance: float = 0.5
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=datetime.now(timezone.utc))
 
     id: int | None = None
+
+@staticmethod
+def utc_now():
+    return datetime.now(timezone.utc)
 
 @dataclass
 class MessageRecord:
     role: str
     content: str
     conversation_id: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=utc_now)
     id: int = None
 
 @dataclass
 class ConversationRecord:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: datetime = field(default_factory=datetime.now)
-    user_last_active: datetime = field(default_factory=datetime.now)
-    bot_last_active: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=utc_now)
+    user_last_active: datetime = field(default_factory=utc_now)
+    bot_last_active: datetime = field(default_factory=utc_now)
 
 @dataclass
 class PromptConfig:

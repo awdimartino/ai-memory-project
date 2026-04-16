@@ -35,8 +35,10 @@ class TickSystem:
         """Perform a tick, which may involve emotional decay, thinking, or sending an unprompted message based on timing and probabilities."""
         # If locked, skip this tick
         if not self.lock.acquire(blocking=False):
+            print("SKIP")
             return
         try:
+            print("TICK")
             self.emotion_decay_tick()
             self.think_tick()
             self.unprompted_message_tick()
