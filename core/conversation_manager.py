@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from infrastructure import conversation_store
 from infrastructure.database import DatabaseConnection
 from core.models import ConversationRecord, MessageRecord
@@ -17,7 +19,15 @@ class ConversationManager:
 
     def resume_conversation(self):
         """Resume most recent conversation, or return None if no conversations exist."""
-        recent = self.conversation_store.get_recent_conversations()
+        # Check if the current conversation is still active 
+        timeout_hours = 2
+        now = datetime.now()
+
+        if self.current_conversation:
+            if self.current_conversation.last_active > now - timedelta(hours=timeout_hours):
+                return self.current_conversation
+            
+        recent = self.conversation_store.get_recent_conversations(hours=timeout_hours)
 
         if not recent:
             return None

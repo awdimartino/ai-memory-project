@@ -1,4 +1,4 @@
-from time import time
+from datetime import datetime, timedelta
 
 from core.companion import Companion
 from core.ticks import TickSystem
@@ -26,8 +26,8 @@ class ChatLoop():
 
             # Get user input
             query = input("You: ")
-            self.tick_system.last_user_interaction = time.time()
-            self.tick_system.last_any_interaction = time.time()
+            self.tick_system.last_user_interaction = datetime.now()
+            self.tick_system.last_any_interaction = datetime.now()
             
             if query.strip().lower() == "/exit":
                 break
