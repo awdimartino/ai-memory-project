@@ -15,7 +15,7 @@ from deprecated.config_old import *
 from core.emotions import Emotions
 from deprecated.memories import Memories
 from deprecated.database import Database
-from ticks import TickSystem
+from core.ticks import TickSystem
 
 class Chatbot:
       def __init__(self, client):

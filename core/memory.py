@@ -1,12 +1,17 @@
-class MemoryService:
-    def __init__(self, embedder, memory_store):
-        self.embedder = embedder
-        self.memory_store = memory_store
+from infrastructure import embedder
+from infrastructure import memory_store
+from infrastructure.database import DatabaseConnection
+
+class MemoryManager:
+    def __init__(self, database: DatabaseConnection):
+        self.database = database
+        self.embedder = embedder.Embedder()
+        self.memory_store = memory_store.MemoryStore(database)
 
     def save_memory(self, memory):
         """Save a memory to the memory store."""
-        self.memory_store.save(memory)
+        self.memory_store.store_memory(memory)
 
     def retrieve_memories(self, query, limit=5):
         """Retrieve relevant memories based on a query."""
-        return self.memory_store.retrieve(query, limit=limit)
+        return self.memory_store.fetch_memories(self.embedder.get_embedding(query), limit=limit)

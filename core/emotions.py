@@ -74,7 +74,7 @@ BASELINE_STATE = {
 }
 
 
-class EmotionService():
+class EmotionManager():
     def __init__(self):
         self.classifier = pipeline(
             "text-classification",

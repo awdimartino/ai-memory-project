@@ -1,16 +1,23 @@
+
 import infrastructure.config as config
-import infrastructure.llm_client as llm_client
+from infrastructure import LLMClient
+from core.memory import MemoryManager
+from core.emotions import EmotionManager
+from core.conversation import ConversationManager
+from infrastructure.database import DatabaseConnection
 
 class Companion:
-    def __init__(self, llm_client, memory_service, emotion_service):
-        self.llm_client = llm_client
-        self.memory_service = memory_service
-        self.emotion_service = emotion_service
+    def __init__(self):
+        self.database = DatabaseConnection()
+        self.llm_client = LLMClient.LLMClient()
+        self.memory_service = MemoryManager.MemoryManager(self.database)
+        self.conversation_manager = ConversationManager(self.database)
+        self.emotion_service = EmotionManager.EmotionManager()
 
-    def respond():
+    def respond(self):
         # Placeholder for response generation logic
         pass
 
-    def think():
+    def think(self):
         # Placeholder for internal thought process logic
         pass
