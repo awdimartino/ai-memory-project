@@ -7,9 +7,11 @@ from core.conversation import ConversationManager
 from infrastructure.database import DatabaseConnection
 
 class Companion:
-    def __init__(self):
+    def __init__(self, client):
+        self.client = client
         self.database = DatabaseConnection()
-        self.llm_client = LLMClient.LLMClient()
+
+        self.llm_client = LLMClient.LLMClient(self.client)
         self.memory_service = MemoryManager.MemoryManager(self.database)
         self.conversation_manager = ConversationManager(self.database)
         self.emotion_service = EmotionManager.EmotionManager()
@@ -21,3 +23,8 @@ class Companion:
     def think(self):
         # Placeholder for internal thought process logic
         pass
+    
+    def chat(self):
+        while True:
+            self.think()
+            self.respond()
