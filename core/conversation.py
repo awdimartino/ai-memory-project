@@ -22,9 +22,7 @@ class ConversationManager:
 
         self.current_conversation = recent[0]
 
-        return self.conversation_store.get_messages(
-            self.current_conversation
-        )
+        return self.current_conversation
 
     def get_active_messages(self):
         """Get the current active conversation messages, or None if no conversation is active."""

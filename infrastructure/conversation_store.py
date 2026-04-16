@@ -78,7 +78,7 @@ class ConversationStore:
         WHERE id = %s
         """
 
-        conversation_result = self.database.query(conversation_sql, (conversation_id,))
+        conversation_result = self.database.fetch_all(conversation_sql, (conversation_id,))
         if not conversation_result:
             return None
 
@@ -98,7 +98,7 @@ class ConversationStore:
         WHERE conversation_id = %s
         ORDER BY timestamp ASC
         """
-        results = self.database.query(sql, (conversation_record.id,))
+        results = self.database.fetch_all(sql, (conversation_record.id,))
         message_records = []
         for message_data in results:
             message_record = MessageRecord(
@@ -121,7 +121,7 @@ class ConversationStore:
         LIMIT %s
         """
 
-        results = self.database.query(sql, (hours, limit))
+        results = self.database.fetch_all(sql, (hours, limit))
 
         conversations = []
         for conversation_data in results:

@@ -3,9 +3,9 @@ from infrastructure import memory_store
 from infrastructure.database import DatabaseConnection
 
 class MemoryManager:
-    def __init__(self, database: DatabaseConnection):
+    def __init__(self, client, database: DatabaseConnection):
         self.database = database
-        self.embedder = embedder.Embedder()
+        self.embedder = embedder.Embedder(client)
         self.memory_store = memory_store.MemoryStore(database)
 
     def save_memory(self, memory):
