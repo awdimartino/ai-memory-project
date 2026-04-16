@@ -11,10 +11,10 @@ import os
 import time
 
 # Files
-from config_old import *
+from deprecated.config_old import *
 from core.emotions import Emotions
-from memories import Memories
-from database import Database
+from deprecated.memories import Memories
+from deprecated.database import Database
 from ticks import TickSystem
 
 class Chatbot:

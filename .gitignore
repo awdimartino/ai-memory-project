@@ -10,3 +10,4 @@
 /config_old.py
 /infrastructure/config.py
 **/__pycache__/
+/deprecated

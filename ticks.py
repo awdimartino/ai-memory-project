@@ -2,7 +2,7 @@ import threading
 import time
 import datetime
 import random
-from config_old import *
+from deprecated.config_old import *
 
 class TickSystem:
     def __init__(self, chatbot, db, conversation, interval=30, lock=None):

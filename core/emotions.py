@@ -2,7 +2,7 @@ from transformers import pipeline
 import transformers
 import logging
 import os
-from config_old import *
+from deprecated.config_old import *
 os.environ["HF_TOKEN"] = HF_TOKEN
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 transformers.logging.set_verbosity_error()

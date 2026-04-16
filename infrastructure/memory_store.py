@@ -10,8 +10,8 @@ from openai import OpenAI as oai
 
 class MemoryStore:
     """Responsible for interfacing with the database to store and retrieve memories."""
-    def __init__(self):
-        self.database = DatabaseConnection()
+    def __init__(self, database: DatabaseConnection):
+        self.database = database
 
     def setup(self):
         """Set up the database schema for storing memories."""
@@ -23,13 +23,13 @@ class MemoryStore:
             reflection - an internal thought or insight
             consolidation - summary of multiple episodes
             abstraction/fact - long term belief or fact about the world, self, or user
-        source - Where the memory came from
-            user_turn - something the user said
-            bot_turn - something the bot said
-            tick_short - 
-            tick_long -
+        origin_type - Where the memory came from
+            message - a specific message in a conversation
+            tick_short - a thought tick
+            tick_long - a longer reflection
             reflection - internal thought process
             tool - output from an external tool
+        origin_id - An optional identifier for the origin 
         category - The category of the memory
             fact - a factual statement about the world, self, or user
             preference - a stable preference or trait of the user or bot
@@ -41,41 +41,48 @@ class MemoryStore:
         emotion_snapshot - A snapshot of the bot's emotional state when the memory was formed (JSONB)
         importance - A score representing the importance of the memory for retrieval and consolidation
         timestamp - When the memory was created
-        access_count - How many times the memory has been accessed
         last_accessed - When the memory was last accessed
         """
         sql = """
         CREATE TABLE IF NOT EXISTS memories (
-            id              SERIAL PRIMARY KEY,
-            content         TEXT NOT NULL,
-            memory_type     TEXT NOT NULL,
-            source          TEXT NOT NULL,
-            category        TEXT NOT NULL,
-            embedding       VECTOR(1024),
-            emotion_snapshot JSONB,
-            importance      FLOAT DEFAULT 0.5,
-            timestamp       TIMESTAMPTZ DEFAULT NOW(),
-            access_count    INT DEFAULT 0,
-            last_accessed   TIMESTAMPTZ
+            id                SERIAL PRIMARY KEY,
+            content           TEXT NOT NULL,
+            memory_type       TEXT NOT NULL,
+            category          TEXT NOT NULL,
+
+            embedding         VECTOR(1024),
+
+            origin_type       TEXT NOT NULL,
+            origin_id         TEXT,
+
+            emotion_snapshot  JSONB,
+            importance        FLOAT DEFAULT 0.5,
+            timestamp         TIMESTAMPTZ DEFAULT NOW()
         );
+
         CREATE INDEX IF NOT EXISTS memories_embedding_idx
             ON memories USING ivfflat (embedding vector_cosine_ops);
-        CREATE INDEX IF NOT EXISTS memories_source_category_idx
-            ON memories (source, category);
+
+        CREATE INDEX IF NOT EXISTS memories_origin_idx
+            ON memories (origin_type, origin_id);
+
+        CREATE INDEX IF NOT EXISTS memories_category_idx
+            ON memories (category);
         """
         self.database.execute(sql)
         
-    def create(self, record: MemoryRecord):
+    def store_memory(self, record: MemoryRecord):
         """Create a new memory from a memory record"""
         sql = """
-        INSERT INTO memories (content, memory_type, source, category, embedding, emotion_snapshot, importance)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO memories (content, memory_type, origin_type, origin_id, category, embedding, emotion_snapshot, importance)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
         try:
             self.database.execute(sql, (
                 record.content,
                 record.memory_type,
-                record.source,
+                record.origin_type,
+                record.origin_id,
                 record.category,
                 record.embedding,
                 json.dumps(record.emotion_snapshot),
@@ -85,15 +92,15 @@ class MemoryStore:
         except Exception as e:
             print(e)
             return False
-        
-    def exists(self, query_embedding, source=None, category=None, threshold=0.92):
+
+    def memory_exists(self, query_embedding, origin_type=None, category=None, threshold=0.92):
         """Check if a memory exists in the database based on the embedding and optional filters."""
         conditions = ["1 - (embedding <=> %s) > %s"]
         params = [str(query_embedding), threshold]
 
-        if source:
-            conditions.append("source = %s")
-            params.append(source)
+        if origin_type:
+            conditions.append("origin_type = %s")
+            params.append(origin_type)
         if category:
             conditions.append("category = %s")
             params.append(category)
@@ -103,21 +110,21 @@ class MemoryStore:
         row = self.database.fetch_one(sql, params)
         return row if row else False
         
-    def fetch(self, query_embedding, source=None, category=None, threshold=0.92, limit=5):
+    def fetch_memories(self, query_embedding, origin_type=None, category=None, threshold=0.92, limit=5):
         """Fetch memories from the database based on embedding similarity and optional filters."""
         conditions = ["1 - (embedding <=> %s) > %s"]
         params = [str(query_embedding), threshold]
 
-        if source:
-            conditions.append("source = %s")
-            params.append(source)
+        if origin_type:
+            conditions.append("origin_type = %s")
+            params.append(origin_type)
         if category:
             conditions.append("category = %s")
             params.append(category)
 
         where = " AND ".join(conditions)
         sql = f"""
-        SELECT id, content, memory_type, source, category, embedding, emotion_snapshot, importance, access_count, timestamp
+        SELECT id, content, memory_type, origin_type, origin_id, category, embedding, emotion_snapshot, importance, timestamp
         FROM memories
         WHERE {where}
         ORDER BY embedding <=> %s
@@ -132,12 +139,12 @@ class MemoryStore:
                     id=row["id"],
                     content=row["content"],
                     memory_type=row["memory_type"],
-                    source=row["source"],
+                    origin_type=row["origin_type"],
+                    origin_id=row["origin_id"],
                     category=row["category"],
                     embedding=row["embedding"],
                     emotion_snapshot=row["emotion_snapshot"],
                     importance=row["importance"],
-                    access_count=row.get("access_count", 0),
                     timestamp=row["timestamp"]
                 )
                 for row in results ]
@@ -145,34 +152,3 @@ class MemoryStore:
             print(e)
             return []
         
-
-# Testing functionality
-store = MemoryStore()
-store.setup()
-
-client = oai(
-            base_url=config.AI_BASE_URL,
-            api_key=config.AI_API_KEY
-        )
-
-# Example usage
-embedder = Embedder(client)  # Pass your embedding client here
-embedding = embedder.get_embedding("This is a test memory.")
-
-record = MemoryRecord(
-    content="This is a test memory.",
-    memory_type="episode",
-    source="user_turn",
-    category="event",
-    embedding=embedding,
-    emotion_snapshot={"happiness": 0.8, "sadness": 0.1},
-    importance=0.7
-)
-
-store.create(record)
-
-exists = store.exists(embedding, source="user_turn", category="event")
-print(f"Memory exists: {exists}")
-
-fetched_memories = store.fetch(embedding, source="user_turn", category="event")
-print(f"Fetched memories: {fetched_memories}")

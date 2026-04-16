@@ -13,6 +13,8 @@ class DatabaseConnection:
             password=config.PG_PASSWORD,
             port=config.PG_PORT
         )
+        self.conn.autocommit = True
+        register_vector(self.conn)
         self.conn.autocommit = False  # explicit control
 
     def execute(self, query, params=None):

@@ -4,12 +4,37 @@ from datetime import datetime
 @dataclass
 class MemoryRecord:
     content: str
-    memory_type: str
-    source: str
-    category: str
     embedding: list[float]
-    emotion_snapshot: dict
+    memory_type: str
+    category: str
+
+    origin_type: str            # message / tool / reflection / document
+    origin_id: str | None = None
+
+    conversation_id: str | None = None
+    message_id: int | None = None
+
+    emotion_snapshot: dict = field(default_factory=dict)
     importance: float = 0.5
-    access_count: int = 0
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    id: int | None = None
+
+@dataclass
+class MessageRecord:
+    role: str
+    content: str
+    conversation_id: str
     timestamp: datetime = field(default_factory=datetime.now)
     id: int = None
+
+@dataclass
+class PromptConfig:
+    include_identity: bool = True
+    include_emotion: bool = True
+    include_relational: bool = True
+    include_temporal: bool = True
+    include_history: bool = True
+    include_format: bool = True
+    history_limit: int = 10
+    task_frame: str = ""
