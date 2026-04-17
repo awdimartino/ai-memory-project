@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from core.companion import Companion
-from core.ticks import TickSystem
+from core.tick_system import TickSystem
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,5 +25,19 @@ class ChatLoop():
 
             # Get user input
             query = input("You: ")
-            response = self.companion.respond(query)
+            # Lock for response
+            with self.tick_system.lock:
+                user_message, bot_message = self.companion.respond(query)
+
+            # Classify the memories asynchronously
+            # TODO: CHANGE THIS TO RUN LESS FREQUENTLY
+            # Conversation context can be relied on more
+            executor.submit(
+                self.companion.memory_manager.classify_memories,
+                user_message,
+                bot_message,
+                conversation
+
+            )
+
 

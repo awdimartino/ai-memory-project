@@ -18,11 +18,6 @@ class MemoryStore:
         """
         id - Unique identifier for the memory (SERIAL PRIMARY KEY)
         content - The textual content of the memory (TEXT NOT NULL)
-        memory_type - The type of memory 
-            episode - a specific event or experience
-            reflection - an internal thought or insight
-            consolidation - summary of multiple episodes
-            abstraction/fact - long term belief or fact about the world, self, or user
         origin_type - Where the memory came from
             message - a specific message in a conversation
             tick_short - a thought tick
@@ -47,7 +42,6 @@ class MemoryStore:
         CREATE TABLE IF NOT EXISTS memories (
             id                SERIAL PRIMARY KEY,
             content           TEXT NOT NULL,
-            memory_type       TEXT NOT NULL,
             category          TEXT NOT NULL,
 
             embedding         VECTOR(1024),
@@ -74,13 +68,12 @@ class MemoryStore:
     def store_memory(self, record: MemoryRecord):
         """Create a new memory from a memory record"""
         sql = """
-        INSERT INTO memories (content, memory_type, origin_type, origin_id, category, embedding, emotion_snapshot, importance)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO memories (content, origin_type, origin_id, category, embedding, emotion_snapshot, importance)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         try:
             self.database.execute(sql, (
                 record.content,
-                record.memory_type,
                 record.origin_type,
                 record.origin_id,
                 record.category,
@@ -124,7 +117,7 @@ class MemoryStore:
 
         where = " AND ".join(conditions)
         sql = f"""
-        SELECT id, content, memory_type, origin_type, origin_id, category, embedding, emotion_snapshot, importance, timestamp
+        SELECT id, content, origin_type, origin_id, category, embedding, emotion_snapshot, importance, timestamp
         FROM memories
         WHERE {where}
         ORDER BY embedding <=> %s
@@ -138,7 +131,6 @@ class MemoryStore:
                 MemoryRecord(
                     id=row["id"],
                     content=row["content"],
-                    memory_type=row["memory_type"],
                     origin_type=row["origin_type"],
                     origin_id=row["origin_id"],
                     category=row["category"],

@@ -1,5 +1,6 @@
 import datetime
 from infrastructure import config
+from core.models import MemoryRecord
 
 
 class PromptBuilder:
@@ -33,11 +34,14 @@ class PromptBuilder:
             })
 
         if memories:
+            memory_list = []
+            for memory in memories:
+                memory_list.append(memory.content)
             messages.append({
                 "role": "assistant",
                 "content": (
                     "Your relevant memories:\n"
-                    f"{memories}"
+                    f"{memory_list}"
                 )
             })
 
@@ -53,19 +57,19 @@ class PromptBuilder:
     def build_thought_prompt(self, last_thought):
         pass
 
-    def build_user_brain_prompt(self, query, conversation_history):
+    def build_classify_prompt(self, query, response):
         messages = [
-            {"role": "system", "content": config.BRAIN_PROMPT_USER},
-            *conversation_history,
-            {"role": "user", "content": f"{query}"}
-        ]
-        return messages
-
-    
-    def build_bot_brain_prompt(self, query, conversation_history):
-        messages = [
-            {"role": "system", "content": config.BRAIN_PROMPT_BOT},
-            *conversation_history,
-            {"role": "user", "content": f"{query}"}
+            {
+                "role": "system",
+                "content": f"{config.BRAIN_PROMPT}"
+            },
+            {
+                "role": "user",
+                "content": query
+            },
+            {
+                "role": "assistant",
+                "content": response
+            }
         ]
         return messages

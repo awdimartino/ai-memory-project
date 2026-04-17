@@ -67,6 +67,7 @@ class ConversationManager:
             self.current_conversation.bot_last_active = message_record.timestamp
 
         self.conversation_store.store_message(self.current_conversation, message_record)
+        return message_record
 
     def last_active(self):
         """Return the timestamp of the last activity in the current conversation."""

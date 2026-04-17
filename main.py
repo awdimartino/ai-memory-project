@@ -1,4 +1,4 @@
-from core.ticks import TickSystem
+from core.tick_system import TickSystem
 from infrastructure.database import DatabaseConnection
 from infrastructure.llm_client import LLMClient
 from infrastructure import config
@@ -51,7 +51,6 @@ def main():
     # Create the chat loop with the companion and tick system
     tick_system = TickSystem(companion, interval=30, lock=threading.Lock())
     chat_loop = ChatLoop(companion, tick_system)
-    print(companion.memory_manager.classify_query("What is the capital of France?", []))
     chat_loop.start()
 
 

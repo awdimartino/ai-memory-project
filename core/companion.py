@@ -25,21 +25,24 @@ class Companion:
         """Generate a response to a user query by building a prompt and streaming the LLM's response."""
         conversation_history = self.conversation_manager.get_active_messages()
         # Add the user message to the conversation
-        self.conversation_manager.add_message(role="user", content=query)
+        user_message = self.conversation_manager.add_message(role="user", content=query)
         # React to user input and build prompt
         self.emotion_manager.react(query)
-            
+        # Retrieve memories from the query
+        memories = self.memory_manager.retrieve_memories(query)
+        print(f"Retrieved: {memories}")
         messages = self.prompt_builder.build_response_prompt(
             query=query,
             conversation=conversation_history,
-            emotions=self.emotion_manager.as_prompt()
+            emotions=self.emotion_manager.as_prompt(),
+            memories = memories
         )
         # Stream the response
         response = self.llm_client.stream(messages)
 
         # Add the user message to the conversation
-        self.conversation_manager.add_message("assistant", response)
-        return response
+        bot_message = self.conversation_manager.add_message("assistant", response)
+        return user_message, bot_message
 
     def think(self):
         """Generate a thinking process, for use with short ticks"""

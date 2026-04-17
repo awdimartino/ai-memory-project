@@ -3,6 +3,7 @@ from infrastructure import embedder
 from infrastructure import memory_store
 from infrastructure.database import DatabaseConnection
 from infrastructure.llm_client import LLMClient
+from core.models import MemoryRecord 
 
 class MemoryManager:
     """Responsible for interfacing with the memory database"""
@@ -25,8 +26,26 @@ class MemoryManager:
         """Check if a similar memory already exists based on the query."""
         return self.memory_store.memory_exists(self.embedder.get_embedding(query), threshold=threshold)
     
-    def classify_query(self, query, conversation_history):
+    def classify_memories(self, user_message, bot_message, conversation):
         """Classify a user query to determine if it should create a new memory or fetch existing ones."""
-        prompt = self.prompt_builder.build_user_brain_prompt(query, conversation_history)
-        response = self.llm_client.memory_classification(prompt)
-        return response
+        
+        messages = self.prompt_builder.build_classify_prompt(user_message.content, bot_message.content)
+        print("TESTING")
+        memories = self.llm_client.memory_classification(messages=messages)
+        print(memories)
+        if not memories:
+            return []
+        
+        for memory in memories:
+            print(f"Saving {memory}")
+            memory_record = MemoryRecord(
+                content=memory["content"],
+                embedding=self.embedder.get_embedding(memory["content"]),
+                category=memory["category"],
+                origin_type="message",
+                origin_id=user_message.id,
+                conversation_id=conversation.id,
+                emotion_snapshot={}
+            )
+            print(f"Saving: {memory_record}")
+            self.save_memory(memory_record)

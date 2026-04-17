@@ -38,15 +38,21 @@ class LLMClient:
             return response.choices[0].message.content
     
     def memory_classification(self, messages):
-            """Classify a query for memory management purposes."""
-            response = self.client.chat.completions.create(
-                model=config.BRAIN_MODEL,
-                temperature=config.BRAIN_TEMPERATURE,
-                messages=messages,
-                response_format=config.BRAIN_RESPONSE_FORMAT
-                )
-            try:
-                results = json.loads(response.choices[0].message.content)
-            except json.JSONDecodeError as e:
-                results = {"create_memory": [], "fetch_memory": []}
-            return results
+        """Return a list of memories to save."""
+
+        response = self.client.chat.completions.create(
+            model=config.BRAIN_MODEL,
+            temperature=config.BRAIN_TEMPERATURE,
+            messages=messages,
+            response_format=config.BRAIN_RESPONSE_FORMAT
+        )
+
+        try:
+            memories = json.loads(response.choices[0].message.content)
+        except json.JSONDecodeError:
+            return []
+
+        if not isinstance(memories, list):
+            return []
+
+        return memories

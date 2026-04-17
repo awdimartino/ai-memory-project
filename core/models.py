@@ -2,11 +2,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import uuid
 
+@staticmethod
+def utc_now():
+    return datetime.now(timezone.utc)
+
 @dataclass
 class MemoryRecord:
     content: str
     embedding: list[float]
-    memory_type: str
     category: str
 
     origin_type: str
@@ -17,13 +20,9 @@ class MemoryRecord:
 
     emotion_snapshot: dict = field(default_factory=dict)
     importance: float = 0.5
-    timestamp: datetime = field(default_factory=datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=utc_now)
 
     id: int | None = None
-
-@staticmethod
-def utc_now():
-    return datetime.now(timezone.utc)
 
 @dataclass
 class MessageRecord:
