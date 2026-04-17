@@ -31,13 +31,13 @@ def main():
     embedder_instance = Embedder(client)
     llm_client = LLMClient(client)
 
-    # Create managers
-    memory_manager = MemoryManager(memory_store, embedder_instance)
-    conversation_manager = ConversationManager(conversation_store)
-    emotion_manager = EmotionManager()
-
     # Create prompt builder
     prompt_builder = PromptBuilder()
+
+    # Create managers
+    memory_manager = MemoryManager(memory_store, embedder_instance, llm_client, prompt_builder)
+    conversation_manager = ConversationManager(conversation_store)
+    emotion_manager = EmotionManager()
     
     # Create companion
     companion = Companion(
@@ -47,9 +47,11 @@ def main():
         emotion_manager=emotion_manager,
         prompt_builder=prompt_builder
     )
+
     # Create the chat loop with the companion and tick system
     tick_system = TickSystem(companion, interval=30, lock=threading.Lock())
     chat_loop = ChatLoop(companion, tick_system)
+    print(companion.memory_manager.classify_query("What is the capital of France?", []))
     chat_loop.start()
 
 

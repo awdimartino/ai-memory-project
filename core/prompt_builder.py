@@ -52,3 +52,20 @@ class PromptBuilder:
         
     def build_thought_prompt(self, last_thought):
         pass
+
+    def build_user_brain_prompt(self, query, conversation_history):
+        messages = [
+            {"role": "system", "content": config.BRAIN_PROMPT_USER},
+            *conversation_history,
+            {"role": "user", "content": f"{query}"}
+        ]
+        return messages
+
+    
+    def build_bot_brain_prompt(self, query, conversation_history):
+        messages = [
+            {"role": "system", "content": config.BRAIN_PROMPT_BOT},
+            *conversation_history,
+            {"role": "user", "content": f"{query}"}
+        ]
+        return messages

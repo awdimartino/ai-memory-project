@@ -1,6 +1,6 @@
 import threading
 import time
-import datetime
+from datetime import datetime, timezone
 import random
 from deprecated.config_old import *
 from core.companion import Companion
@@ -9,8 +9,8 @@ class TickSystem:
     def __init__(self, companion: Companion, interval=30, lock=None):
         self.companion = companion
         self.interval = interval  # seconds between ticks
-        self.last_user_interaction = time.time()   # only updated when user sends a message
-        self.last_any_interaction = time.time()    # updated when either party speaks   
+        self.last_user_interaction = datetime.now(timezone.utc) # only updated when user sends a message
+        self.last_any_interaction = datetime.now(timezone.utc)    # updated when either party speaks   
         self.running = False
         self.lock = lock
         self.last_thought = ""
