@@ -175,6 +175,16 @@ Tiered by fit-to-effort. None are on the critical path; pull them in as the core
 - **Energy budget** — ticks deplete a small energy stat; low energy biases the bot toward choosing sleep, giving autonomous sleep an internal logic instead of a random roll.
 - **Time-of-day awareness** — greets differently morning vs. late night; notices patterns ("up late again").
 
+**From GitHub companion-project research (2026-07-19)** — a whole ecosystem is building the same shape (local brain: memory + emotion + reflection + proactivity + evolving persona; near-twins: Shikigami-Protocol, companion-emergence). Captured for later, user liked #2/#5/#7:
+- **[liked] Multi-drive proactivity** — replace the single idle gate with several slow-drifting internal drives (desire-to-connect, restlessness, mood, anxiety, busyness) that cross thresholds to trigger behavior (deterministic, more lifelike). Generalizes our tick gates + the energy budget. (jiwen, Drivesoid)
+- **[liked] Energy / body cycles** — a fatigue/energy stat that biases toward rest and gives autonomous sleep internal logic (supersedes the plain "Energy budget" bullet above). (Shikigami, Drivesoid, Eventide)
+- **[liked] Nightly / scheduled deep consolidation** — a scheduled "end of day" job that summarizes the day into an episodic day-summary (reminisce fuel), distinct from per-window consolidation; natural sleep-time job. (Aelios "nightly consolidation", Shikigami "day summaries")
+- Temporal memory / **fact-validity windows** — track *when* each fact was true (Zep/Graphiti: +15pts on temporal retrieval); the principled version of the recency/conflict tie-breaker.
+- **Do-not-disturb / time-of-day gating** for proactivity — the missing gate that makes self-wake + reach-out principled (astrbot proactive plugin).
+- **Push notifications** for reach-out (e.g. Bark) — so proactive messages reach the user's phone, not a closed tab; also unlocks a *useful* self-wake (dylan-heartbeat).
+- **Hybrid BM25 + vector recall** — keyword + semantic; targets our recall phrasing-sensitivity limitation (Ombre-Brain).
+- Further out (embodiment/delivery): multi-channel presence (OpenClaw: WhatsApp/Telegram/Discord), voice with acoustic emotion perception (Callhome), Live2D/VRM avatars, wearable sensors.
+
 ### 2.10 Testing (v1 had none — decide upfront)
 
 - **Deterministic layer:** the in-memory fake Store (from the day-one Protocol) lets us unit-test manager logic — lifecycle decisions, retrieval ranking, mood math — with fixed inputs, no model.
