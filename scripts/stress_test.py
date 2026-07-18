@@ -86,13 +86,15 @@ async def _noop(_t):
 
 
 async def run_conversation(comp):
-    errors, replies, empty_replies = 0, 0, 0
-    async def _reg_reachout():
-        pushes = []
-        comp.tick.register(ReachOutJob(comp, lambda m: pushes.append(m), config.TICK_INTERVAL,
-                                       config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN))
-        return pushes
-    pushes = await _reg_reachout()
+    errors, replies = 0, 0
+    empties = []
+    pushes = []
+
+    async def _notify(m):   # the reach-out contract is an async notifier (web uses _broadcast)
+        pushes.append(m)
+
+    comp.tick.register(ReachOutJob(comp, _notify, config.TICK_INTERVAL,
+                                   config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN))
     comp.tick.start()
 
     for kind, val in SCRIPT:
@@ -103,14 +105,16 @@ async def run_conversation(comp):
             r = await comp.send(val, _noop)
             replies += 1
             if not r.text.strip():
-                empty_replies += 1
+                empties.append(val[:50])
         except Exception as e:  # noqa: BLE001
             errors += 1
             print(f"  !! send error on {val[:40]!r}: {type(e).__name__}: {e}")
 
     await comp.tick.stop()
     await comp.flush()
-    return {"errors": errors, "replies": replies, "empty_replies": empty_replies,
+    if empties:
+        print(f"  (empty replies on: {empties})")
+    return {"errors": errors, "replies": replies, "empty_replies": len(empties),
             "proactive": len(pushes)}
 
 
