@@ -135,6 +135,15 @@ SLEEP_ENABLED = os.environ.get("SLEEP_ENABLED", "true").lower() in ("1", "true",
 SLEEP_AFTER_IDLE = float(os.environ.get("SLEEP_AFTER_IDLE", "1800"))   # 30 min away -> sleep
 LMS_PATH = os.environ.get("LMS_PATH", "lms")                           # LM Studio CLI
 
+# Internal drives (multi-drive proactivity, roadmap arc A1 — "observe first" slice).
+# Slow-integrating scalars (connection, restlessness) that rise while you're away,
+# modulated by mood, and relax on contact — a more lifelike generalization of the tick's
+# fixed idle gates (V2_PLAN §2.9). This slice only *observes* them (surfaced in the status
+# panel); the behaviors still fire on their existing idle gates until the drives prove out.
+# Persisted like mood so they survive restarts. Rise rates / weights live in core/drives.py.
+DRIVES_ENABLED = os.environ.get("DRIVES_ENABLED", "true").lower() in ("1", "true", "yes")
+DRIVE_AWAY_AFTER = float(os.environ.get("DRIVE_AWAY_AFTER", "90"))  # idle (s) before drives rise
+
 # Tools (pillar 4): native function-calling. When enabled, the chat turn streams
 # through a tool loop so Mari can call registered tools (clock, reminisce, more
 # later). Verified 100% reliable on the chat model (scripts/tool_probe.py). The

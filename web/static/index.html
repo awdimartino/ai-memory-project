@@ -190,6 +190,9 @@
       melancholy: "#6a8bd0", unease: "#9b7bd0", interest: "#4fbf8f",
     };
 
+    // Internal drives (multi-drive proactivity) — observed only for now.
+    const DRIVE_COLORS = { connection: "#4f9bd9", restlessness: "#d98f4f" };
+
     function el(tag, cls, text) {
       const n = document.createElement(tag);
       if (cls) n.className = cls;
@@ -400,6 +403,13 @@
         const m = stSection("Mood");
         Object.entries(s.mood).forEach(([ch, val]) => m.appendChild(barRow(ch, val, MOOD_COLORS[ch])));
         box.appendChild(m);
+      }
+
+      if (s.drives) {
+        const dr = stSection("Drives");
+        Object.entries(s.drives).forEach(([d, val]) =>
+          dr.appendChild(barRow(d, val, DRIVE_COLORS[d] || "#888")));
+        box.appendChild(dr);
       }
 
       const mem = stSection(

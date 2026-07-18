@@ -92,13 +92,16 @@ class Companion:
                  history: list[dict] | None = None,
                  unconsolidated: list[dict] | None = None,
                  emotion=None, thoughts=None, model_manager=None,
-                 tools=None, tool_max_iters: int = 5):
+                 tools=None, tool_max_iters: int = 5, drives=None):
         self.llm = llm
         self.store = store
         self.memory = memory
         self.meta = meta
         self.emotion = emotion  # EmotionManager, or None when disabled
         self.thoughts = thoughts  # ThoughtStore for the private journal, or None
+        # DriveManager (multi-drive proactivity), or None when disabled. Updated by the
+        # tick's DriveDriftJob and relieved here on each user message (contact).
+        self.drives = drives
         self.model_manager = model_manager  # unload/reload the LLM for sleep, or None
         # ToolRegistry (pillar 4), or None/empty to run plain streaming turns. When
         # non-empty, send() streams through the tool loop so Mari can call tools.
@@ -195,6 +198,9 @@ class Companion:
                 title = " ".join(user_text.split())[:40] or "New chat"
                 await asyncio.to_thread(self.store.set_title, self.session_id, title)
                 self._session_title = title
+
+            if self.drives is not None:
+                await self.drives.on_user_message()  # contact relieves connection/restlessness
 
             self._maybe_consolidate()
             return TurnResult(text, stats, recalled, emotion_info, core, stats.get("tools"))

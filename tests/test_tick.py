@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.emotion_manager import EmotionManager
 from core.tick import (
+    DriveDriftJob,
     IdleConsolidationJob,
     Job,
     MoodDriftJob,
@@ -154,6 +155,52 @@ async def mood_drift_only_when_idle():
 async def mood_drift_noop_without_emotion():
     job = MoodDriftJob(FakeCompanion(idle=1000.0), None, interval=0.0, idle_after=90.0)
     await job.run()               # emotion disabled -> no crash, nothing to do
+
+
+class FakeDrives:
+    """Records update() calls so the job's plumbing (idle + mood pass-through) is testable."""
+
+    def __init__(self):
+        self.updates = []
+
+    async def update(self, idle_seconds, mood=None):
+        self.updates.append((idle_seconds, mood))
+        return {"connection": 0.1, "restlessness": 0.2}
+
+
+class DriveCompanion:
+    def __init__(self, idle, emotion=None):
+        self._idle = idle
+        self.emotion = emotion
+
+    def idle_seconds(self):
+        return self._idle
+
+
+@case
+async def drive_drift_updates_with_idle_and_no_mood():
+    drives = FakeDrives()
+    comp = DriveCompanion(idle=500.0)               # emotion disabled -> mood None
+    await DriveDriftJob(comp, drives, interval=0.0).run()
+    assert drives.updates == [(500.0, None)], drives.updates
+
+
+@case
+async def drive_drift_passes_mood_when_emotion_on():
+    drives = FakeDrives()
+
+    class Emo:
+        state = {"warmth": 0.5}
+
+    comp = DriveCompanion(idle=500.0, emotion=Emo())
+    await DriveDriftJob(comp, drives, interval=0.0).run()
+    assert drives.updates == [(500.0, {"warmth": 0.5})], drives.updates
+
+
+@case
+async def drive_drift_noop_without_drives():
+    # Drives disabled -> the job is a harmless no-op (mirrors mood-drift without emotion).
+    await DriveDriftJob(DriveCompanion(idle=500.0), None, interval=0.0).run()
 
 
 @case

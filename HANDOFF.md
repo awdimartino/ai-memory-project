@@ -74,9 +74,16 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   requests to a model.
 - **Tick loop (pillar 3):** a pluggable job scheduler (`core/tick.py`) running a
   background heartbeat. Jobs: **mood drift** (decays the persisted mood toward baseline while the
-  user is away), **idle consolidation** (flushes the pending buffer after a while idle),
-  **self-reflection**, **proactive reach-out**, **persona edit**, and **sleep**. A **busy guard** on
-  `Companion` means jobs never fire mid-turn (idle reads 0 during a reply, even a slow generation).
+  user is away), **drive drift** (integrates the internal drives — see below), **idle consolidation**
+  (flushes the pending buffer after a while idle), **self-reflection**, **proactive reach-out**,
+  **persona edit**, and **sleep**. A **busy guard** on `Companion` means jobs never fire mid-turn
+  (idle reads 0 during a reply, even a slow generation).
+- **Internal drives (multi-drive proactivity, arc A1 — "observe first"):** `core/drives.py`
+  `DriveManager` holds slow-integrating scalars — **connection** and **restlessness** — that rise while
+  you're away (connection sped by warmth/melancholy, slowed by irritation; restlessness sped by boredom),
+  relax while present, and are relieved on contact. Integrated by **elapsed wall-time** (not tick count) and
+  **persisted** like mood. Surfaced read-only in the status panel; **no behavior gates on them yet** — the
+  generalization of the fixed idle gates, landed but not yet load-bearing (see §8-A).
 - **Sleep / standby (§2.8):** after a long idle (`SLEEP_AFTER_IDLE`, default 30 min)
   `SleepJob` calls `Companion.sleep()` — flush pending, then **unload the LLM from VRAM** via the `lms`
   CLI (`infrastructure/model_manager.py`) to free the machine. The heartbeat keeps ticking (mood still
@@ -141,7 +148,8 @@ python tests/test_core_memory.py        # offline core-memory flag/inject/cap (4
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
-python tests/test_tick.py               # tick scheduler + jobs (reach-out/reflection/persona/sleep) + familiarity (25 cases)
+python tests/test_tick.py               # tick scheduler + jobs (reach-out/reflection/persona/sleep/drive-drift) + familiarity (28 cases)
+python tests/test_drives.py             # offline drive dynamics: rise/relax/mood-modulation/contact/discharge/persist (11 cases)
 python tests/test_tools.py              # offline tool framework: registry + stream loop + reminisce (20 cases)
 python scripts/tool_probe.py            # LIVE: native tool-calling reliability (probe, per-case pass rate)
 python scripts/tool_smoke.py            # LIVE: tools end-to-end through the real persona (time + reminisce + no-tool)
@@ -269,6 +277,15 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
 - **★ Multi-drive proactivity** — replace the one idle gate with several slow-drifting internal drives
   (desire-to-connect, restlessness, mood, anxiety, busyness) that cross thresholds to trigger behavior.
   Deterministic and more lifelike; **generalizes the tick gates we already have** — the best starting point.
+  - **Framework landed (2026-07-18, "observe first" slice):** `core/drives.py` `DriveManager` ships two
+    drives — **connection** (urge to reach out; sped by warmth/melancholy, slowed by irritation) and
+    **restlessness** (mental idleness → reflection; sped by boredom). They integrate by **elapsed wall-time**
+    (deterministic, `TICK_INTERVAL`-independent), are **persisted** like mood, rise while away / relax while
+    present, and are relieved on contact (`Companion.on_user_message`). A `DriveDriftJob` updates them every
+    tick; they're surfaced **read-only** in `GET /status` + a "Drives" panel section. **Behaviors are NOT yet
+    gated on them** — reach-out/reflection/sleep stay on their idle gates until the drives prove out. Live-verified
+    end-to-end (mood modulation active). **Next step:** watch the panel over real use, then flip reach-out onto
+    `connection` and reflection onto `restlessness` (a one-line gate change per job; `discharge()` already exists).
 - **★ Energy / body cycles** — a fatigue/energy stat that biases toward rest, giving *autonomous* sleep an
   internal logic instead of a fixed 30-min timer.
 - **★ Nightly / scheduled deep consolidation** — an "end of day" job that summarizes the day into an episodic

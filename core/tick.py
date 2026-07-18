@@ -83,6 +83,32 @@ class TickLoop:
         logger.info("tick loop stopped")
 
 
+class DriveDriftJob(Job):
+    """Integrate Mari's internal drives each tick (multi-drive proactivity, arc A1).
+
+    Drives rise while the user is away (connection scaled by mood, restlessness by
+    boredom) and relax while present. This "observe first" slice only *updates and
+    surfaces* the drives — the behaviors still fire on their own idle gates — so a bad
+    drive can't yet cause or suppress an action. Runs even while asleep: drives are
+    cheap state with no model call (like mood drift), and letting connection keep
+    building while she sleeps is exactly the future basis for a principled self-wake.
+    """
+    name = "drive_drift"
+
+    def __init__(self, companion, drives, interval: float):
+        self.companion = companion
+        self.drives = drives
+        self.interval = interval
+
+    async def run(self) -> None:
+        if self.drives is None:
+            return
+        mood = self.companion.emotion.state if self.companion.emotion is not None else None
+        state = await self.drives.update(self.companion.idle_seconds(), mood)
+        top = max(state, key=state.get)
+        logger.info("drive drift: %s %.2f", top, state[top])
+
+
 class MoodDriftJob(Job):
     """While the user is away, decay mood one step toward baseline each run, so it
     settles over time instead of freezing where the last message left it."""

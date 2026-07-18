@@ -113,6 +113,7 @@ async def status() -> dict:
         return {"ready": False}
     store = c.memory.store
     mood = c.emotion.state if c.emotion is not None else None
+    drives = c.drives.snapshot() if c.drives is not None else None
     fam = c.familiarity()
 
     def _ago(key):
@@ -125,6 +126,7 @@ async def status() -> dict:
         "asleep": c.is_asleep(),
         "familiarity": {"value": round(fam, 3), "label": familiarity_label(fam)},
         "mood": ({ch: round(mood[ch], 3) for ch in CHANNELS} if mood else None),
+        "drives": ({d: round(v, 3) for d, v in drives.items()} if drives else None),
         "memory": {
             "core": c.memory.core_memories(),
             "active_count": store.count(),

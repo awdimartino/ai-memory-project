@@ -10,10 +10,12 @@ import sys
 import config
 from core.builtin_tools import make_reminisce_tool, make_time_tool
 from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
+from core.drives import DriveManager
 from core.emotion_manager import EmotionManager
 from core.memory_manager import MemoryManager
 from core.tools import ToolRegistry
 from core.tick import (
+    DriveDriftJob,
     IdleConsolidationJob,
     MoodDriftJob,
     PersonaEditJob,
@@ -70,6 +72,11 @@ async def build() -> tuple[Companion, str]:
 
     emotion = await _build_emotion(meta_store)
 
+    # Internal drives (multi-drive proactivity). Cheap deterministic state, persisted like
+    # mood; the tick's DriveDriftJob integrates them, and the companion relieves them on
+    # contact. Observed only in this slice — no behavior gates on them yet.
+    drives = DriveManager(meta_store, config.DRIVE_AWAY_AFTER) if config.DRIVES_ENABLED else None
+
     # Sleep/standby needs the `lms` CLI; auto-disable if it isn't on this machine.
     model_manager = None
     if config.SLEEP_ENABLED:
@@ -101,7 +108,7 @@ async def build() -> tuple[Companion, str]:
     companion = Companion(llm, conv_store, memory, meta_store, active,
                           history, unconsolidated, emotion=emotion, thoughts=thought_store,
                           model_manager=model_manager, tools=tools,
-                          tool_max_iters=config.TOOL_MAX_ITERS)
+                          tool_max_iters=config.TOOL_MAX_ITERS, drives=drives)
     companion._session_title = conv_store.session_title(active)
 
     # Proactivity heartbeat. Created, not started; the entry point starts it so eval/test
@@ -112,6 +119,8 @@ async def build() -> tuple[Companion, str]:
             MoodDriftJob(companion, emotion, config.TICK_INTERVAL, config.TICK_IDLE_SECONDS),
             IdleConsolidationJob(companion, config.TICK_INTERVAL, config.IDLE_CONSOLIDATE_AFTER),
         ]
+        if drives is not None:
+            jobs.append(DriveDriftJob(companion, drives, config.TICK_INTERVAL))
         if config.REFLECT_ENABLED:
             jobs.append(ReflectionJob(companion, config.TICK_INTERVAL,
                                       config.REFLECT_MIN_IDLE, config.REFLECT_COOLDOWN))
