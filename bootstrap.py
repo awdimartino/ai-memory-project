@@ -3,11 +3,13 @@
 Both entry points (the REPL and the web app) build the Companion here so wiring
 lives in exactly one place.
 """
+import asyncio
 import logging
 import sys
 
 import config
 from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
+from core.emotion_manager import EmotionManager
 from core.memory_manager import MemoryManager
 from infrastructure.conversation_store import SqliteConversationStore
 from infrastructure.db import connect
@@ -49,6 +51,8 @@ async def build() -> tuple[Companion, str]:
         config.MEMORY_RELATE_TOP_K, config.MEMORY_RELATE_SIMILARITY,
     )
 
+    emotion = await _build_emotion(meta_store)
+
     history = conv_store.recent_messages(config.HISTORY_TURNS)
     # Recover the unconsolidated tail: any messages logged after the last
     # consolidation checkpoint (e.g. dropped by a hard kill before flush).
@@ -56,12 +60,32 @@ async def build() -> tuple[Companion, str]:
     unconsolidated = conv_store.messages_after(watermark)
     session_id = conv_store.create_session()
     companion = Companion(llm, conv_store, memory, meta_store, session_id,
-                          history, unconsolidated)
+                          history, unconsolidated, emotion=emotion)
 
     logging.getLogger("bootstrap").info(
-        "ready: chat=%s, brain=%s, embed=%s | %d logged msgs, %d memories, "
+        "ready: chat=%s, brain=%s, embed=%s, emotion=%s | %d logged msgs, %d memories, "
         "%d carried, %d unconsolidated recovered",
         model, brain_model, config.EMBED_MODEL,
+        config.EMOTION_MODEL if emotion else "off",
         conv_store.message_count(), mem_store.count(), len(history), len(unconsolidated),
     )
     return companion, model
+
+
+async def _build_emotion(meta_store) -> EmotionManager | None:
+    """Load the CPU emotion classifier (off the event loop). Degrade gracefully:
+    if it's disabled or fails to load, chat still runs — emotion just stays off."""
+    if not config.EMOTION_ENABLED:
+        return None
+    try:
+        # Import here so a disabled build never pays the torch/transformers import.
+        from infrastructure.emotion_classifier import EmotionClassifier
+        classifier = await asyncio.to_thread(EmotionClassifier, config.EMOTION_MODEL)
+    except Exception:  # noqa: BLE001 - emotion is an enhancement, never a hard dependency
+        logging.getLogger("bootstrap").warning(
+            "emotion classifier failed to load; continuing without emotion", exc_info=True
+        )
+        return None
+    return EmotionManager(classifier, meta_store,
+                          pull_strength=config.EMOTION_PULL_STRENGTH,
+                          noise_floor=config.EMOTION_NOISE_FLOOR)

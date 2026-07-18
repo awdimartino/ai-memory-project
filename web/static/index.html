@@ -50,6 +50,36 @@
     }
     button:disabled { opacity: .5; cursor: default; }
     .dot { color: var(--muted); }
+
+    /* Per-turn inspector: memories recalled + emotion read + resulting mood. */
+    .details { margin: 2px 4px 2px; max-width: 78%; }
+    .details summary {
+      color: var(--muted); font-size: 11px; cursor: pointer; list-style: none;
+      user-select: none; padding: 2px 0;
+    }
+    .details summary::-webkit-details-marker { display: none; }
+    .details summary::before { content: "▸ "; }
+    .details[open] summary::before { content: "▾ "; }
+    .td-body {
+      margin-top: 6px; padding: 10px 12px; background: var(--panel);
+      border: 1px solid var(--line); border-radius: 10px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .td-title {
+      color: var(--muted); font-size: 10px; letter-spacing: .06em;
+      text-transform: uppercase; margin-bottom: 6px;
+    }
+    .mem { font-size: 12px; padding: 3px 0; display: flex; gap: 8px; align-items: baseline; }
+    .mem .pct { color: var(--muted); font-size: 11px; margin-left: auto; flex: none; }
+    .td-empty { font-size: 12px; color: var(--muted); }
+    .bar-row {
+      display: grid; grid-template-columns: 92px 1fr 34px; align-items: center;
+      gap: 8px; font-size: 12px; padding: 2px 0;
+    }
+    .bar-label { color: var(--text); text-transform: capitalize; }
+    .bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; border-radius: 4px; background: var(--user); }
+    .bar-val { color: var(--muted); font-size: 11px; text-align: right; }
   </style>
 </head>
 <body>
@@ -94,6 +124,91 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    // Distinct hue per mood channel so the six bars read at a glance.
+    const MOOD_COLORS = {
+      irritation: "#e5534b", warmth: "#e0a458", amusement: "#d9c04f",
+      melancholy: "#6a8bd0", unease: "#9b7bd0", interest: "#4fbf8f",
+    };
+
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+
+    function barRow(label, value, color) {
+      const row = el("div", "bar-row");
+      row.appendChild(el("span", "bar-label", label));
+      const bar = el("span", "bar");
+      const fill = el("i");
+      fill.style.width = Math.round(Math.max(0, Math.min(1, value)) * 100) + "%";
+      if (color) fill.style.background = color;
+      bar.appendChild(fill);
+      row.appendChild(bar);
+      row.appendChild(el("span", "bar-val", value.toFixed(2).replace(/^0/, "")));
+      return row;
+    }
+
+    function section(title) {
+      const s = el("div", "td-section");
+      s.appendChild(el("div", "td-title", title));
+      return s;
+    }
+
+    // Render the collapsible inspector: what Mari recalled + felt this turn.
+    function addDetails(recalled, emotion) {
+      recalled = recalled || [];
+      const hasEmotion = emotion && emotion.mood;
+      if (!recalled.length && !hasEmotion) return;
+
+      const details = el("details", "details");
+      const summary = el("summary");
+      const bits = [];
+      bits.push(`${recalled.length} ${recalled.length === 1 ? "memory" : "memories"}`);
+      if (hasEmotion) {
+        const top = Object.entries(emotion.mood).sort((a, b) => b[1] - a[1])[0];
+        bits.push(`mood: ${top[0]}`);
+      }
+      summary.textContent = "inspect · " + bits.join(" · ");
+      details.appendChild(summary);
+
+      const body = el("div", "td-body");
+
+      const mem = section("Recalled memories");
+      if (recalled.length) {
+        recalled.forEach((m) => {
+          const row = el("div", "mem");
+          row.appendChild(el("span", null, m.content));
+          row.appendChild(el("span", "pct", Math.round(m.similarity * 100) + "%"));
+          mem.appendChild(row);
+        });
+      } else {
+        mem.appendChild(el("div", "td-empty", "none pulled for this turn"));
+      }
+      body.appendChild(mem);
+
+      if (hasEmotion) {
+        const det = section("Detected in your message");
+        const found = emotion.detected || [];
+        if (found.length) {
+          found.forEach((d) => det.appendChild(barRow(d.label, d.score)));
+        } else {
+          det.appendChild(el("div", "td-empty", "neutral / nothing notable"));
+        }
+        body.appendChild(det);
+
+        const mood = section("Mari's mood");
+        Object.entries(emotion.mood).forEach(([ch, v]) =>
+          mood.appendChild(barRow(ch, v, MOOD_COLORS[ch])));
+        body.appendChild(mood);
+      }
+
+      details.appendChild(body);
+      log.appendChild(details);
+      log.scrollTop = log.scrollHeight;
+    }
+
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${proto}://${location.host}/ws`);
 
@@ -114,6 +229,7 @@
       } else if (msg.type === "done") {
         current = null;
         addStats(msg.stats);
+        addDetails(msg.recalled, msg.emotion);
         setSending(false);
       } else if (msg.type === "error") {
         if (current) current.textContent += `\n[error: ${msg.message}]`;

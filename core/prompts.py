@@ -51,21 +51,24 @@ Also:
 Never use em dashes or hyphens as dashes."""
 
 
-def build_system(memories: list[str]) -> str:
-    """The chat system message: the persona, plus any recalled memories folded in.
+def build_system(memories: list[str], mood: str | None = None) -> str:
+    """The chat system message: the persona, plus recalled memories and mood folded in.
 
-    Memories go in the system message (never as a separate turn) so local chat
-    templates stay happy, and are framed as things Mari simply knows.
+    Both memories and the mood block go in the system message (never as separate
+    turns) so local chat templates stay happy. Memories are framed as things Mari
+    simply knows; the mood colors tone without being named.
     """
-    if not memories:
-        return SYSTEM_PROMPT
-    lines = "\n".join(f"- {m}" for m in memories)
-    return (
-        f"{SYSTEM_PROMPT}\n\n"
-        f"Some things you already know about them (from earlier talks). Use them "
-        f"naturally when relevant, and never mention that you 'stored' or 'retrieved' anything:\n"
-        f"{lines}"
-    )
+    parts = [SYSTEM_PROMPT]
+    if memories:
+        lines = "\n".join(f"- {m}" for m in memories)
+        parts.append(
+            f"Some things you already know about them (from earlier talks). Use them "
+            f"naturally when relevant, and never mention that you 'stored' or 'retrieved' "
+            f"anything:\n{lines}"
+        )
+    if mood:
+        parts.append(mood)
+    return "\n\n".join(parts)
 
 
 # --- Memory consolidation (Tier-2 structured output) ---

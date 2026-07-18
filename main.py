@@ -68,16 +68,30 @@ async def amain() -> int:
 
         print(f"{config.BOT_NAME}: ", end="", flush=True)
         try:
-            _, stats = await companion.send(user, on_token)
+            result = await companion.send(user, on_token)
         except Exception as e:
             print(f"\n[error: {e}]\n")
             continue
 
+        stats = result.stats
         approx = "~" if stats["estimated"] else ""
         print(
             f"\n  [ttft {stats['ttft']:.2f}s | {stats['tok_per_s']:.1f} tok/s "
-            f"| {approx}{stats['tokens']} tok]\n"
+            f"| {approx}{stats['tokens']} tok]"
         )
+        if result.recalled:
+            mems = ", ".join(f"{c} ({s:.2f})" for c, s in result.recalled)
+            print(f"  [recalled: {mems}]")
+        if result.emotion:
+            mood = result.emotion["mood"]
+            top = ", ".join(
+                f"{ch} {mood[ch]:.2f}"
+                for ch in sorted(mood, key=mood.get, reverse=True)[:3]
+            )
+            detected = result.emotion["detected"]
+            felt = ", ".join(f"{d['label']} {d['score']:.2f}" for d in detected[:3])
+            print(f"  [detected: {felt or 'neutral'} | mood: {top}]")
+        print()
 
     # Consolidate anything that didn't fill a window before quitting.
     print("(consolidating memory...)")

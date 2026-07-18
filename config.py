@@ -65,6 +65,15 @@ CONSOLIDATE_WINDOW = int(os.environ.get("CONSOLIDATE_WINDOW", str(HISTORY_TURNS)
 MEMORY_RELATE_SIMILARITY = float(os.environ.get("MEMORY_RELATE_SIMILARITY", "0.6"))
 MEMORY_RELATE_TOP_K = int(os.environ.get("MEMORY_RELATE_TOP_K", "5"))
 
+# Emotion (pillar 2). A local RoBERTa GoEmotions classifier maps each message to
+# 28 emotions, folded into 6 mood channels that decay toward a baseline. Runs on
+# CPU (the 9070XT can't use the v1 CUDA path) so it keeps all VRAM for the LLMs.
+EMOTION_ENABLED = os.environ.get("EMOTION_ENABLED", "true").lower() in ("1", "true", "yes")
+EMOTION_MODEL = os.environ.get("EMOTION_MODEL", "SamLowe/roberta-base-go_emotions")
+# How reactive mood is to a single message (v1-tuned); noise floor drops weak labels.
+EMOTION_PULL_STRENGTH = float(os.environ.get("EMOTION_PULL_STRENGTH", "0.4"))
+EMOTION_NOISE_FLOOR = float(os.environ.get("EMOTION_NOISE_FLOOR", "0.05"))
+
 # Web server.
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))

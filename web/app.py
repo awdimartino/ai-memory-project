@@ -72,8 +72,15 @@ async def ws(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "token", "text": t})
 
                 try:
-                    _, stats = await companion.send(text, on_token)
-                    await websocket.send_json({"type": "done", "stats": stats})
+                    result = await companion.send(text, on_token)
+                    await websocket.send_json({
+                        "type": "done",
+                        "stats": result.stats,
+                        "recalled": [
+                            {"content": c, "similarity": s} for c, s in result.recalled
+                        ],
+                        "emotion": result.emotion,  # {detected, mood} or None
+                    })
                 except Exception as e:  # noqa: BLE001 - surface to the UI
                     logger.exception("generation failed")
                     await websocket.send_json({"type": "error", "message": str(e)})

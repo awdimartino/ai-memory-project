@@ -19,6 +19,7 @@ strictly contiguous (a failed, re-queued chunk can't be jumped over).
 """
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 import config
@@ -31,14 +32,30 @@ logger = logging.getLogger(__name__)
 CONSOLIDATED_WATERMARK_KEY = "last_consolidated_msg_id"
 
 
+@dataclass
+class TurnResult:
+    """Everything a caller might want to show for one turn.
+
+    `stats` are perf numbers; `recalled` are the memories injected this turn as
+    (content, similarity); `emotion` is the classifier read + resulting mood
+    ({"detected": [...], "mood": {...}}), or None when emotion is disabled.
+    """
+    text: str
+    stats: dict
+    recalled: list[tuple[str, float]]
+    emotion: dict | None = None
+
+
 class Companion:
     def __init__(self, llm, store, memory, meta, session_id: int,
                  history: list[dict] | None = None,
-                 unconsolidated: list[dict] | None = None):
+                 unconsolidated: list[dict] | None = None,
+                 emotion=None):
         self.llm = llm
         self.store = store
         self.memory = memory
         self.meta = meta
+        self.emotion = emotion  # EmotionManager, or None when disabled
         self.session_id = session_id
         self.history: list[dict] = history or []
         # Each entry carries its message id so a successful consolidation can
@@ -48,10 +65,19 @@ class Companion:
         # a background pass can't overlap a shutdown flush.
         self._consol_lock = asyncio.Lock()
 
-    async def send(self, user_text: str, on_token: Callable[[str], Awaitable]):
-        """Recall, stream a reply, log, and maybe kick off consolidation. Returns (text, stats)."""
+    async def send(self, user_text: str, on_token: Callable[[str], Awaitable]) -> TurnResult:
+        """Recall + react, stream a reply, log, and maybe consolidate. Returns a TurnResult."""
         recalled = await self.memory.recall(user_text)
-        system = build_system([content for content, _ in recalled])
+
+        # Emotion is autonomic (Tier-1): the user's message shifts mood, which
+        # then colors this reply's tone via the system prompt.
+        emotion_info = None
+        mood_prompt = None
+        if self.emotion is not None:
+            emotion_info = await self.emotion.react(user_text)
+            mood_prompt = self.emotion.as_prompt()
+
+        system = build_system([content for content, _ in recalled], mood_prompt)
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -68,7 +94,7 @@ class Companion:
         self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
 
         self._maybe_consolidate()
-        return text, stats
+        return TurnResult(text, stats, recalled, emotion_info)
 
     def _maybe_consolidate(self) -> None:
         """At the end of a context window, consolidate in the background (non-blocking).

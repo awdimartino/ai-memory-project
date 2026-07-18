@@ -47,12 +47,23 @@ The **brain foundation is done and live-verified.** In place:
   episodic log, so a hard kill no longer drops in-flight facts.
 - **Persona** — emergent "friendly stranger" (Mari) in one prompt module
   (`core/prompts.py`), tuned via a model bake-off + iteration.
+- **Emotion / mood (pillar 2, new 2026-07-18):** a local RoBERTa GoEmotions classifier
+  on **CPU** scores each user message; 28 labels fold into **6 mood channels** (irritation,
+  warmth, amusement, melancholy, unease, interest) that decay toward a baseline at per-channel
+  rates. Mood is **persisted** (survives restarts) and folds into the system prompt to color
+  tone. Split as `infrastructure/emotion_classifier.py` (the model) + `core/emotion_manager.py`
+  (the mood logic). Graceful: if the model can't load, chat still runs.
+- **Response inspector (web + REPL, new 2026-07-18):** each turn now returns a `TurnResult`
+  (text, stats, recalled memories, emotion read). The web UI shows a collapsible per-turn
+  panel with the **memories recalled** (+ similarity), the **emotions detected** in your
+  message, and **Mari's 6-channel mood**; the REPL prints a compact one-line version.
 - **Concurrency safety** — a single model-access lock in `LLMClient` serializes ALL
   model calls (chat vs. background consolidation); LM Studio can't serve concurrent
   requests to a model (that crash was hit and fixed this session).
 
-Not yet built: **emotion, tick/proactivity, tools, voice.** Persona self-modification
-and familiarity meter are planned but not started.
+Not yet built: **tick/proactivity, tools, voice.** Persona self-modification and
+familiarity meter are planned but not started. Emotion is done but not yet wired into
+a tick (mood drift on idle) — that lands with proactivity (pillar 3).
 
 ---
 
@@ -66,11 +77,15 @@ python main.py          # same brain, terminal REPL
 python tests/test_memory_lifecycle.py   # offline, no LM Studio needed
 python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
+python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
+python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
 ```
 
 Requires **LM Studio running with its local server on** (port 1234) and the chat +
-embedding models available. Config is env-driven via a git-ignored `.env` (see
-`.env.example`). Both entry points share `companion.db` (git-ignored).
+embedding models available. The emotion classifier (`SamLowe/roberta-base-go_emotions`)
+downloads from HuggingFace on first run and then runs locally on CPU. Config is env-driven
+via a git-ignored `.env` (see `.env.example`). Both entry points share `companion.db`
+(git-ignored). Emotion can be turned off with `EMOTION_ENABLED=false`.
 
 REPL commands: `/exit` (flushes pending consolidation), `/reset`, `/model <name>`, `/temp <v>`.
 
@@ -87,6 +102,8 @@ REPL commands: `/exit` (flushes pending consolidation), `/reset`, `/model <name>
     `reasoning_content` channel (not inline `<think>`), which is why a reasoning model
     with a token cap could return an empty answer.
 - **Embedding: `text-embedding-nomic-embed-text-v1.5`** (CPU-friendly, small).
+- **Emotion: `SamLowe/roberta-base-go_emotions`** (~125M), runs on **CPU** (`device=-1`),
+  ~0.5 GB RAM, leaves all VRAM for the LLMs. Configurable via `EMOTION_MODEL`.
 - **Brain (consolidation): reuses the chat model** by default (`BRAIN_MODEL` empty),
   so only ~5 GB (qwen3-8b) + ~0.5 GB (nomic) is resident — no second big model, no
   load/unload thrash. Reasoning can be re-enabled (`NO_THINK=false`) for the brain /
@@ -148,6 +165,21 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
   prompt-tunable.
 - Recall threshold calibrated on a small sample; precision at large memory volume
   unmeasured. Only qwen3-8b / gemma tested for extraction/decisions.
+- **Recall is sensitive to query phrasing.** A clean query ("do I have any pets?") recalls
+  a seeded fact at 0.638, but an emotionally-prefixed one ("I'm so excited, do I have any
+  pets?") fell below the 0.55 floor and recalled nothing. Pre-existing (not emotion-related),
+  but now visible in the inspector. Options later: embed only the salient clause, lower the
+  floor, or re-rank.
+- **LM Studio intermittently 400s on the *structured* extraction call** (`Engine protocol
+  predict request failed: fetch failed`) while normal streaming chat is fine. Hit ~2–3× this
+  session (and once successfully advanced the watermark), so it's intermittent, not constant.
+  The durability re-queue absorbs it (facts retried next window / on restart), but if it
+  persists, investigate the `response_format` grammar path or the LM Studio build.
+- **Emotion is prompt-only so far.** Mood colors tone but there's no behavioral guardrail
+  yet (e.g. very high irritation doesn't change *what* Mari does, only her wording). Also
+  "approval" from bland acknowledgements ("ok sure") nudges warmth up a little — a mapping
+  nuance surfaced by the eval, not necessarily wrong. Mood only shifts on user messages;
+  idle mood-drift waits for the tick (pillar 3).
 
 ---
 
@@ -168,9 +200,14 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 1. ✅ ~~Commit the qwen3-8b/no-think change~~ (landed as `73d517d`).
 2. ✅ ~~Close the **hard-kill durability** gap~~ (done 2026-07-18 — watermark + tail
    recovery; §7). Reusable `MetaStore` (KV) added — emotion will use it for mood.
-3. **Emotion (pillar 2)** — keep v1's RoBERTa GoEmotions → 6 mood channels approach,
-   but run it on **CPU** (the 9070XT can't use v1's CUDA path), **persist mood to DB**
-   (via the new `MetaStore`), and run a **behavioral eval** (never done in v1). V2_PLAN §2.3.
-4. Then proactivity (tick loop + reach-out over WebSocket) → tools framework.
+3. ✅ ~~Emotion (pillar 2)~~ (done 2026-07-18 — RoBERTa GoEmotions → 6 mood channels on
+   CPU, persisted mood, behavioral eval passed; plus a response inspector in the web UI +
+   REPL). V2_PLAN §2.3 / build log.
+4. **Proactivity (pillar 3)** — the tick loop. A pluggable job scheduler that on each tick
+   does: **mood drift** (decay the now-persisted mood toward baseline while idle — the
+   emotion hook is ready), internal reflection, and the "should I reach out?" gate that
+   pushes an unprompted, model-generated message over the **WebSocket**. Definition of done:
+   a real unprompted message arrives in the UI. Pairs with **sleep/standby** (§2.8). V2_PLAN §2.4.
+5. Then the tool framework (pillar 4).
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.

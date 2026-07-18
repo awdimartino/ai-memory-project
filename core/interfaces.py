@@ -61,3 +61,11 @@ class MetaStore(Protocol):
     def set_int(self, key: str, value: int) -> None:
         """Write an integer value."""
         ...
+
+    def get_json(self, key: str, default=None):
+        """Read a JSON value, or `default` if unset/unparseable."""
+        ...
+
+    def set_json(self, key: str, value) -> None:
+        """Write a JSON-serializable value."""
+        ...

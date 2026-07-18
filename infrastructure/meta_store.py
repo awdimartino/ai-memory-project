@@ -6,6 +6,7 @@ pending-tick bookkeeping later. Pure persistence: string values in and out, with
 typed helpers layered on top. A lock serializes writes since the connection is
 shared across asyncio's threadpool.
 """
+import json
 import sqlite3
 import threading
 
@@ -41,3 +42,15 @@ class SqliteMetaStore:
 
     def set_int(self, key: str, value: int) -> None:
         self.set(key, str(value))
+
+    def get_json(self, key: str, default=None):
+        value = self.get(key)
+        if value is None:
+            return default
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default
+
+    def set_json(self, key: str, value) -> None:
+        self.set(key, json.dumps(value))
