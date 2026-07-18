@@ -80,18 +80,55 @@
     .bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; }
     .bar > i { display: block; height: 100%; border-radius: 4px; background: var(--user); }
     .bar-val { color: var(--muted); font-size: 11px; text-align: right; }
+
+    /* Layout: chat + right status panel */
+    #main { flex: 1; display: flex; min-height: 0; }
+    #chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    #status {
+      width: 340px; flex: none; overflow-y: auto; border-left: 1px solid var(--line);
+      padding: 14px 14px 40px; display: flex; flex-direction: column; gap: 18px; background: #12141a;
+    }
+    body.no-status #status { display: none; }
+    #toggleStatus {
+      background: transparent; color: var(--muted); border: 1px solid var(--line);
+      padding: 3px 12px; margin-left: auto; font-size: 12px; border-radius: 8px;
+    }
+    .st-h {
+      color: var(--muted); font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+      margin-bottom: 7px;
+    }
+    .st-kv { font-size: 12px; display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
+    .st-kv .k { color: var(--muted); }
+    .st-kv .v { margin-left: auto; }
+    .pill { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--bot); }
+    .pill.asleep { background: #3a2f52; }
+    .st-mem { font-size: 12px; padding: 2px 0; }
+    .st-mem.core::before { content: "★ "; color: #e0a458; }
+    .st-old { font-size: 11px; color: var(--muted); padding: 2px 0; }
+    .st-old s { color: #6b7080; }
+    .st-thought {
+      font-size: 12px; padding: 2px 0 2px 8px; border-left: 2px solid var(--line); margin: 4px 0;
+    }
+    .st-thought .m { color: var(--muted); font-size: 10px; }
+    .st-empty { color: var(--muted); font-size: 12px; }
   </style>
 </head>
 <body>
   <header>
     <h1 id="botname">Mari</h1>
     <span class="meta" id="model">connecting...</span>
+    <button id="toggleStatus" type="button">status</button>
   </header>
-  <div id="log"></div>
-  <form id="form">
-    <textarea id="input" rows="1" placeholder="Say something..." autocomplete="off"></textarea>
-    <button id="send" type="submit">Send</button>
-  </form>
+  <div id="main">
+    <div id="chat">
+      <div id="log"></div>
+      <form id="form">
+        <textarea id="input" rows="1" placeholder="Say something..." autocomplete="off"></textarea>
+        <button id="send" type="submit">Send</button>
+      </form>
+    </div>
+    <aside id="status"><div class="st-empty">loading…</div></aside>
+  </div>
 
   <script>
     const log = document.getElementById("log");
@@ -283,6 +320,98 @@
       input.style.height = "auto";
       input.style.height = Math.min(input.scrollHeight, 140) + "px";
     });
+
+    // --- Status panel: poll /status and render Mari's whole state ---
+    function fmtAgo(secs) {
+      if (secs == null) return "—";
+      if (secs < 60) return secs + "s ago";
+      if (secs < 3600) return Math.round(secs / 60) + "m ago";
+      return Math.round(secs / 3600) + "h ago";
+    }
+    function kvRow(k, v) {
+      const r = el("div", "st-kv");
+      r.appendChild(el("span", "k", k));
+      r.appendChild(el("span", "v", v));
+      return r;
+    }
+    function stSection(title) {
+      const s = el("div", "st-sec");
+      s.appendChild(el("div", "st-h", title));
+      return s;
+    }
+    function renderStatus(s) {
+      const box = document.getElementById("status");
+      box.innerHTML = "";
+
+      const ov = stSection("Mari");
+      const state = el("div", "st-kv");
+      state.appendChild(el("span", "k", "state"));
+      const v = el("span", "v");
+      v.appendChild(el("span", "pill" + (s.asleep ? " asleep" : ""), s.asleep ? "asleep 😴" : "awake"));
+      state.appendChild(v);
+      ov.appendChild(state);
+      ov.appendChild(kvRow("familiarity", `${s.familiarity.value.toFixed(2)} · ${s.familiarity.label}`));
+      box.appendChild(ov);
+
+      if (s.mood) {
+        const m = stSection("Mood");
+        Object.entries(s.mood).forEach(([ch, val]) => m.appendChild(barRow(ch, val, MOOD_COLORS[ch])));
+        box.appendChild(m);
+      }
+
+      const mem = stSection(
+        `Memory · ${s.memory.active_count} active · ${s.memory.core_count} core · ${s.memory.superseded_count} retired`);
+      if (s.memory.core.length) {
+        s.memory.core.forEach((c) => mem.appendChild(el("div", "st-mem core", c)));
+      } else {
+        mem.appendChild(el("div", "st-empty", "no core facts yet"));
+      }
+      if (s.memory.superseded.length) {
+        mem.appendChild(el("div", "st-h", "recently updated / retired"));
+        s.memory.superseded.forEach((o) => {
+          const d = el("div", "st-old");
+          d.appendChild(el("s", null, o.content));
+          mem.appendChild(d);
+        });
+      }
+      box.appendChild(mem);
+
+      const p = stSection("Self-description");
+      p.appendChild(el("div", s.persona ? "st-mem" : "st-empty",
+        s.persona || "none yet — develops as you talk"));
+      box.appendChild(p);
+
+      const th = stSection("Recent thoughts (private journal)");
+      if (s.thoughts.length) {
+        s.thoughts.forEach((t) => {
+          const d = el("div", "st-thought");
+          if (t.mood) d.appendChild(el("span", "m", `[${t.mood}] `));
+          d.appendChild(document.createTextNode(t.content));
+          th.appendChild(d);
+        });
+      } else {
+        th.appendChild(el("div", "st-empty", "no thoughts yet — she reflects while you're away"));
+      }
+      box.appendChild(th);
+
+      const a = stSection("Activity");
+      a.appendChild(kvRow("model", s.model || "—"));
+      a.appendChild(kvRow("pending consolidation", String(s.pending_consolidation)));
+      a.appendChild(kvRow("last reach-out", fmtAgo(s.last.reach_out_secs_ago)));
+      a.appendChild(kvRow("last reflection", fmtAgo(s.last.reflect_secs_ago)));
+      a.appendChild(kvRow("last persona edit", fmtAgo(s.last.persona_edit_secs_ago)));
+      box.appendChild(a);
+    }
+    async function pollStatus() {
+      try {
+        const s = await (await fetch("/status")).json();
+        if (s.ready) renderStatus(s);
+      } catch (e) { /* transient; keep last render */ }
+    }
+    document.getElementById("toggleStatus").onclick = () =>
+      document.body.classList.toggle("no-status");
+    setInterval(pollStatus, 3000);
+    pollStatus();
   </script>
 </body>
 </html>

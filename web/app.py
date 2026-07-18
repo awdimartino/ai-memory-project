@@ -100,6 +100,49 @@ async def persona() -> dict:
     }
 
 
+@app.get("/status")
+async def status() -> dict:
+    """One aggregate view of Mari's whole state — for the web status panel."""
+    import time as _time
+    from core.companion import PERSONA_SELF_KEY, familiarity_label
+    from core.emotion_manager import CHANNELS
+    from core.tick import LAST_PERSONA_EDIT_KEY, LAST_REACHOUT_KEY, LAST_REFLECT_KEY
+
+    c = _state.get("companion")
+    if not c:
+        return {"ready": False}
+    store = c.memory.store
+    mood = c.emotion.state if c.emotion is not None else None
+    fam = c.familiarity()
+
+    def _ago(key):
+        t = c.meta.get_json(key, 0) or 0
+        return max(0, int(_time.time() - t)) if t else None
+
+    return {
+        "ready": True,
+        "model": _state.get("model"),
+        "asleep": c.is_asleep(),
+        "familiarity": {"value": round(fam, 3), "label": familiarity_label(fam)},
+        "mood": ({ch: round(mood[ch], 3) for ch in CHANNELS} if mood else None),
+        "memory": {
+            "core": c.memory.core_memories(),
+            "active_count": store.count(),
+            "core_count": store.count_core(),
+            "superseded_count": store.count_superseded(),
+            "superseded": store.superseded(8),
+        },
+        "persona": c.meta.get(PERSONA_SELF_KEY) or "",
+        "thoughts": c.thoughts.recent(8) if c.thoughts else [],
+        "pending_consolidation": c.pending_count(),
+        "last": {
+            "reach_out_secs_ago": _ago(LAST_REACHOUT_KEY),
+            "reflect_secs_ago": _ago(LAST_REFLECT_KEY),
+            "persona_edit_secs_ago": _ago(LAST_PERSONA_EDIT_KEY),
+        },
+    }
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()

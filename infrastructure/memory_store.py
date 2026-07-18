@@ -72,3 +72,17 @@ class SqliteMemoryStore:
         return self.conn.execute(
             "SELECT COUNT(*) FROM memories WHERE active = 1 AND core = 1"
         ).fetchone()[0]
+
+    def count_superseded(self) -> int:
+        """Retired memories (soft-deleted; kept as history)."""
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE active = 0"
+        ).fetchone()[0]
+
+    def superseded(self, limit: int) -> list[dict]:
+        """Recent retired memories with the id that replaced them (for the inspector)."""
+        rows = self.conn.execute(
+            "SELECT content, superseded_by FROM memories WHERE active = 0 "
+            "ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [{"content": r["content"], "superseded_by": r["superseded_by"]} for r in rows]
