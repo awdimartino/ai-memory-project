@@ -33,7 +33,7 @@ async def amain() -> int:
     print(f"Model: {model}  |  temp: {companion.llm.temperature}")
     if companion.history:
         print(f"(carried {len(companion.history)} messages of context from earlier)")
-    print("Commands: /exit, /reset, /thoughts, /core, /model [name], /temp [value]")
+    print("Commands: /exit, /reset, /thoughts, /core, /persona, /model [name], /temp [value]")
     print(f"\nYou're talking to {config.BOT_NAME}. Say hi.\n")
 
     async def on_token(t: str) -> None:
@@ -69,6 +69,13 @@ async def amain() -> int:
                 for c in facts:
                     print(f"  - {c}")
                 print()
+            continue
+        if user == "/persona":
+            from core.companion import PERSONA_SELF_KEY, familiarity_label
+            desc = companion.meta.get(PERSONA_SELF_KEY)
+            fam = companion.familiarity()
+            print(f"(familiarity {fam:.2f} — {familiarity_label(fam)})")
+            print(f"(self-description) {desc if desc else '— none yet; Mari develops one as you talk —'}\n")
             continue
         if user.startswith("/model"):
             parts = user.split(maxsplit=1)

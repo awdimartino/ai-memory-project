@@ -11,7 +11,7 @@ import config
 from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
 from core.emotion_manager import EmotionManager
 from core.memory_manager import MemoryManager
-from core.tick import IdleConsolidationJob, MoodDriftJob, ReflectionJob, TickLoop
+from core.tick import IdleConsolidationJob, MoodDriftJob, PersonaEditJob, ReflectionJob, TickLoop
 from infrastructure.conversation_store import SqliteConversationStore
 from infrastructure.db import connect
 from infrastructure.embedder import Embedder
@@ -80,6 +80,10 @@ async def build() -> tuple[Companion, str]:
         if config.REFLECT_ENABLED:
             jobs.append(ReflectionJob(companion, config.TICK_INTERVAL,
                                       config.REFLECT_MIN_IDLE, config.REFLECT_COOLDOWN))
+        if config.PERSONA_EDIT_ENABLED:
+            jobs.append(PersonaEditJob(companion, config.TICK_INTERVAL,
+                                       config.PERSONA_EDIT_MIN_IDLE, config.PERSONA_EDIT_COOLDOWN,
+                                       config.PERSONA_MIN_MESSAGES))
         companion.tick = TickLoop(jobs, interval=config.TICK_INTERVAL)
 
     logging.getLogger("bootstrap").info(

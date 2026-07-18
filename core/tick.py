@@ -173,6 +173,40 @@ class ReflectionJob(Job):
         await self.companion.reflect()
 
 
+LAST_PERSONA_EDIT_KEY = "last_persona_edit_at"
+
+
+class PersonaEditJob(Job):
+    """During idle, let Mari rewrite her own self-description (the self-modifying persona).
+
+    Slow and rare: needs a minimum amount of history first (`min_messages`), then a long
+    cooldown between edits. `companion.edit_persona()` reads her thoughts + core memories and
+    is gated by familiarity so a stranger doesn't rewrite herself into a best friend.
+    """
+    name = "persona_edit"
+
+    def __init__(self, companion, interval: float, min_idle: float, cooldown: float,
+                 min_messages: int, clock=time.time):
+        self.companion = companion
+        self.interval = interval
+        self.min_idle = min_idle
+        self.cooldown = cooldown
+        self.min_messages = min_messages
+        self.clock = clock
+
+    async def run(self) -> None:
+        if self.companion.idle_seconds() < self.min_idle:
+            return
+        if self.companion.store.message_count() < self.min_messages:
+            return  # too early in the relationship to have a developed self
+        now = self.clock()
+        last = self.companion.meta.get_json(LAST_PERSONA_EDIT_KEY, 0) or 0
+        if now - last < self.cooldown:
+            return
+        await asyncio.to_thread(self.companion.meta.set_json, LAST_PERSONA_EDIT_KEY, now)
+        await self.companion.edit_persona()
+
+
 class IdleConsolidationJob(Job):
     """Once the user has been away a while, consolidate any pending messages so
     facts get saved without waiting for a full context window."""

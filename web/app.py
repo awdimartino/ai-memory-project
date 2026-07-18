@@ -87,6 +87,19 @@ async def core() -> dict:
     return {"core": facts}
 
 
+@app.get("/persona")
+async def persona() -> dict:
+    """Mari's evolving self-description (the self-modifying persona) + familiarity."""
+    from core.companion import PERSONA_SELF_KEY
+    companion = _state.get("companion")
+    if not companion:
+        return {"self_description": "", "familiarity": 0.0}
+    return {
+        "self_description": companion.meta.get(PERSONA_SELF_KEY) or "",
+        "familiarity": round(companion.familiarity(), 3),
+    }
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()

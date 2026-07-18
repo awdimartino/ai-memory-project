@@ -26,6 +26,8 @@ from typing import Awaitable, Callable
 import config
 from core.prompts import (
     REFLECT_CUE,
+    build_persona_edit_system,
+    build_persona_edit_user,
     build_reachout_cue,
     build_reachout_system,
     build_reflect_system,
@@ -37,6 +39,21 @@ logger = logging.getLogger(__name__)
 # Key for the consolidation checkpoint in the MetaStore. Shared with bootstrap,
 # which reads it on startup to recover the unconsolidated tail.
 CONSOLIDATED_WATERMARK_KEY = "last_consolidated_msg_id"
+# Mari's own evolving self-description (the self-modifying persona slot), in the MetaStore.
+PERSONA_SELF_KEY = "persona_self"
+
+
+def familiarity_label(f: float) -> str:
+    """Human phrasing of the familiarity scalar (0..1), used to gate the persona edit."""
+    if f < 0.15:
+        return "a stranger you're only just starting to know"
+    if f < 0.40:
+        return "a new acquaintance"
+    if f < 0.70:
+        return "someone you're becoming familiar with"
+    if f < 0.90:
+        return "someone you know pretty well by now"
+    return "someone you're genuinely close to"
 
 
 def _humanize_away(seconds: float) -> str:
@@ -113,6 +130,7 @@ class Companion:
         try:
             recalled = await self.memory.recall(user_text)
             core = self.memory.core_memories()
+            persona = self.meta.get(PERSONA_SELF_KEY)
 
             # Emotion is autonomic (Tier-1): the user's message shifts mood, which
             # then colors this reply's tone via the system prompt.
@@ -124,7 +142,7 @@ class Companion:
 
             # Core facts are always injected; drop any recalled duplicates of them.
             extra = [content for content, _ in recalled if content not in core]
-            system = build_system(extra, mood_prompt, core=core)
+            system = build_system(extra, mood_prompt, core=core, persona=persona)
 
             messages = [{"role": "system", "content": system}]
             messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -158,7 +176,8 @@ class Companion:
         core = self.memory.core_memories()
         extra = [content for content, _ in recalled if content not in core]
         mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
-        system = build_reachout_system(extra, mood_prompt, core=core)
+        system = build_reachout_system(extra, mood_prompt, core=core,
+                                       persona=self.meta.get(PERSONA_SELF_KEY))
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -193,7 +212,8 @@ class Companion:
         extra = [content for content, _ in recalled if content not in core]
         mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
         recent = [t["content"] for t in self.thoughts.recent(5)]
-        system = build_reflect_system(extra, mood_prompt, recent, core=core)
+        system = build_reflect_system(extra, mood_prompt, recent, core=core,
+                                      persona=self.meta.get(PERSONA_SELF_KEY))
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -212,6 +232,35 @@ class Companion:
             dom = max(self.emotion.state, key=self.emotion.state.get)
         await asyncio.to_thread(self.thoughts.add, text, dom)
         logger.info("reflected: %s", text[:80])
+        return text
+
+    def familiarity(self) -> float:
+        """Relationship depth 0..1, from how much you two have talked (gates persona drift)."""
+        return min(1.0, self.store.message_count() / max(1, config.FAMILIARITY_MESSAGES))
+
+    async def edit_persona(self) -> str | None:
+        """Rewrite Mari's own self-description slot from her thoughts + core memories, gated by
+        familiarity. Runs during idle ticks; the new text colors later turns via build_system."""
+        current = self.meta.get(PERSONA_SELF_KEY) or ""
+        thoughts = [t["content"] for t in self.thoughts.recent(8)] if self.thoughts else []
+        core = self.memory.core_memories()
+        fam = familiarity_label(self.familiarity())
+
+        system = build_persona_edit_system(fam, config.PERSONA_MAX_CHARS)
+        user = build_persona_edit_user(current, thoughts, core)
+
+        async def _sink(_t):
+            pass
+
+        text, _ = await self.llm.stream(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}], _sink)
+        text = text.strip()
+        if not text or text.rstrip(".!").strip().upper() == "PASS":
+            logger.info("persona edit: no change")
+            return None
+        text = text[:config.PERSONA_MAX_CHARS].strip()  # hard cap so the slot stays small
+        await asyncio.to_thread(self.meta.set, PERSONA_SELF_KEY, text)
+        logger.info("persona updated: %s", text[:80])
         return text
 
     def _maybe_consolidate(self) -> None:

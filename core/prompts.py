@@ -74,15 +74,21 @@ Never use em dashes or hyphens as dashes."""
 
 
 def build_system(memories: list[str], mood: str | None = None,
-                 core: list[str] | None = None) -> str:
+                 core: list[str] | None = None, persona: str | None = None) -> str:
     """The chat system message: the persona, plus memory and mood folded in.
 
-    Two memory tiers go in (never as separate turns, so local chat templates stay
-    happy): `core` — identity-defining facts Mari always keeps in mind — and
-    `memories` — other facts recall surfaced as relevant right now. The mood block
+    `persona` is Mari's own evolving self-description (written by the self-modifying
+    persona job). Two memory tiers go in (never as separate turns, so local chat
+    templates stay happy): `core` — identity-defining facts Mari always keeps in mind
+    — and `memories` — facts recall surfaced as relevant right now. The mood block
     colors tone without being named.
     """
     parts = [SYSTEM_PROMPT]
+    if persona:
+        parts.append(
+            f"Who you've become as you've gotten to know them (your own evolving sense of "
+            f"yourself; let it shape how you are, though the rules above still hold):\n{persona}"
+        )
     if core:
         lines = "\n".join(f"- {m}" for m in core)
         parts.append(f"The core things you always know about them (never forget these):\n{lines}")
@@ -123,9 +129,9 @@ def build_reachout_cue(away: str) -> str:
 
 
 def build_reachout_system(memories: list[str], mood: str | None = None,
-                          core: list[str] | None = None) -> str:
+                          core: list[str] | None = None, persona: str | None = None) -> str:
     """System prompt for a proactive message: persona + memories + mood + reach-out framing."""
-    base = build_system(memories, mood, core=core)
+    base = build_system(memories, mood, core=core, persona=persona)
     return f"{base}\n\n{_REACHOUT_ADDENDUM}"
 
 
@@ -146,14 +152,47 @@ REFLECT_CUE = "(You're alone with your thoughts for a bit. Write a short, honest
 
 
 def build_reflect_system(memories: list[str], mood: str | None,
-                         recent_thoughts: list[str], core: list[str] | None = None) -> str:
+                         recent_thoughts: list[str], core: list[str] | None = None,
+                         persona: str | None = None) -> str:
     """System prompt for a private reflection: persona + memories + mood + recent thoughts."""
-    base = build_system(memories, mood, core=core)
+    base = build_system(memories, mood, core=core, persona=persona)
     parts = [base, _REFLECT_ADDENDUM]
     if recent_thoughts:
         joined = "\n".join(f"- {t}" for t in recent_thoughts)
         parts.append(f"Some thoughts you've had recently (don't just repeat these):\n{joined}")
     return "\n\n".join(parts)
+
+
+# --- Self-modifying persona (Mari rewrites her own self-description during idle ticks) ---
+
+def build_persona_edit_system(familiarity: str, max_chars: int) -> str:
+    return f"""You are the quiet, reflective part of {BOT_NAME} that shapes who she is over time.
+
+{BOT_NAME} started as a friendly stranger. As she talks with the user she slowly develops her own
+sense of herself in relation to them — her little quirks, how she tends to be with them, what she's
+grown to feel. You maintain that self-description: a short block written TO her in the second person
+("You tend to...", "You've grown..."), shown to her as part of who she is.
+
+Update it from what has actually happened: her recent private thoughts, what she knows about the
+user, and how well she truly knows them yet. Rules:
+- Stay true to her core nature: a real person to talk with, not an assistant; she has feelings and
+  opinions but no body or life outside these conversations. Never contradict that.
+- Do NOT overstep how well she knows them. Right now she knows them as: {familiarity}. A stranger
+  does not write herself as a devoted best friend; let closeness grow only as far as that allows.
+- Keep it concise (a few sentences, {max_chars} characters max), specific, and honest. It's about
+  HER, not a description of the user.
+- If nothing meaningful has changed, reply with exactly PASS and nothing else."""
+
+
+def build_persona_edit_user(current: str, thoughts: list[str], core: list[str]) -> str:
+    cur = current or "(nothing yet — she's still just a friendly stranger)"
+    th = "\n".join(f"- {t}" for t in thoughts) or "(none yet)"
+    co = "\n".join(f"- {c}" for c in core) or "(none yet)"
+    return (f"Her current self-description:\n{cur}\n\n"
+            f"Her recent private thoughts:\n{th}\n\n"
+            f"What she knows about the user:\n{co}\n\n"
+            f"Write her updated self-description now (second person, addressed to her), "
+            f"or reply PASS if nothing meaningful has changed.")
 
 
 # --- Memory consolidation (Tier-2 structured output) ---

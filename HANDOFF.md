@@ -74,6 +74,13 @@ The **brain foundation is done and live-verified.** In place:
   **self-reflection** (below), and **proactive reach-out** (below). A **busy guard** on `Companion`
   means jobs never fire mid-turn (idle reads 0 during a reply, even a slow generation). Started by
   the web app + REPL.
+- **Self-modifying persona (new 2026-07-19):** `PersonaEditJob` — during idle (min-messages + long
+  cooldown), `Companion.edit_persona()` rewrites a bot-owned self-description slot (`meta.persona_self`,
+  injected by `build_system` into chat/reach-out/reflect) from her **thought journal** + core memories,
+  written to herself in the second person. **Familiarity-gated:** a scalar from message count
+  (`FAMILIARITY_MESSAGES`) → a label the edit prompt must respect, so a stranger can't write herself
+  into a best friend. Capped (`PERSONA_MAX_CHARS`); can reply PASS for no change. Visible via REPL
+  `/persona` + `GET /persona`. (Live at familiarity 0.50: "…still getting to know him as a friendly stranger.")
 - **Self-reflection / private journal (new 2026-07-19):** `ReflectionJob` — while the user is away
   (`REFLECT_MIN_IDLE`, `REFLECT_COOLDOWN`), `Companion.reflect()` writes a short first-person private
   thought (schema **v5** `thoughts` table + `SqliteThoughtStore`) about how she's doing / the
@@ -107,7 +114,8 @@ python tests/test_core_memory.py        # offline core-memory flag/inject/cap (4
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
-python tests/test_tick.py               # offline tick-loop scheduler + jobs (reach-out, reflection) (16 cases)
+python tests/test_tick.py               # tick scheduler + jobs (reach-out/reflection/persona) + familiarity (21 cases)
+python scripts/stress_test.py           # LIVE whole-system stress + invariant checks
 python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
 python scripts/eval_extraction.py       # LIVE: memory-extraction quality (durable vs junk)
 python scripts/eval_conversation.py     # LIVE: repetition + backbone over scripted scenarios
@@ -277,12 +285,13 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
    idle + low energy (a bot-initiated sleep job) and reload on wake ("waking up…" state). Ties to
    the energy-budget idea; the model-lifecycle piece is the `lms load/unload` we've been driving by hand.
 6. ✅ ~~Core memory~~ (done 2026-07-19 — `core` flag on `memories`, extractor-marked, always injected,
-   brain re-rank cap, v6). **Self-modifying persona** remains: a reflection tick job that rewrites
-   Mari's own self-description slot in the persona, reading her **thought journal** (v5) as input,
-   gated by familiarity. That's the piece that also resolves the "has feelings" vs "no body" tension.
-7. **Familiarity meter** (V2_PLAN §2.9) — a slow persistent scalar that gates how far the self-modifying
-   persona may drift; the natural companion to #6.
-8. Then the tool framework (pillar 4): web search, Navidrome playlists, reminders, reminisce (which
-   reads the v5 thought journal + episodic log).
+   brain re-rank cap, v6).
+7. ✅ ~~Self-modifying persona + familiarity meter~~ (done 2026-07-19 — `PersonaEditJob` rewrites the
+   `meta.persona_self` slot from the thought journal, gated by a message-count familiarity scalar).
+   **The brain is now feature-complete** for the planned v2 pillars.
+8. **Sleep / standby (§2.8)** — bot-initiated tick job: unload the LLM from VRAM when idle + low
+   energy, reload on wake ("waking up…" state). The remaining hardware/lifecycle piece.
+9. **Tool framework (pillar 4)** — web search, Navidrome playlists, reminders, and **reminisce**
+   (reads the v5 thought journal + episodic log). Then voice.
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.

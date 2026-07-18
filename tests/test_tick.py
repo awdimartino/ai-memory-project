@@ -18,6 +18,7 @@ from core.tick import (
     IdleConsolidationJob,
     Job,
     MoodDriftJob,
+    PersonaEditJob,
     ReachOutJob,
     ReflectionJob,
     TickLoop,
@@ -286,6 +287,79 @@ async def reflection_fires_and_sets_cooldown():
     await job.run()
     assert comp.reflect_calls == 1
     assert comp.meta.get_json("last_reflect_at") == 1_000_000.0
+
+
+class _Store:
+    def __init__(self, n):
+        self.n = n
+
+    def message_count(self):
+        return self.n
+
+
+class PersonaCompanion:
+    def __init__(self, idle, messages):
+        self._idle = idle
+        self.meta = InMemoryMeta()
+        self.store = _Store(messages)
+        self.edit_calls = 0
+
+    def idle_seconds(self):
+        return self._idle
+
+    async def edit_persona(self):
+        self.edit_calls += 1
+        return "you've grown fond of them"
+
+
+def _persona_job(comp, clock):
+    return PersonaEditJob(comp, interval=0.0, min_idle=300.0, cooldown=3600.0,
+                          min_messages=20, clock=clock)
+
+
+@case
+async def persona_edit_gated_by_idle():
+    comp = PersonaCompanion(idle=60.0, messages=100)   # not idle enough
+    await _persona_job(comp, WallClock()).run()
+    assert comp.edit_calls == 0
+
+
+@case
+async def persona_edit_gated_by_min_messages():
+    comp = PersonaCompanion(idle=1000.0, messages=5)   # too early in the relationship
+    await _persona_job(comp, WallClock()).run()
+    assert comp.edit_calls == 0
+
+
+@case
+async def persona_edit_gated_by_cooldown():
+    comp = PersonaCompanion(idle=1000.0, messages=100)
+    comp.meta.set_json("last_persona_edit_at", 1_000_000.0 - 60.0)  # edited 60s ago (< 3600)
+    await _persona_job(comp, WallClock()).run()
+    assert comp.edit_calls == 0
+
+
+@case
+async def persona_edit_fires_and_sets_cooldown():
+    comp = PersonaCompanion(idle=1000.0, messages=100)
+    await _persona_job(comp, WallClock()).run()
+    assert comp.edit_calls == 1
+    assert comp.meta.get_json("last_persona_edit_at") == 1_000_000.0
+
+
+@case
+async def familiarity_scales_with_messages():
+    import config
+    from core.companion import Companion, familiarity_label
+    config.FAMILIARITY_MESSAGES = 400
+    c = Companion(llm=None, store=_Store(0), memory=None, meta=None, session_id=1)
+    assert c.familiarity() == 0.0
+    c.store.n = 200
+    assert abs(c.familiarity() - 0.5) < 1e-9
+    c.store.n = 100000
+    assert c.familiarity() == 1.0  # capped
+    assert "stranger" in familiarity_label(0.0)
+    assert "close" in familiarity_label(0.95)
 
 
 @case

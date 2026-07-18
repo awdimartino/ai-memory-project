@@ -115,6 +115,18 @@ REFLECT_ENABLED = os.environ.get("REFLECT_ENABLED", "true").lower() in ("1", "tr
 REFLECT_MIN_IDLE = float(os.environ.get("REFLECT_MIN_IDLE", "120"))      # think after 2 min away
 REFLECT_COOLDOWN = float(os.environ.get("REFLECT_COOLDOWN", "600"))      # at most every ~10 min
 
+# Self-modifying persona: during idle ticks Mari rewrites a bot-owned "who you've become"
+# slot in her system prompt, reading her thought journal + core memories. How far it may
+# drift is gated by a familiarity meter (derived from message count) so a stranger doesn't
+# rewrite herself into a close friend on day one. Slow and rare (a personality shifts gradually).
+PERSONA_EDIT_ENABLED = os.environ.get("PERSONA_EDIT_ENABLED", "true").lower() in ("1", "true", "yes")
+PERSONA_EDIT_MIN_IDLE = float(os.environ.get("PERSONA_EDIT_MIN_IDLE", "300"))     # 5 min away
+PERSONA_EDIT_COOLDOWN = float(os.environ.get("PERSONA_EDIT_COOLDOWN", "3600"))    # at most hourly
+PERSONA_MIN_MESSAGES = int(os.environ.get("PERSONA_MIN_MESSAGES", "20"))          # need some history first
+PERSONA_MAX_CHARS = int(os.environ.get("PERSONA_MAX_CHARS", "600"))               # keep the slot small
+# Messages of interaction to reach full familiarity (stranger -> close friend), roughly.
+FAMILIARITY_MESSAGES = int(os.environ.get("FAMILIARITY_MESSAGES", "400"))
+
 # Web server.
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
