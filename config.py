@@ -143,6 +143,11 @@ LMS_PATH = os.environ.get("LMS_PATH", "lms")                           # LM Stud
 # Persisted like mood so they survive restarts. Rise rates / weights live in core/drives.py.
 DRIVES_ENABLED = os.environ.get("DRIVES_ENABLED", "true").lower() in ("1", "true", "yes")
 DRIVE_AWAY_AFTER = float(os.environ.get("DRIVE_AWAY_AFTER", "90"))  # idle (s) before drives rise
+# Behavior thresholds: reach-out fires when `connection` crosses this, reflection when
+# `restlessness` does (both still gated by their persisted cooldowns as a hard floor).
+# 0.6 connection ≈ 15 min neutral / sooner after a warm or sad chat; 0.4 restlessness ≈ 5 min.
+DRIVE_CONNECTION_THRESHOLD = float(os.environ.get("DRIVE_CONNECTION_THRESHOLD", "0.6"))
+DRIVE_RESTLESSNESS_THRESHOLD = float(os.environ.get("DRIVE_RESTLESSNESS_THRESHOLD", "0.4"))
 
 # Tools (pillar 4): native function-calling. When enabled, the chat turn streams
 # through a tool loop so Mari can call registered tools (clock, reminisce, more

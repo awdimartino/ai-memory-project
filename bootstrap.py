@@ -123,7 +123,8 @@ async def build() -> tuple[Companion, str]:
             jobs.append(DriveDriftJob(companion, drives, config.TICK_INTERVAL))
         if config.REFLECT_ENABLED:
             jobs.append(ReflectionJob(companion, config.TICK_INTERVAL,
-                                      config.REFLECT_MIN_IDLE, config.REFLECT_COOLDOWN))
+                                      config.REFLECT_MIN_IDLE, config.REFLECT_COOLDOWN,
+                                      drives=drives, threshold=config.DRIVE_RESTLESSNESS_THRESHOLD))
         if config.PERSONA_EDIT_ENABLED:
             jobs.append(PersonaEditJob(companion, config.TICK_INTERVAL,
                                        config.PERSONA_EDIT_MIN_IDLE, config.PERSONA_EDIT_COOLDOWN,

@@ -52,7 +52,8 @@ async def _startup() -> None:
         if config.REACHOUT_ENABLED:
             companion.tick.register(ReachOutJob(
                 companion, _broadcast, config.TICK_INTERVAL,
-                config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN))
+                config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN,
+                drives=companion.drives, threshold=config.DRIVE_CONNECTION_THRESHOLD))
         companion.tick.start()  # proactivity heartbeat
     logger.info("web ready at http://%s:%d (model=%s)", config.WEB_HOST, config.WEB_PORT, model)
 

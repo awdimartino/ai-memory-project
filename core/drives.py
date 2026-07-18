@@ -43,13 +43,14 @@ BASELINE = {
     "restlessness": 0.0,
 }
 
-# Rise per hour of continuous idle, under neutral mood. Chosen so that — with no mood
-# modulation — each drive crosses its notional threshold near the current idle gate for
-# the behavior it will eventually drive: restlessness ~= reflection's 2-min gate,
-# connection ~= reach-out's 15-min gate. Defaults; tune them from the panel.
+# Rise per hour of continuous idle, under neutral mood. Tuned against the first live demo
+# so each drive has a usable *gradient* up to and a little past its threshold, rather than
+# pegging at the ceiling. connection ~0.6 at 15 min (≈ reach-out's gate, pulled earlier by a
+# warm/sad mood); restlessness ~0.4 at ~5 min and saturates ~12 min (the demo showed the
+# original 15/hr pegged it at 1.0 within 4 min — a step function, not a signal).
 RISE_PER_HOUR = {
     "connection": 2.4,     # ~0.6 after 15 min idle
-    "restlessness": 15.0,  # ~0.5 after 2 min idle
+    "restlessness": 5.0,   # ~0.4 after 5 min idle, saturates ~12 min
 }
 
 # Fraction pulled back toward baseline per update while the user is present (idle below

@@ -78,12 +78,17 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   (flushes the pending buffer after a while idle), **self-reflection**, **proactive reach-out**,
   **persona edit**, and **sleep**. A **busy guard** on `Companion` means jobs never fire mid-turn
   (idle reads 0 during a reply, even a slow generation).
-- **Internal drives (multi-drive proactivity, arc A1 — "observe first"):** `core/drives.py`
-  `DriveManager` holds slow-integrating scalars — **connection** and **restlessness** — that rise while
-  you're away (connection sped by warmth/melancholy, slowed by irritation; restlessness sped by boredom),
-  relax while present, and are relieved on contact. Integrated by **elapsed wall-time** (not tick count) and
-  **persisted** like mood. Surfaced read-only in the status panel; **no behavior gates on them yet** — the
-  generalization of the fixed idle gates, landed but not yet load-bearing (see §8-A).
+- **Internal drives (multi-drive proactivity, arc A1):** `core/drives.py` `DriveManager` holds
+  slow-integrating scalars — **connection** and **restlessness** — that rise while you're away (connection
+  sped by warmth/melancholy, slowed by irritation; restlessness sped by boredom), relax while present, and
+  are relieved on contact. Integrated by **elapsed wall-time** (not tick count) and **persisted** like mood;
+  surfaced in the status panel. **Now load-bearing:** `ReachOutJob` fires when **connection ≥
+  `DRIVE_CONNECTION_THRESHOLD`** (0.6) and `ReflectionJob` when **restlessness ≥
+  `DRIVE_RESTLESSNESS_THRESHOLD`** (0.4), each discharging its drive on fire; the persisted cooldowns stay a
+  hard floor, and both jobs **fall back to the old idle gate** when drives are disabled. So *how she feels*
+  now sets *when* she reaches out — a warm/sad chat pulls reach-out earlier than a throwaway one. Sleep still
+  runs on its idle timer (energy/body-cycles is the next slice, §8-A). Tunable via the two threshold env vars
+  + the rise rates in `core/drives.py`; watch `scripts/drive_demo.py` or the panel to calibrate.
 - **Sleep / standby (§2.8):** after a long idle (`SLEEP_AFTER_IDLE`, default 30 min)
   `SleepJob` calls `Companion.sleep()` — flush pending, then **unload the LLM from VRAM** via the `lms`
   CLI (`infrastructure/model_manager.py`) to free the machine. The heartbeat keeps ticking (mood still
@@ -96,13 +101,15 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   second person. **Familiarity-gated:** a scalar from message count (`FAMILIARITY_MESSAGES`) → a label
   the edit prompt must respect, so a stranger can't write herself into a best friend. Capped
   (`PERSONA_MAX_CHARS`); can reply PASS. Visible via REPL `/persona` + `GET /persona`.
-- **Self-reflection / private journal:** `ReflectionJob` — while the user is away
-  (`REFLECT_MIN_IDLE`, `REFLECT_COOLDOWN`), `Companion.reflect()` writes a short first-person private
+- **Self-reflection / private journal:** `ReflectionJob` — gated on the **`restlessness`
+  drive** (crosses `DRIVE_RESTLESSNESS_THRESHOLD`; falls back to `REFLECT_MIN_IDLE` if drives are off, with
+  `REFLECT_COOLDOWN` as a floor), `Companion.reflect()` writes a short first-person private
   thought (schema **v5** `thoughts` table + `SqliteThoughtStore`) about how she's doing, colored by and
   tagged with her current mood, avoiding recent repeats. Never shown in chat; viewable via REPL
   `/thoughts` or `GET /thoughts`. This is the substrate for reminisce and the self-modifying persona.
-- **Proactive reach-out (pillar 3 payoff):** `ReachOutJob` — after the user is idle
-  past `REACHOUT_MIN_IDLE` (+ a persisted `REACHOUT_COOLDOWN` so it can't nag), `Companion.reach_out()`
+- **Proactive reach-out (pillar 3 payoff):** `ReachOutJob` — now gated on the **`connection`
+  drive** (crosses `DRIVE_CONNECTION_THRESHOLD`; falls back to `REACHOUT_MIN_IDLE` if drives are off) with a
+  persisted `REACHOUT_COOLDOWN` as a hard floor so it can't nag, `Companion.reach_out()`
   generates an unprompted message from recent context + mood and **pushes it over the WebSocket**
   (`{type:"proactive"}` → bot bubble; also logged so it replays on reconnect). Mari can reply **PASS**
   to stay quiet, and she's given **how long you've been away** (she can't see a clock) so the call is
@@ -154,6 +161,7 @@ python tests/test_tools.py              # offline tool framework: registry + str
 python scripts/tool_probe.py            # LIVE: native tool-calling reliability (probe, per-case pass rate)
 python scripts/tool_smoke.py            # LIVE: tools end-to-end through the real persona (time + reminisce + no-tool)
 python scripts/reminisce_smoke.py       # LIVE: reminisce recalls a past episode out of the context window
+python scripts/drive_demo.py            # LIVE: drives observation harness — chat + away-gaps trigger reflection/reach-out
 python scripts/stress_test.py           # LIVE whole-system stress + invariant checks
 python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
 python scripts/eval_extraction.py       # LIVE: memory-extraction quality (durable vs junk)
@@ -274,23 +282,19 @@ brain, per the guiding principle.**
 ### A. Autonomous inner life ★ (recommended next arc)
 The three the user liked from the GitHub-companion research. Together they replace the single idle-timer
 with something that feels alive, and they make self-wake + autonomous sleep coherent.
-- **★ Multi-drive proactivity** — replace the one idle gate with several slow-drifting internal drives
-  (desire-to-connect, restlessness, mood, anxiety, busyness) that cross thresholds to trigger behavior.
-  Deterministic and more lifelike; **generalizes the tick gates we already have** — the best starting point.
-  - **Framework landed (2026-07-18, "observe first" slice):** `core/drives.py` `DriveManager` ships two
-    drives — **connection** (urge to reach out; sped by warmth/melancholy, slowed by irritation) and
-    **restlessness** (mental idleness → reflection; sped by boredom). They integrate by **elapsed wall-time**
-    (deterministic, `TICK_INTERVAL`-independent), are **persisted** like mood, rise while away / relax while
-    present, and are relieved on contact (`Companion.on_user_message`). A `DriveDriftJob` updates them every
-    tick; they're surfaced **read-only** in `GET /status` + a "Drives" panel section. **Behaviors are NOT yet
-    gated on them** — reach-out/reflection/sleep stay on their idle gates until the drives prove out. Live-verified
-    end-to-end (mood modulation active). **Observation from the first live demo (2 example conversations):**
-    `connection` has a healthy gradient (0.22 → 0.66/0.83 → 1.00 over 5/15/25 min) and mood modulation is real —
-    a warm/sad chat drove it to **0.83** at 15 min vs **0.66** after a neutral chat (melancholy 0.35 vs 0.10, same
-    gap). **But `restlessness` saturates too fast** — pegs at 1.00 within ~4–5 min (default rise 15/hr → ceiling in
-    4 min), so it's a step function, not a graded signal. **Next step:** drop restlessness's `RISE_PER_HOUR` ~5–8×
-    (in `core/drives.py`) so its level is meaningful, watch the panel over real use, then flip reach-out onto
-    `connection` and reflection onto `restlessness` (a one-line gate change per job; `discharge()` already exists).
+- **★ Multi-drive proactivity — BUILT & WIRED (2026-07-18).** Replaced the one idle gate with slow-drifting
+  internal drives that cross thresholds to trigger behavior. `core/drives.py` `DriveManager` ships two drives —
+  **connection** (urge to reach out; sped by warmth/melancholy, slowed by irritation) and **restlessness**
+  (mental idleness → reflection; sped by boredom). They integrate by **elapsed wall-time** (deterministic,
+  `TICK_INTERVAL`-independent), are **persisted** like mood, rise while away / relax while present, are relieved
+  on contact (`Companion.on_user_message`), and are surfaced in `GET /status` + a "Drives" panel section. A
+  `DriveDriftJob` updates them each tick. **Reach-out is gated on `connection`, reflection on `restlessness`**
+  (thresholds `DRIVE_CONNECTION_THRESHOLD` 0.6 / `DRIVE_RESTLESSNESS_THRESHOLD` 0.4; discharge on fire;
+  cooldowns as a hard floor; idle-gate fallback when drives are off). Tuned from the first live demo:
+  `connection` has a healthy gradient (0.66 neutral vs 0.83 warm/sad at 15 min — mood modulation is real);
+  restlessness rise cut 15→5/hr so it grades instead of pegging at 1.0 in 4 min. `scripts/drive_demo.py` is a
+  live observation harness. **Remaining in this item:** the extra drives (mood/anxiety/busyness) are optional;
+  practical tuning of the thresholds/rates is a user-testing task.
 - **★ Energy / body cycles** — a fatigue/energy stat that biases toward rest, giving *autonomous* sleep an
   internal logic instead of a fixed 30-min timer.
 - **★ Nightly / scheduled deep consolidation** — an "end of day" job that summarizes the day into an episodic

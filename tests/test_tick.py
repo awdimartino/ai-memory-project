@@ -305,6 +305,62 @@ async def reach_out_decline_still_sets_cooldown():
     assert comp.meta.get_json("last_reachout_at") == 1_000_000.0, "cooldown set even on decline"
 
 
+class FakeDriveState:
+    """Minimal drive stand-in for gating tests: get() reads a level, discharge() records + zeroes."""
+
+    def __init__(self, **vals):
+        self.vals = dict(vals)
+        self.discharged = []
+
+    def get(self, name):
+        return self.vals.get(name, 0.0)
+
+    async def discharge(self, name):
+        self.discharged.append(name)
+        self.vals[name] = 0.0
+
+
+def _reach_drive_job(comp, drv, pushes, threshold=0.6):
+    async def notify(m):
+        pushes.append(m)
+    return ReachOutJob(comp, notify, interval=0.0, min_idle=900.0, cooldown=7200.0,
+                       drives=drv, threshold=threshold, clock=WallClock())
+
+
+@case
+async def reach_out_gated_by_low_connection_drive():
+    # idle is high, but the connection drive is below threshold -> no reach-out (drive gates now)
+    comp = ReachCompanion(idle=1000.0, reach_result="hey")
+    drv = FakeDriveState(connection=0.3)
+    pushes = []
+    await _reach_drive_job(comp, drv, pushes).run()
+    assert comp.reach_calls == 0 and pushes == [], "low connection should not reach out"
+    assert drv.discharged == []
+
+
+@case
+async def reach_out_fires_on_high_connection_and_discharges():
+    # idle is LOW (would fail the old gate) but connection is high -> the drive is the gate
+    comp = ReachCompanion(idle=5.0, reach_result="hey, was thinking about you")
+    drv = FakeDriveState(connection=0.8)
+    pushes = []
+    await _reach_drive_job(comp, drv, pushes).run()
+    assert comp.reach_calls == 1
+    assert pushes == [{"type": "proactive", "content": "hey, was thinking about you"}]
+    assert drv.discharged == ["connection"], "firing must discharge the drive"
+    assert comp.meta.get_json("last_reachout_at") == 1_000_000.0
+
+
+@case
+async def reach_out_drive_still_respects_cooldown():
+    comp = ReachCompanion(idle=1000.0, reach_result="hey")
+    comp.meta.set_json("last_reachout_at", 1_000_000.0 - 100.0)  # 100s ago (< 7200)
+    drv = FakeDriveState(connection=0.9)
+    pushes = []
+    await _reach_drive_job(comp, drv, pushes).run()
+    assert comp.reach_calls == 0 and drv.discharged == [], "cooldown is a hard floor over the drive"
+
+
 class ReflectCompanion:
     def __init__(self, idle, asleep=False):
         self._idle = idle
@@ -346,6 +402,28 @@ async def reflection_fires_and_sets_cooldown():
     job = ReflectionJob(comp, interval=0.0, min_idle=120.0, cooldown=600.0, clock=WallClock())
     await job.run()
     assert comp.reflect_calls == 1
+    assert comp.meta.get_json("last_reflect_at") == 1_000_000.0
+
+
+@case
+async def reflection_gated_by_low_restlessness_drive():
+    comp = ReflectCompanion(idle=1000.0)               # idle high, but drive low
+    drv = FakeDriveState(restlessness=0.2)
+    job = ReflectionJob(comp, interval=0.0, min_idle=120.0, cooldown=600.0,
+                        drives=drv, threshold=0.4, clock=WallClock())
+    await job.run()
+    assert comp.reflect_calls == 0 and drv.discharged == []
+
+
+@case
+async def reflection_fires_on_high_restlessness_and_discharges():
+    comp = ReflectCompanion(idle=5.0)                  # idle low; the drive is the gate
+    drv = FakeDriveState(restlessness=0.6)
+    job = ReflectionJob(comp, interval=0.0, min_idle=120.0, cooldown=600.0,
+                        drives=drv, threshold=0.4, clock=WallClock())
+    await job.run()
+    assert comp.reflect_calls == 1
+    assert drv.discharged == ["restlessness"]
     assert comp.meta.get_json("last_reflect_at") == 1_000_000.0
 
 

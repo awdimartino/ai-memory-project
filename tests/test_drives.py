@@ -68,10 +68,10 @@ async def connection_rises_while_away():
 async def restlessness_rises_faster_than_connection():
     clk = Clock()
     mgr, meta, conn, path = _mgr(clk)
-    clk.t += 120  # 2 min idle
-    state = await mgr.update(idle_seconds=120)
+    clk.t += 300  # 5 min idle
+    state = await mgr.update(idle_seconds=300)
     assert state["restlessness"] > state["connection"], state
-    assert 0.4 < state["restlessness"] < 0.6, state["restlessness"]  # ~0.5 at 2 min
+    assert 0.35 < state["restlessness"] < 0.5, state["restlessness"]  # ~0.42 at 5 min
     conn.close(); os.remove(path)
 
 

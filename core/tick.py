@@ -134,35 +134,50 @@ LAST_REACHOUT_KEY = "last_reachout_at"
 
 
 class ReachOutJob(Job):
-    """Once the user has been away a while, maybe send an unprompted message.
+    """Once the urge to connect is strong enough, maybe send an unprompted message.
 
-    A cheap gate first (idle >= min_idle, and a persisted cooldown so attempts can't
-    hammer — restart-safe via wall clock), then one model call via `companion.reach_out()`,
-    which may decline. The attempt timestamp is written *before* generating, so the
-    cooldown holds even on a decline and two reach-outs can't overlap. `notify` pushes
-    the message to the surface (the web app's WebSocket broadcaster).
+    Gated on the **`connection` drive** (multi-drive proactivity): the drive integrates how
+    long the user's been away *and* how she feels — a warm or sad conversation makes her miss
+    them faster than a throwaway one — so this fires sooner then, later otherwise. The drive
+    resets to baseline on contact, so it inherently can't cross mid-conversation. When drives
+    are disabled it falls back to the old idle gate (`idle >= min_idle`). The persisted
+    wall-clock cooldown is a hard floor either way, so she can't nag even if the drive spikes.
+
+    The attempt marks the cooldown *and* discharges the drive **before** generating, so a
+    decline or a slow generation can't start a second reach-out. `companion.reach_out()` may
+    still decline (PASS). `notify` pushes the message to the surface (the WebSocket broadcaster).
     """
     name = "reach_out"
 
     def __init__(self, companion, notify, interval: float, min_idle: float,
-                 cooldown: float, clock=time.time):
+                 cooldown: float, drives=None, threshold: float = 0.6, clock=time.time):
         self.companion = companion
         self.notify = notify
         self.interval = interval
         self.min_idle = min_idle
         self.cooldown = cooldown
+        self.drives = drives
+        self.threshold = threshold
         self.clock = clock
 
+    def _wants_to(self) -> bool:
+        """Drive threshold when drives are on; else the old idle gate (graceful fallback)."""
+        if self.drives is not None:
+            return self.drives.get("connection") >= self.threshold
+        return self.companion.idle_seconds() >= self.min_idle
+
     async def run(self) -> None:
-        if self.companion.is_asleep() or self.companion.idle_seconds() < self.min_idle:
+        if self.companion.is_asleep() or not self._wants_to():
             return
         now = self.clock()
         last = self.companion.meta.get_json(LAST_REACHOUT_KEY, 0) or 0
         if now - last < self.cooldown:
             return
-        # Mark the attempt before generating: enforces the cooldown even if she declines,
-        # and stops a slow generation from letting the next tick start a second reach-out.
+        # Mark the attempt (cooldown + drive discharge) before generating: enforces the
+        # cooldown even on a decline, and stops a slow generation from starting a second one.
         await asyncio.to_thread(self.companion.meta.set_json, LAST_REACHOUT_KEY, now)
+        if self.drives is not None:
+            await self.drives.discharge("connection")
         message = await self.companion.reach_out()
         if message:
             await self.notify({"type": "proactive", "content": message})
@@ -174,28 +189,40 @@ LAST_REFLECT_KEY = "last_reflect_at"
 class ReflectionJob(Job):
     """While the user is away, have Mari write a short private thought to her journal.
 
-    Same gate shape as reach-out (idle >= min_idle, persisted wall-clock cooldown, mark
-    the attempt before generating), but internal: nothing is pushed to the user, the
-    thought is just stored via `companion.reflect()`.
+    Gated on the **`restlessness` drive** (mental idleness) — same shape as reach-out but
+    internal: nothing is pushed to the user, the thought is just stored via
+    `companion.reflect()`. Falls back to the idle gate when drives are off; the persisted
+    cooldown is a hard floor. A reflection only *partly* discharges restlessness (she can
+    still be restless), so she may journal a few times over a long absence.
     """
     name = "reflection"
 
     def __init__(self, companion, interval: float, min_idle: float,
-                 cooldown: float, clock=time.time):
+                 cooldown: float, drives=None, threshold: float = 0.4, clock=time.time):
         self.companion = companion
         self.interval = interval
         self.min_idle = min_idle
         self.cooldown = cooldown
+        self.drives = drives
+        self.threshold = threshold
         self.clock = clock
 
+    def _wants_to(self) -> bool:
+        """Drive threshold when drives are on; else the old idle gate (graceful fallback)."""
+        if self.drives is not None:
+            return self.drives.get("restlessness") >= self.threshold
+        return self.companion.idle_seconds() >= self.min_idle
+
     async def run(self) -> None:
-        if self.companion.is_asleep() or self.companion.idle_seconds() < self.min_idle:
+        if self.companion.is_asleep() or not self._wants_to():
             return
         now = self.clock()
         last = self.companion.meta.get_json(LAST_REFLECT_KEY, 0) or 0
         if now - last < self.cooldown:
             return
         await asyncio.to_thread(self.companion.meta.set_json, LAST_REFLECT_KEY, now)
+        if self.drives is not None:
+            await self.drives.discharge("restlessness")
         await self.companion.reflect()
 
 
