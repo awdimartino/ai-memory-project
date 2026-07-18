@@ -1,43 +1,37 @@
-from datetime import datetime, timedelta
-
 from core.companion import Companion
 from core.tick_system import TickSystem
-import threading
-from concurrent.futures import ThreadPoolExecutor
 
-class ChatLoop():
-    """Responsible for managing the main chat loop and tick system"""
+
+class ChatLoop:
+    """Runs the main chat REPL and coordinates with the background tick system."""
+
     def __init__(self, companion: Companion, tick_system: TickSystem):
         self.companion = companion
         self.tick_system = tick_system
 
     def start(self):
-        """Main loop for chatting with the user, managing tick system, and synchronizing access to shared resources."""        
-        # Initialize background tick system
+        """Main loop: read user input, respond, then classify memories."""
         self.tick_system.start()
-        executor = ThreadPoolExecutor(max_workers=2)
 
         while True:
-            # Check for existing conversation or start a new one
-            conversation = self.companion.conversation_manager.check_conversation()
-            if not conversation:
-                conversation = self.companion.conversation_manager.start_conversation()
+            self.companion.ensure_conversation()
 
-            # Get user input
-            query = input("You: ")
-            # Lock for response
+            try:
+                query = input("You: ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nbye!")
+                self.companion.flush_pending_classification()
+                self.tick_system.stop()
+                break
+
+            if not query.strip():
+                continue
+
+            # Hold the tick lock so a background tick can't interleave the turn.
             with self.tick_system.lock:
-                user_message, bot_message = self.companion.respond(query)
+                self.companion.respond(query)
 
-            # Classify the memories asynchronously
-            # TODO: CHANGE THIS TO RUN LESS FREQUENTLY
-            # Conversation context can be relied on more
-            executor.submit(
-                self.companion.memory_manager.classify_memories,
-                user_message,
-                bot_message,
-                conversation
-
-            )
-
-
+            # Classification runs in batches (config.CLASSIFY_BATCH_SIZE), not
+            # every turn — the active conversation already stays in the response
+            # prompt's context window, so per-turn extraction is redundant.
+            self.companion.maybe_classify()

@@ -1,17 +1,22 @@
+import logging
+
+import infrastructure.config as config
+from core.interfaces import MemoryStoreProtocol
+from core.models import MemoryRecord
 from core.prompt_builder import PromptBuilder
-from infrastructure import embedder
-from infrastructure import memory_store
-from infrastructure.database import DatabaseConnection
+from infrastructure.embedder import Embedder
 from infrastructure.llm_client import LLMClient
-from core.models import MemoryRecord 
+
+logger = logging.getLogger(__name__)
+
 
 class MemoryManager:
-    """Responsible for interfacing with the memory database"""
-    def __init__(self, memory_store: memory_store.MemoryStore, embedder: embedder.Embedder, llm_client: LLMClient, prompt_builder: PromptBuilder):
+    """Coordinates the memory store, the embedder, and the LLM classifier."""
+
+    def __init__(self, memory_store: MemoryStoreProtocol, embedder: Embedder, llm_client: LLMClient):
         self.memory_store = memory_store
         self.embedder = embedder
         self.llm_client = llm_client
-        self.prompt_builder = prompt_builder
         self.memory_store.setup()
 
     def save_memory(self, memory):
@@ -21,31 +26,41 @@ class MemoryManager:
     def retrieve_memories(self, query, limit=5):
         """Retrieve relevant memories based on a query."""
         return self.memory_store.fetch_memories(self.embedder.get_embedding(query), limit=limit)
-    
-    def memory_exists(self, query, threshold=0.92):
+
+    def memory_exists(self, query, threshold=config.MEMORY_DEDUP_THRESHOLD):
         """Check if a similar memory already exists based on the query."""
         return self.memory_store.memory_exists(self.embedder.get_embedding(query), threshold=threshold)
-    
-    def classify_memories(self, user_message, bot_message, conversation):
-        """Classify a user query to determine if it should create a new memory or fetch existing ones."""
-        
-        messages = self.prompt_builder.build_classify_prompt(user_message.content, bot_message.content)
-        print("TESTING")
-        memories = self.llm_client.memory_classification(messages=messages)
-        print(memories)
+
+    def classify_memories(self, messages, conversation):
+        """Extract long-term memories from a batch of recent messages and store the new ones."""
+        if not messages:
+            return []
+
+        prompt = PromptBuilder.build_classify_prompt(messages)
+        memories = self.llm_client.memory_classification(messages=prompt)
         if not memories:
             return []
-        
+
+        # Provenance points at the last message in the classified batch.
+        origin_id = str(messages[-1].id) if messages[-1].id is not None else None
+
+        saved = []
         for memory in memories:
-            print(f"Saving {memory}")
+            if self.memory_exists(memory["content"]):
+                logger.debug("Skipping duplicate memory: %s", memory["content"])
+                continue
+
             memory_record = MemoryRecord(
                 content=memory["content"],
                 embedding=self.embedder.get_embedding(memory["content"]),
                 category=memory["category"],
                 origin_type="message",
-                origin_id=user_message.id,
+                origin_id=origin_id,
                 conversation_id=conversation.id,
-                emotion_snapshot={}
+                emotion_snapshot={},
             )
-            print(f"Saving: {memory_record}")
             self.save_memory(memory_record)
+            saved.append(memory_record)
+            logger.debug("Saved memory: %s", memory["content"])
+
+        return saved

@@ -9,8 +9,8 @@ from core.companion import Companion
 from core.memory_manager import MemoryManager
 from core.conversation_manager import ConversationManager
 from core.emotion_manager import EmotionManager
-from core.prompt_builder import PromptBuilder
 from core.chat_loop import ChatLoop
+import logging
 import threading
 from openai import OpenAI as oai
 
@@ -21,7 +21,25 @@ client = oai(
         )
 
 
+def configure_logging():
+    """Keep the root/third-party loggers quiet; only the app's own loggers
+    ('core', 'infrastructure') follow DEBUG_MODE. Otherwise httpcore/httpx/
+    huggingface DEBUG spam floods the chat prompt."""
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    app_level = logging.DEBUG if config.DEBUG_MODE else logging.INFO
+    for name in ("core", "infrastructure"):
+        logging.getLogger(name).setLevel(app_level)
+    for noisy in ("httpcore", "httpx", "openai", "urllib3",
+                  "huggingface_hub", "transformers", "filelock"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
 def main():
+    configure_logging()
+
     # Create databae objects
     db = DatabaseConnection()
     memory_store = MemoryStore(db)
@@ -31,11 +49,8 @@ def main():
     embedder_instance = Embedder(client)
     llm_client = LLMClient(client)
 
-    # Create prompt builder
-    prompt_builder = PromptBuilder()
-
     # Create managers
-    memory_manager = MemoryManager(memory_store, embedder_instance, llm_client, prompt_builder)
+    memory_manager = MemoryManager(memory_store, embedder_instance, llm_client)
     conversation_manager = ConversationManager(conversation_store)
     emotion_manager = EmotionManager()
     
@@ -45,7 +60,6 @@ def main():
         memory_manager=memory_manager,
         conversation_manager=conversation_manager,
         emotion_manager=emotion_manager,
-        prompt_builder=prompt_builder
     )
 
     # Create the chat loop with the companion and tick system

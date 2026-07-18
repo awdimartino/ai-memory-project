@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
 from infrastructure import conversation_store
-from infrastructure.database import DatabaseConnection
 from core.models import ConversationRecord, MessageRecord
 
 class ConversationManager:
@@ -11,10 +10,14 @@ class ConversationManager:
         self.conversation_store = conversation_store
         self.conversation_store.setup_conversations()
         self.conversation_store.setup_messages()
+        # Messages added since the last classification batch was flushed.
+        # In-memory only (see pending_batch()) — resets on restart.
+        self._pending_batch = []
 
     def start_conversation(self):
         """Start a new conversation and set it as the current conversation."""
-        self.current_conversation= self.conversation_store.new_conversation()
+        self.current_conversation = self.conversation_store.new_conversation()
+        self._pending_batch = []
         return self.current_conversation
 
     def check_conversation(self, timeout_hours=2):
@@ -66,8 +69,17 @@ class ConversationManager:
         else:
             self.current_conversation.bot_last_active = message_record.timestamp
 
-        self.conversation_store.store_message(self.current_conversation, message_record)
+        message_record.id = self.conversation_store.store_message(self.current_conversation, message_record)
+        self._pending_batch.append(message_record)
         return message_record
+
+    def pending_batch(self):
+        """Messages accumulated since the last classification flush."""
+        return list(self._pending_batch)
+
+    def clear_pending_batch(self):
+        """Mark the accumulated messages as classified."""
+        self._pending_batch = []
 
     def last_active(self):
         """Return the timestamp of the last activity in the current conversation."""

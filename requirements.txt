@@ -1,3 +1,5 @@
 openai
-pgvector
-psycopg2
+sqlite-vec
+transformers
+torch
+tqdm
