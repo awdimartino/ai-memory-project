@@ -42,6 +42,17 @@ MIGRATIONS = [
     """
     ALTER TABLE memories ADD COLUMN superseded_by INTEGER;
     """,
+    # v4 — durable scalar state (key/value). Seeds the consolidation watermark to
+    # the current max message id so an existing DB doesn't re-consolidate its whole
+    # backlog on first run with this feature (fresh DB: no messages => 0).
+    """
+    CREATE TABLE meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    INSERT INTO meta (key, value)
+    VALUES ('last_consolidated_msg_id', (SELECT COALESCE(MAX(id), 0) FROM messages));
+    """,
 ]
 
 

@@ -7,13 +7,14 @@ import logging
 import sys
 
 import config
-from core.companion import Companion
+from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
 from core.memory_manager import MemoryManager
 from infrastructure.conversation_store import SqliteConversationStore
 from infrastructure.db import connect
 from infrastructure.embedder import Embedder
 from infrastructure.llm_client import LLMClient
 from infrastructure.memory_store import SqliteMemoryStore
+from infrastructure.meta_store import SqliteMetaStore
 
 
 def configure_logging() -> None:
@@ -34,6 +35,7 @@ async def build() -> tuple[Companion, str]:
     conn = connect(config.DB_PATH)
     conv_store = SqliteConversationStore(conn)
     mem_store = SqliteMemoryStore(conn)
+    meta_store = SqliteMetaStore(conn)
 
     llm = LLMClient(config.BASE_URL, config.API_KEY, config.MODEL, config.TEMPERATURE,
                     no_think=config.NO_THINK)
@@ -48,12 +50,18 @@ async def build() -> tuple[Companion, str]:
     )
 
     history = conv_store.recent_messages(config.HISTORY_TURNS)
+    # Recover the unconsolidated tail: any messages logged after the last
+    # consolidation checkpoint (e.g. dropped by a hard kill before flush).
+    watermark = meta_store.get_int(CONSOLIDATED_WATERMARK_KEY, 0)
+    unconsolidated = conv_store.messages_after(watermark)
     session_id = conv_store.create_session()
-    companion = Companion(llm, conv_store, memory, session_id, history)
+    companion = Companion(llm, conv_store, memory, meta_store, session_id,
+                          history, unconsolidated)
 
     logging.getLogger("bootstrap").info(
-        "ready: chat=%s, brain=%s, embed=%s | %d logged msgs, %d memories, %d carried",
+        "ready: chat=%s, brain=%s, embed=%s | %d logged msgs, %d memories, "
+        "%d carried, %d unconsolidated recovered",
         model, brain_model, config.EMBED_MODEL,
-        conv_store.message_count(), mem_store.count(), len(history),
+        conv_store.message_count(), mem_store.count(), len(history), len(unconsolidated),
     )
     return companion, model

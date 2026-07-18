@@ -14,12 +14,19 @@ class ConversationStore(Protocol):
         """Start a new conversation session; return its id."""
         ...
 
-    def add_message(self, session_id: int, role: str, content: str) -> None:
-        """Append one message to a session."""
+    def add_message(self, session_id: int, role: str, content: str) -> int:
+        """Append one message to a session; return its row id."""
         ...
 
     def recent_messages(self, limit: int) -> list[dict]:
         """Return up to `limit` most recent messages (oldest first) as {role, content}."""
+        ...
+
+    def messages_after(self, msg_id: int) -> list[dict]:
+        """Return messages with id > msg_id (oldest first) as {id, role, content}.
+
+        Used on startup to recover the unconsolidated tail after a hard kill.
+        """
         ...
 
 
@@ -41,4 +48,16 @@ class MemoryStore(Protocol):
 
     def count(self) -> int:
         """Number of active memories."""
+        ...
+
+
+class MetaStore(Protocol):
+    """Persistence for durable scalar state (a small key/value table)."""
+
+    def get_int(self, key: str, default: int = 0) -> int:
+        """Read an integer value, or `default` if unset/unparseable."""
+        ...
+
+    def set_int(self, key: str, value: int) -> None:
+        """Write an integer value."""
         ...

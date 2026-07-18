@@ -26,20 +26,29 @@ class SqliteConversationStore:
             self.conn.commit()
             return cur.lastrowid
 
-    def add_message(self, session_id: int, role: str, content: str) -> None:
+    def add_message(self, session_id: int, role: str, content: str) -> int:
         with self._lock:
-            self.conn.execute(
+            cur = self.conn.execute(
                 "INSERT INTO messages (session_id, role, content, created_at) "
                 "VALUES (?, ?, ?, ?)",
                 (session_id, role, content, _utcnow()),
             )
             self.conn.commit()
+            return cur.lastrowid
 
     def recent_messages(self, limit: int) -> list[dict]:
         rows = self.conn.execute(
             "SELECT role, content FROM messages ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+
+    def messages_after(self, msg_id: int) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, role, content FROM messages WHERE id > ? ORDER BY id", (msg_id,)
+        ).fetchall()
+        return [
+            {"id": r["id"], "role": r["role"], "content": r["content"]} for r in rows
+        ]
 
     def message_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]

@@ -31,7 +31,7 @@ The **brain foundation is done and live-verified.** In place:
 - **Single async runtime.** FastAPI + WebSocket **web UI** and a terminal **REPL**,
   both wired through one composition root (`bootstrap.py`) and a `Companion` facade.
 - **Persistence** — SQLite with a versioned migration runner (`PRAGMA user_version`,
-  schema at **v3**). Conversation survives restarts.
+  schema at **v4**). Conversation survives restarts.
 - **Two memory tiers:**
   - *Episodic* — full verbatim conversation log (`messages` table).
   - *Semantic* — distilled, embedded facts (`memories` table).
@@ -41,6 +41,10 @@ The **brain foundation is done and live-verified.** In place:
 - **Consolidation (end of a context window, backgrounded):** extract durable facts,
   then a **lifecycle** decision per fact — duplicate (skip) / update (soft-delete old,
   keep history via `superseded_by`) / new. Never blocks chat.
+- **Crash-durable consolidation (new 2026-07-18):** a persisted watermark
+  (`meta.last_consolidated_msg_id`, via a reusable `MetaStore` KV table) checkpoints the
+  last consolidated message; on startup the unconsolidated tail is recovered from the
+  episodic log, so a hard kill no longer drops in-flight facts.
 - **Persona** — emergent "friendly stranger" (Mari) in one prompt module
   (`core/prompts.py`), tuned via a model bake-off + iteration.
 - **Concurrency safety** — a single model-access lock in `LLMClient` serializes ALL
@@ -61,6 +65,7 @@ python main.py          # same brain, terminal REPL
 
 python tests/test_memory_lifecycle.py   # offline, no LM Studio needed
 python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
+python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 ```
 
 Requires **LM Studio running with its local server on** (port 1234) and the chat +
@@ -131,9 +136,11 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 
 ## 7. Known limitations / open issues (honest)
 
-- **Hard kill loses the unconsolidated buffer** — `flush()` only runs on *graceful*
-  shutdown (web shutdown event / REPL `/exit`). A crash still drops in-flight messages.
-  Fix later: persist a "last consolidated message id" and resume on startup.
+- ~~**Hard kill loses the unconsolidated buffer**~~ **FIXED (2026-07-18).** A persisted
+  watermark (`meta.last_consolidated_msg_id`) checkpoints the last consolidated message
+  id; on startup the tail (`messages_after(watermark)`) is recovered into the buffer, so
+  a crash no longer drops in-flight facts. The watermark advances only on a *successful*
+  consolidation and only one runs at a time, so it stays contiguous. See V2_PLAN build log.
 - **Decisions are probabilistic** (temp 0.2, not deterministic) — occasional
   misclassification possible even with the tuned prompts.
 - Persona still occasionally slips a mild embodiment line ("i saw someone play it")
@@ -158,11 +165,12 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 
 ## 9. Next steps (in plan order)
 
-1. **Commit the uncommitted qwen3-8b/no-think change** (see §5).
-2. **Emotion (pillar 2)** — keep v1's RoBERTa GoEmotions → 6 mood channels approach,
-   but run it on **CPU** (the 9070XT can't use v1's CUDA path), **persist mood to DB**,
-   and run a **behavioral eval** (never done in v1). See V2_PLAN §2.3.
-3. Optionally first: close the **hard-kill durability** gap (§7).
+1. ✅ ~~Commit the qwen3-8b/no-think change~~ (landed as `73d517d`).
+2. ✅ ~~Close the **hard-kill durability** gap~~ (done 2026-07-18 — watermark + tail
+   recovery; §7). Reusable `MetaStore` (KV) added — emotion will use it for mood.
+3. **Emotion (pillar 2)** — keep v1's RoBERTa GoEmotions → 6 mood channels approach,
+   but run it on **CPU** (the 9070XT can't use v1's CUDA path), **persist mood to DB**
+   (via the new `MetaStore`), and run a **behavioral eval** (never done in v1). V2_PLAN §2.3.
 4. Then proactivity (tick loop + reach-out over WebSocket) → tools framework.
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.
