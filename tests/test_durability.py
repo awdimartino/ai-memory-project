@@ -176,7 +176,10 @@ async def upgrade_seeds_watermark_to_max_message_id():
         db.MIGRATIONS = original[:3]          # bring the DB up to v3 only
         conn = connect(path)
         conv = SqliteConversationStore(conn)
-        conv.create_session()
+        # Insert a session via raw SQL — create_session() writes `title`, which the
+        # v3 schema doesn't have yet (it arrives in v7); we're simulating an old DB.
+        conn.execute("INSERT INTO sessions (started_at) VALUES ('t')")
+        conn.commit()
         for i in range(5):
             conv.add_message(1, "user", f"m{i}")   # ids 1..5
         conn.close()

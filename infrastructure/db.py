@@ -67,6 +67,10 @@ MIGRATIONS = [
     ALTER TABLE memories ADD COLUMN core INTEGER NOT NULL DEFAULT 0;
     CREATE INDEX idx_memories_core ON memories(core);
     """,
+    # v7 — named conversations (tabs): each session is a separate message thread
+    """
+    ALTER TABLE sessions ADD COLUMN title TEXT;
+    """,
 ]
 
 

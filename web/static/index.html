@@ -81,9 +81,28 @@
     .bar > i { display: block; height: 100%; border-radius: 4px; background: var(--user); }
     .bar-val { color: var(--muted); font-size: 11px; text-align: right; }
 
-    /* Layout: chat + right status panel */
+    /* Layout: conversation sidebar + chat + right status panel */
     #main { flex: 1; display: flex; min-height: 0; }
     #chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    #sidebar {
+      width: 210px; flex: none; overflow-y: auto; border-right: 1px solid var(--line);
+      padding: 10px 8px; display: flex; flex-direction: column; gap: 3px; background: #12141a;
+    }
+    #newConv {
+      background: var(--bot); color: var(--text); border: 1px solid var(--line);
+      padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-bottom: 6px; text-align: left;
+    }
+    .conv {
+      display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 8px;
+      cursor: pointer; font-size: 13px;
+    }
+    .conv:hover { background: var(--bot); }
+    .conv.active { background: var(--bot); border-left: 2px solid var(--user); }
+    .conv .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conv .n { color: var(--muted); font-size: 11px; }
+    .conv .del { color: var(--muted); font-size: 14px; opacity: 0; padding: 0 2px; }
+    .conv:hover .del { opacity: .7; }
+    .conv .del:hover { opacity: 1; color: #e5534b; }
     #status {
       width: 340px; flex: none; overflow-y: auto; border-left: 1px solid var(--line);
       padding: 14px 14px 40px; display: flex; flex-direction: column; gap: 18px; background: #12141a;
@@ -120,6 +139,10 @@
     <button id="toggleStatus" type="button">status</button>
   </header>
   <div id="main">
+    <aside id="sidebar">
+      <button id="newConv" type="button">+ New conversation</button>
+      <div id="convList"></div>
+    </aside>
     <div id="chat">
       <div id="log"></div>
       <form id="form">
@@ -263,6 +286,11 @@
         botName = msg.bot;
         botnameEl.textContent = msg.bot;
         modelEl.textContent = msg.model;
+      } else if (msg.type === "conversations") {
+        renderConversations(msg.list, msg.active);
+      } else if (msg.type === "history_start") {
+        log.innerHTML = "";   // switching/new conversation: clear the thread
+        current = null;
       } else if (msg.type === "history") {
         addBubble(msg.role === "user" ? "user" : "bot", msg.content);
       } else if (msg.type === "proactive") {
@@ -412,6 +440,37 @@
       document.body.classList.toggle("no-status");
     setInterval(pollStatus, 3000);
     pollStatus();
+
+    // --- Conversation tabs (sidebar) ---
+    function renderConversations(list, active) {
+      const box = document.getElementById("convList");
+      box.innerHTML = "";
+      list.forEach((c) => {
+        const item = el("div", "conv" + (c.id === active ? " active" : ""));
+        const title = el("span", "title", c.title || "New chat");
+        title.title = c.title || "New chat";
+        item.appendChild(title);
+        item.appendChild(el("span", "n", String(c.count)));
+        const del = el("span", "del", "×");
+        del.title = "delete conversation";
+        del.onclick = (e) => {
+          e.stopPropagation();
+          if (confirm("Delete this conversation? (Mari's memories are kept.)"))
+            socket.send(JSON.stringify({ type: "delete", id: c.id }));
+        };
+        item.appendChild(del);
+        item.onclick = () => {
+          if (c.id !== active) socket.send(JSON.stringify({ type: "switch", id: c.id }));
+        };
+        item.ondblclick = () => {
+          const t = prompt("Rename conversation:", c.title || "");
+          if (t != null) socket.send(JSON.stringify({ type: "rename", id: c.id, title: t }));
+        };
+        box.appendChild(item);
+      });
+    }
+    document.getElementById("newConv").onclick = () =>
+      socket.send(JSON.stringify({ type: "new" }));
   </script>
 </body>
 </html>

@@ -31,7 +31,7 @@ The **brain foundation is done and live-verified.** In place:
 - **Single async runtime.** FastAPI + WebSocket **web UI** and a terminal **REPL**,
   both wired through one composition root (`bootstrap.py`) and a `Companion` facade.
 - **Persistence** — SQLite with a versioned migration runner (`PRAGMA user_version`,
-  schema at **v6**). Conversation survives restarts.
+  schema at **v7**). Conversation survives restarts.
 - **Memory tiers:**
   - *Episodic* — full verbatim conversation log (`messages` table).
   - *Semantic* — distilled, embedded facts (`memories` table), surfaced by recall.
@@ -102,9 +102,18 @@ The **brain foundation is done and live-verified.** In place:
   to stay quiet, and she's given **how long you've been away** (she can't see a clock) so the call is
   sensible — live she PASSed after "gonna go sleep" but checked in after an unresolved bad-day vent.
   Web-only (registered in `web/app.py` with the connection broadcaster); the REPL runs internal jobs only.
+- **Web UI: status panel + conversation tabs (new 2026-07-19):** a live **status panel** (right side,
+  toggle in the header) polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity,
+  the 6 mood bars, memory (core list + retired/superseded facts + counts), self-description, the private
+  thought journal, and last tick/reach-out/reflect. Plus **conversation tabs** (left sidebar): sessions
+  are now named threads (schema **v7** `sessions.title`, auto-titled by the first message) you can
+  create / switch / rename / delete. **Mari is one companion:** memory, mood, thoughts, persona,
+  familiarity, and the consolidation/durability machinery are all the user's and **shared across every
+  conversation**; only the message *thread* (history + `session_id`) is per-tab. On boot she resumes the
+  most recent conversation instead of spawning a new session per launch.
 
-Not yet built: **tools, voice, sleep/standby.** Persona self-modification, core memory,
-and the familiarity meter are planned but not started.
+Not yet built: **tool framework (pillar 4) + voice.** Delivery-layer extras only; the brain
+(all four pillars + core memory + self-modifying persona + sleep) is feature-complete.
 
 ---
 
@@ -300,10 +309,12 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
    a long idle; wake-on-message reloads with a "waking up…" state; model-jobs pause while asleep).
    **Follow-up: self-waking** (wake to reach out) — deferred; needs a real trigger (reminders / energy
    budget / time-of-day) to gate it so it's principled, not twitchy. `wake()` is already a public seam.
-9. **Status panel + memory inspector (web UI)** — one live view of mood / core+semantic memory (and
-   superseded history) / thoughts / persona+familiarity / sleep state / last tick. Attacks the v1
-   "invisible bugs" pain; ties together everything built.
+9. ✅ ~~Status panel + web UI overhaul~~ (done 2026-07-19 — `GET /status` + live right-side panel showing
+   mood/memory/persona/thoughts/sleep; **conversation tabs** with per-thread history over a shared brain,
+   schema v7). A full memory-browser/editor (edit/undo supersede) is a possible later extension.
 10. **Tool framework (pillar 4)** — start with **reminisce** (reads the v5 journal + episodic; can be a
     tick behavior), then a function-calling reliability probe → web search, reminders, Navidrome. Then voice.
+11. **From the GitHub research (V2_PLAN §2.9), user-liked:** multi-drive proactivity, energy/body cycles,
+    nightly deep consolidation. Plus fact-validity windows, do-not-disturb gating, push notifications.
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.

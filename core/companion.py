@@ -113,8 +113,24 @@ class Companion:
         # True while a turn is being processed; the tick treats this as "not idle"
         # so autonomy jobs never fire mid-reply (even during a slow generation).
         self._busy = False
+        # Title of the active conversation (None => untitled; set from the first user message).
+        self._session_title: str | None = None
         # The proactivity heartbeat, attached by bootstrap; started by the entry point.
         self.tick = None
+
+    def switch_conversation(self, session_id: int) -> None:
+        """Make `session_id` the active conversation: rebind history + title. Everything
+        else (memory, mood, thoughts, persona, the consolidation buffer) is the user's and
+        stays shared across conversations."""
+        self.session_id = session_id
+        self.history = self.store.session_messages(session_id, config.HISTORY_TURNS)
+        self._session_title = self.store.session_title(session_id)
+
+    def new_conversation(self, title: str | None = None) -> int:
+        """Start a fresh conversation thread and switch to it. Returns its id."""
+        sid = self.store.create_session(title)
+        self.switch_conversation(sid)
+        return sid
 
     def idle_seconds(self) -> float:
         """Seconds since the last turn finished (0 while a turn is in progress)."""
@@ -161,6 +177,11 @@ class Companion:
             self.history.append({"role": "assistant", "content": text})
             self._unconsolidated.append({"id": uid, "role": "user", "content": user_text})
             self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+
+            if not self._session_title:  # name a fresh conversation by its first message
+                title = " ".join(user_text.split())[:40] or "New chat"
+                await asyncio.to_thread(self.store.set_title, self.session_id, title)
+                self._session_title = title
 
             self._maybe_consolidate()
             return TurnResult(text, stats, recalled, emotion_info, core)

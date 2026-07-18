@@ -78,15 +78,17 @@ async def build() -> tuple[Companion, str]:
             logging.getLogger("bootstrap").warning(
                 "SLEEP_ENABLED but `%s` CLI not found; sleep/standby disabled", config.LMS_PATH)
 
-    history = conv_store.recent_messages(config.HISTORY_TURNS)
-    # Recover the unconsolidated tail: any messages logged after the last
-    # consolidation checkpoint (e.g. dropped by a hard kill before flush).
+    # Resume the most recent conversation (tabs); create one only if there are none.
+    active = conv_store.latest_session() or conv_store.create_session()
+    history = conv_store.session_messages(active, config.HISTORY_TURNS)
+    # Recover the unconsolidated tail (GLOBAL, across all conversations): any messages
+    # logged after the last consolidation checkpoint (e.g. dropped by a hard kill).
     watermark = meta_store.get_int(CONSOLIDATED_WATERMARK_KEY, 0)
     unconsolidated = conv_store.messages_after(watermark)
-    session_id = conv_store.create_session()
-    companion = Companion(llm, conv_store, memory, meta_store, session_id,
+    companion = Companion(llm, conv_store, memory, meta_store, active,
                           history, unconsolidated, emotion=emotion, thoughts=thought_store,
                           model_manager=model_manager)
+    companion._session_title = conv_store.session_title(active)
 
     # Proactivity heartbeat. Created, not started; the entry point starts it so eval/test
     # harnesses that call build() don't tick. Internal jobs live here; surface-specific

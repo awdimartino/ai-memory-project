@@ -143,50 +143,90 @@ async def status() -> dict:
     }
 
 
+async def _send_conversations(ws: WebSocket) -> None:
+    c = _state["companion"]
+    await ws.send_json({"type": "conversations",
+                        "list": c.store.list_conversations(), "active": c.session_id})
+
+
+async def _replay_history(ws: WebSocket) -> None:
+    c = _state["companion"]
+    await ws.send_json({"type": "history_start"})  # UI clears the log
+    for m in c.history:
+        await ws.send_json({"type": "history", "role": m["role"], "content": m["content"]})
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()
     companion = _state["companion"]
     _state["connections"].add(websocket)
     await websocket.send_json({"type": "ready", "model": _state["model"], "bot": config.BOT_NAME})
-
-    # Replay carried context so a refresh shows the ongoing conversation (proactive
-    # messages were logged as assistant turns, so they replay here too).
-    for m in companion.history:
-        await websocket.send_json({"type": "history", "role": m["role"], "content": m["content"]})
+    await _send_conversations(websocket)
+    await _replay_history(websocket)  # proactive messages replay here too (logged as assistant turns)
 
     try:
         while True:
             data = await websocket.receive_json()
-            if data.get("type") != "user":
-                continue
-            text = (data.get("text") or "").strip()
-            if not text:
-                continue
+            t = data.get("type")
 
-            async with _state["lock"]:
-                if companion.is_asleep():
-                    # cold model reload is coming; tell the UI so it doesn't look hung
-                    await websocket.send_json({"type": "waking"})
-                await websocket.send_json({"type": "start"})
+            if t == "user":
+                text = (data.get("text") or "").strip()
+                if not text:
+                    continue
+                async with _state["lock"]:
+                    if companion.is_asleep():
+                        await websocket.send_json({"type": "waking"})  # cold reload coming
+                    await websocket.send_json({"type": "start"})
 
-                async def on_token(t: str) -> None:
-                    await websocket.send_json({"type": "token", "text": t})
+                    async def on_token(tok: str) -> None:
+                        await websocket.send_json({"type": "token", "text": tok})
 
-                try:
-                    result = await companion.send(text, on_token)
-                    await websocket.send_json({
-                        "type": "done",
-                        "stats": result.stats,
-                        "recalled": [
-                            {"content": c, "similarity": s} for c, s in result.recalled
-                        ],
-                        "emotion": result.emotion,  # {detected, mood} or None
-                        "core": result.core or [],  # always-known facts about the user
-                    })
-                except Exception as e:  # noqa: BLE001 - surface to the UI
-                    logger.exception("generation failed")
-                    await websocket.send_json({"type": "error", "message": str(e)})
+                    try:
+                        result = await companion.send(text, on_token)
+                        await websocket.send_json({
+                            "type": "done", "stats": result.stats,
+                            "recalled": [{"content": c2, "similarity": s} for c2, s in result.recalled],
+                            "emotion": result.emotion, "core": result.core or [],
+                        })
+                    except Exception as e:  # noqa: BLE001 - surface to the UI
+                        logger.exception("generation failed")
+                        await websocket.send_json({"type": "error", "message": str(e)})
+                await _send_conversations(websocket)  # title/order may have changed
+
+            elif t == "switch":
+                async with _state["lock"]:
+                    companion.switch_conversation(int(data["id"]))
+                await _replay_history(websocket)
+                await _send_conversations(websocket)
+
+            elif t == "new":
+                async with _state["lock"]:
+                    companion.new_conversation()
+                await _replay_history(websocket)
+                await _send_conversations(websocket)
+
+            elif t == "rename":
+                title = (data.get("title") or "").strip()[:60] or "Untitled"
+                companion.store.set_title(int(data["id"]), title)
+                if int(data["id"]) == companion.session_id:
+                    companion._session_title = title
+                await _send_conversations(websocket)
+
+            elif t == "delete":
+                did = int(data["id"])
+                async with _state["lock"]:
+                    was_active = did == companion.session_id
+                    companion.store.delete_session(did)
+                    if was_active:
+                        nxt = companion.store.latest_session()
+                        companion.switch_conversation(nxt) if nxt else companion.new_conversation()
+                if was_active:
+                    await _replay_history(websocket)
+                await _send_conversations(websocket)
+
+            elif t == "list":
+                await _send_conversations(websocket)
     except WebSocketDisconnect:
         pass
     finally:
