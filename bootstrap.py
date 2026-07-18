@@ -40,7 +40,10 @@ async def build() -> tuple[Companion, str]:
     meta_store = SqliteMetaStore(conn)
 
     llm = LLMClient(config.BASE_URL, config.API_KEY, config.MODEL, config.TEMPERATURE,
-                    no_think=config.NO_THINK)
+                    no_think=config.NO_THINK,
+                    frequency_penalty=config.FREQUENCY_PENALTY,
+                    presence_penalty=config.PRESENCE_PENALTY,
+                    max_retries=config.LLM_MAX_RETRIES)
     model = await llm.resolve_model()
 
     embedder = Embedder(llm.client, config.EMBED_MODEL)

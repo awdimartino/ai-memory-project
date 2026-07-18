@@ -32,6 +32,15 @@ API_KEY = os.environ.get("LMSTUDIO_API_KEY", "lm-studio")  # value is ignored on
 # Empty MODEL => auto-detect the first model loaded in LM Studio.
 MODEL = os.environ.get("MODEL", "")
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.8"))
+# Discourage the model from repeating itself (verbatim lines/metaphors across a
+# reply and, with the anti-repeat persona rule, across turns). OpenAI-style
+# penalties, applied to chat generation only (structured brain calls stay crisp).
+FREQUENCY_PENALTY = float(os.environ.get("FREQUENCY_PENALTY", "0.4"))
+PRESENCE_PENALTY = float(os.environ.get("PRESENCE_PENALTY", "0.3"))
+# LM Studio intermittently 400s ("predict request failed: fetch failed"). Retry a
+# few times so a transient hiccup doesn't surface as a chat error or drop a
+# consolidation. Chat retries only before the first visible token (never mid-stream).
+LLM_MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "3"))
 
 # For reasoning models (qwen3 etc.), append "/no_think" so they answer directly
 # instead of spending latency (and token budget) on hidden reasoning. Set true

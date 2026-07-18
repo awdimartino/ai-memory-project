@@ -78,7 +78,10 @@ python tests/test_memory_lifecycle.py   # offline, no LM Studio needed
 python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
+python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
 python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
+python scripts/eval_extraction.py       # LIVE: memory-extraction quality (durable vs junk)
+python scripts/eval_conversation.py     # LIVE: repetition + backbone over scripted scenarios
 ```
 
 Requires **LM Studio running with its local server on** (port 1234) and the chat +
@@ -160,9 +163,23 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
   consolidation and only one runs at a time, so it stays contiguous. See V2_PLAN build log.
 - **Decisions are probabilistic** (temp 0.2, not deterministic) — occasional
   misclassification possible even with the tuned prompts.
-- Persona still occasionally slips a mild embodiment line ("i saw someone play it")
-  and the prompt's `"you?"` example can seed an occasional bounce-back — both minor,
-  prompt-tunable.
+- **Conversation-quality pass (2026-07-19)** fixed three complaints from real use, each with
+  a live eval (`scripts/eval_conversation.py`, `scripts/eval_extraction.py`):
+  - *Verbatim repetition* (the bot copied its own earlier replies, e.g. the "vending machine"
+    line, and rewrote the same poem stanza 3×): added `FREQUENCY_PENALTY`/`PRESENCE_PENALTY`
+    on chat + an anti-repeat persona rule. After: cross-scenario dups 0, only a rare short echo.
+  - *Bad memories (too specific/temporal/self)*: rewrote `MEMORY_EXTRACTION_SYSTEM` to keep
+    only timeless user-life facts, exclude current activities / app-meta / Mari's own lines /
+    plans, and normalize phrasing. After: extraction eval went **8+ bad → 0 bad**.
+  - *Too agreeable*: gave the persona a backbone (holds positions, doesn't cave to pressure/
+    flattery, doesn't grovel), made it own its feelings (no "just a chatbot"), and wired mood
+    to behavior. After: pushes back on insults, resists tasks, mood (irritation) shortens replies.
+- **Remaining conversation nits (honest, low-severity):** (1) extraction still sometimes drops
+  the user's **name** ("I'm Alex" read as a greeting) — strengthened the prompt with an explicit
+  name example on 2026-07-19, **pending live re-verification** (LM Studio was down at commit time);
+  (2) an occasional "just a chatbot" self-deprecation slip (tightened, also pending re-verify);
+  (3) under enough repeated pressure it may still write a short (non-repeated) poem instead of
+  fully refusing. Re-run the two eval scripts once LM Studio is healthy to confirm 1 and 2.
 - Recall threshold calibrated on a small sample; precision at large memory volume
   unmeasured. Only qwen3-8b / gemma tested for extraction/decisions.
 - **Recall is sensitive to query phrasing.** A clean query ("do I have any pets?") recalls
@@ -170,16 +187,19 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
   pets?") fell below the 0.55 floor and recalled nothing. Pre-existing (not emotion-related),
   but now visible in the inspector. Options later: embed only the salient clause, lower the
   floor, or re-rank.
-- **LM Studio intermittently 400s on the *structured* extraction call** (`Engine protocol
-  predict request failed: fetch failed`) while normal streaming chat is fine. Hit ~2–3× this
-  session (and once successfully advanced the watermark), so it's intermittent, not constant.
-  The durability re-queue absorbs it (facts retried next window / on restart), but if it
-  persists, investigate the `response_format` grammar path or the LM Studio build.
-- **Emotion is prompt-only so far.** Mood colors tone but there's no behavioral guardrail
-  yet (e.g. very high irritation doesn't change *what* Mari does, only her wording). Also
-  "approval" from bland acknowledgements ("ok sure") nudges warmth up a little — a mapping
-  nuance surfaced by the eval, not necessarily wrong. Mood only shifts on user messages;
-  idle mood-drift waits for the tick (pillar 3).
+- **LM Studio instability is the biggest practical pain.** It 400s with `Engine protocol
+  predict request failed: fetch failed` — originally just on structured extraction, but under
+  sustained eval load it also hit **streaming chat** and eventually **crashed** (HTTP 000, needs
+  a restart). Mitigation added 2026-07-19: `LLMClient` now **retries** transient failures
+  (`LLM_MAX_RETRIES=3`, chat only before the first token so it never double-streams; verified in
+  `tests/test_llm_retry.py`). This makes chat/consolidation resilient to hiccups but can't save a
+  fully crashed server. If it keeps happening, suspect the `response_format` grammar path or give
+  qwen3-8b more headroom / a different quant. **Restart LM Studio before long eval runs.**
+- **Emotion now influences behavior, not just tone.** The persona wires mood to conduct
+  (irritated → shorter/less accommodating), and the eval shows irritation climbing on insults
+  with visibly clipped replies. Still: "approval" from bland acknowledgements ("ok sure") nudges
+  warmth up a little (mapping nuance, not clearly wrong); mood only shifts on user messages; idle
+  mood-drift waits for the tick (pillar 3).
 
 ---
 

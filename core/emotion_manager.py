@@ -134,6 +134,6 @@ class EmotionManager:
         body = "\n".join(f"- {c}: {value_to_word(self.state[c])}" for c in CHANNELS)
         return (
             f"Your current emotional state:\n{body}\n\n"
-            f"Let this color your tone and word choice. Never reference these values "
-            f"or name your emotions directly."
+            f"Let this shape how you come across and how you act right now, not just your "
+            f"word choice. Never reference these values or name your emotions directly."
         )

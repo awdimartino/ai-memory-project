@@ -7,6 +7,11 @@ time-to-first-token and tokens/sec.
 All model calls go through a single lock: LM Studio (llama.cpp) can't safely
 serve two concurrent requests to a model, so background consolidation and live
 chat must never overlap. This is the seed of the §1.2 priority-queue arbiter.
+
+Transient LM Studio failures ("predict request failed: fetch failed", connection
+resets) are retried a few times. Chat retries only *before the first visible
+token* so we never re-emit a partial stream; structured calls are non-streaming
+and always safe to retry.
 """
 import asyncio
 import json
@@ -22,14 +27,25 @@ logger = logging.getLogger(__name__)
 _THINK_OPEN = "<think>"
 _THINK_BLOCK = re.compile(r"(?s)^\s*<think>.*?</think>\s*")
 
+_RETRYABLE_MARKERS = ("fetch failed", "predict request", "connection error",
+                      "connection reset", "timeout", "temporarily")
+
+
+def _is_retryable(exc: Exception) -> bool:
+    return any(m in str(exc).lower() for m in _RETRYABLE_MARKERS)
+
 
 class LLMClient:
     def __init__(self, base_url: str, api_key: str, model: str, temperature: float,
-                 no_think: bool = False):
+                 no_think: bool = False, frequency_penalty: float = 0.0,
+                 presence_penalty: float = 0.0, max_retries: int = 0):
         self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self.model = model
         self.temperature = temperature
         self.no_think = no_think
+        self.frequency_penalty = frequency_penalty
+        self.presence_penalty = presence_penalty
+        self.max_retries = max_retries
         self._model_lock = asyncio.Lock()
 
     def _prep(self, messages):
@@ -58,8 +74,28 @@ class LLMClient:
     async def stream(self, messages, on_token: Callable[[str], Awaitable]):
         """Stream a reply, awaiting on_token(text) for each visible chunk.
 
-        Returns (full_text, stats) with ttft, tok_per_s, tokens, estimated.
+        Returns (full_text, stats) with ttft, tok_per_s, tokens, estimated. Retries
+        transient failures, but only while nothing has been emitted yet.
         """
+        prepped = self._prep(messages)
+        emitted = {"any": False}
+
+        async def guarded(t: str) -> None:
+            emitted["any"] = True
+            await on_token(t)
+
+        for attempt in range(self.max_retries + 1):
+            emitted["any"] = False
+            try:
+                return await self._stream_once(prepped, guarded)
+            except Exception as e:  # noqa: BLE001
+                if emitted["any"] or attempt >= self.max_retries or not _is_retryable(e):
+                    raise
+                logger.warning("chat generation failed (%s); retry %d/%d",
+                               e, attempt + 1, self.max_retries)
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+    async def _stream_once(self, messages, on_token: Callable[[str], Awaitable]):
         raw = ""
         visible_started = False
         first_token_at = None
@@ -70,7 +106,9 @@ class LLMClient:
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 temperature=self.temperature,
-                messages=self._prep(messages),
+                frequency_penalty=self.frequency_penalty,
+                presence_penalty=self.presence_penalty,
+                messages=messages,
                 stream=True,
                 stream_options={"include_usage": True},
             )
@@ -130,18 +168,30 @@ class LLMClient:
         }
         return text, stats
 
+    async def _create_retry(self, **kwargs):
+        """Non-streaming completion with the model lock + transient-error retries."""
+        async with self._model_lock:
+            for attempt in range(self.max_retries + 1):
+                try:
+                    return await self.client.chat.completions.create(**kwargs)
+                except Exception as e:  # noqa: BLE001
+                    if attempt >= self.max_retries or not _is_retryable(e):
+                        raise
+                    logger.warning("structured call failed (%s); retry %d/%d",
+                                   e, attempt + 1, self.max_retries)
+                    await asyncio.sleep(0.5 * (attempt + 1))
+
     async def structured(self, messages, schema: dict, model: str | None = None) -> list:
         """Schema-constrained (Tier-2) call. Returns the `memories` list.
 
         Tolerates a bare list too. Low temperature for stable extraction.
         """
-        async with self._model_lock:
-            resp = await self.client.chat.completions.create(
-                model=model or self.model,
-                temperature=0.2,
-                messages=self._prep(messages),
-                response_format=schema,
-            )
+        resp = await self._create_retry(
+            model=model or self.model,
+            temperature=0.2,
+            messages=self._prep(messages),
+            response_format=schema,
+        )
         content = resp.choices[0].message.content
         logger.debug("structured raw: %s", content)
         try:
@@ -159,13 +209,12 @@ class LLMClient:
 
     async def structured_json(self, messages, schema: dict, model: str | None = None) -> dict:
         """Schema-constrained call returning a single parsed object ({} on failure)."""
-        async with self._model_lock:
-            resp = await self.client.chat.completions.create(
-                model=model or self.model,
-                temperature=0.2,
-                messages=self._prep(messages),
-                response_format=schema,
-            )
+        resp = await self._create_retry(
+            model=model or self.model,
+            temperature=0.2,
+            messages=self._prep(messages),
+            response_format=schema,
+        )
         content = resp.choices[0].message.content
         logger.debug("structured_json raw: %s", content)
         try:
