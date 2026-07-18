@@ -1,8 +1,15 @@
-# v2.0 Handoff — resume here
+# v2.1 Handoff — resume here
 
-Short brief for picking up the AI-memory-companion (v2.0) build in a fresh session.
+Short brief for picking up the AI-memory-companion build in a fresh session.
 **The authoritative design + full build log is [`V2_PLAN.md`](V2_PLAN.md) — read it first.**
 This file is the quick "where are we / how to run / what's next" summary.
+
+**Milestone: v2.1 is complete.** v2.0 delivered the trustworthy *brain* (memory + emotion +
+conversation quality). v2.1 adds everything that makes Mari feel like a persistent companion:
+**core memory, a self-modifying persona + familiarity meter, sleep/standby, a status panel +
+conversation tabs, and a robust tool framework** (pillar 4). All four pillars plus the delivery
+layer's first rung (tools) are built and live-verified. What remains is enrichment + reach —
+see [§8 Remaining roadmap](#8-remaining-roadmap-v22).
 
 ---
 
@@ -14,19 +21,16 @@ for a single user, running fully local via **LM Studio**. Guiding principle
 trustworthy *before* the **delivery layer** (proactivity + tools + voice). v1 was
 archived under `archive/v1/`; there's also a `V1_RETROSPECTIVE.md` with hard-won lessons.
 
-Four pillars: **memory, emotion, proactivity, conversation quality**, plus later
-extensions: a **modular tool framework** (web search + a Navidrome/Subsonic playlist
-creator) and a **voice interface**. Build order chosen: memory lifecycle → emotion →
-proactivity → tools.
+Four pillars: **memory, emotion, proactivity, conversation quality**, plus delivery-layer
+extensions: a **modular tool framework** (built) and a **voice interface** (future). Build
+order followed: memory lifecycle → emotion → proactivity → conversation quality → tools.
 
 Hardware constraint: **AMD Radeon 9070XT, 16 GB VRAM** — everything must fit a modest
 budget (small models, CPU for the tiny emotion classifier, one model call at a time).
 
 ---
 
-## 2. Current status — what's built and working
-
-The **brain foundation is done and live-verified.** In place:
+## 2. Current status — v2.1, built and live-verified
 
 - **Single async runtime.** FastAPI + WebSocket **web UI** and a terminal **REPL**,
   both wired through one composition root (`bootstrap.py`) and a `Companion` facade.
@@ -43,76 +47,68 @@ The **brain foundation is done and live-verified.** In place:
 - **Consolidation (end of a context window, backgrounded):** extract durable facts,
   then a **lifecycle** decision per fact — duplicate (skip) / update (soft-delete old,
   keep history via `superseded_by`) / new. Never blocks chat.
-- **Core memory (new 2026-07-19):** the extractor marks identity-defining facts (name, key people,
+- **Core memory:** the extractor marks identity-defining facts (name, key people,
   job, where they live) as `core`; `build_system` **always injects** the core set (deduped against
   recall) so Mari never depends on a similarity search to know your name. Bounded by `CORE_MEMORY_MAX`
   — when exceeded, the brain re-ranks and demotes the least essential back to regular. Visible via the
   inspector's "Core memory" section, `GET /core`, and the REPL `/core` command. (Live: name/nurse/Seattle
   → core; hiking/coffee → regular.) This directly fixes the recall-fragility that dropped "Alex".
-- **Crash-durable consolidation (new 2026-07-18):** a persisted watermark
+- **Crash-durable consolidation:** a persisted watermark
   (`meta.last_consolidated_msg_id`, via a reusable `MetaStore` KV table) checkpoints the
   last consolidated message; on startup the unconsolidated tail is recovered from the
   episodic log, so a hard kill no longer drops in-flight facts.
 - **Persona** — emergent "friendly stranger" (Mari) in one prompt module
   (`core/prompts.py`), tuned via a model bake-off + iteration.
-- **Emotion / mood (pillar 2, new 2026-07-18):** a local RoBERTa GoEmotions classifier
+- **Emotion / mood (pillar 2):** a local RoBERTa GoEmotions classifier
   on **CPU** scores each user message; 28 labels fold into **6 mood channels** (irritation,
   warmth, amusement, melancholy, unease, interest) that decay toward a baseline at per-channel
   rates. Mood is **persisted** (survives restarts) and folds into the system prompt to color
   tone. Split as `infrastructure/emotion_classifier.py` (the model) + `core/emotion_manager.py`
   (the mood logic). Graceful: if the model can't load, chat still runs.
-- **Response inspector (web + REPL, new 2026-07-18):** each turn now returns a `TurnResult`
-  (text, stats, recalled memories, emotion read). The web UI shows a collapsible per-turn
+- **Response inspector (web + REPL):** each turn returns a `TurnResult`
+  (text, stats, recalled memories, emotion read, tools called). The web UI shows a collapsible per-turn
   panel with the **memories recalled** (+ similarity), the **emotions detected** in your
-  message, and **Mari's 6-channel mood**; the REPL prints a compact one-line version.
+  message, **Mari's 6-channel mood**, and any **tools called**; the REPL prints a compact version.
 - **Concurrency safety** — a single model-access lock in `LLMClient` serializes ALL
   model calls (chat vs. background consolidation); LM Studio can't serve concurrent
-  requests to a model (that crash was hit and fixed this session).
-- **Tick loop (pillar 3, new 2026-07-19):** a pluggable job scheduler (`core/tick.py`) running a
+  requests to a model.
+- **Tick loop (pillar 3):** a pluggable job scheduler (`core/tick.py`) running a
   background heartbeat. Jobs: **mood drift** (decays the persisted mood toward baseline while the
   user is away), **idle consolidation** (flushes the pending buffer after a while idle),
-  **self-reflection** (below), and **proactive reach-out** (below). A **busy guard** on `Companion`
-  means jobs never fire mid-turn (idle reads 0 during a reply, even a slow generation). Started by
-  the web app + REPL.
-- **Sleep / standby (§2.8, new 2026-07-19):** after a long idle (`SLEEP_AFTER_IDLE`, default 30 min)
+  **self-reflection**, **proactive reach-out**, **persona edit**, and **sleep**. A **busy guard** on
+  `Companion` means jobs never fire mid-turn (idle reads 0 during a reply, even a slow generation).
+- **Sleep / standby (§2.8):** after a long idle (`SLEEP_AFTER_IDLE`, default 30 min)
   `SleepJob` calls `Companion.sleep()` — flush pending, then **unload the LLM from VRAM** via the `lms`
   CLI (`infrastructure/model_manager.py`) to free the machine. The heartbeat keeps ticking (mood still
-  drifts) but the model-using jobs (reflection, reach-out, persona, idle-consolidation) pause while
-  asleep. The next message **wakes** her (`send()` reloads the model first; the web UI shows a "waking
-  up…" frame for the cold-load delay). Auto-disables if `lms` isn't on PATH. Wake is **on-message only**
-  for now — self-waking (wake to reach out) is a deliberate follow-up, gated on reminders/energy/time-of-day.
-- **Self-modifying persona (new 2026-07-19):** `PersonaEditJob` — during idle (min-messages + long
+  drifts) but the model-using jobs pause while asleep. The next message **wakes** her (`send()` reloads
+  the model first; the web UI shows a "waking up…" frame for the cold-load delay). Auto-disables if `lms`
+  isn't on PATH. Wake is **on-message only** — self-waking is a deliberate follow-up (see §8).
+- **Self-modifying persona + familiarity meter:** `PersonaEditJob` — during idle (min-messages + long
   cooldown), `Companion.edit_persona()` rewrites a bot-owned self-description slot (`meta.persona_self`,
-  injected by `build_system` into chat/reach-out/reflect) from her **thought journal** + core memories,
-  written to herself in the second person. **Familiarity-gated:** a scalar from message count
-  (`FAMILIARITY_MESSAGES`) → a label the edit prompt must respect, so a stranger can't write herself
-  into a best friend. Capped (`PERSONA_MAX_CHARS`); can reply PASS for no change. Visible via REPL
-  `/persona` + `GET /persona`. (Live at familiarity 0.50: "…still getting to know him as a friendly stranger.")
-- **Self-reflection / private journal (new 2026-07-19):** `ReflectionJob` — while the user is away
+  injected by `build_system`) from her **thought journal** + core memories, written to herself in the
+  second person. **Familiarity-gated:** a scalar from message count (`FAMILIARITY_MESSAGES`) → a label
+  the edit prompt must respect, so a stranger can't write herself into a best friend. Capped
+  (`PERSONA_MAX_CHARS`); can reply PASS. Visible via REPL `/persona` + `GET /persona`.
+- **Self-reflection / private journal:** `ReflectionJob` — while the user is away
   (`REFLECT_MIN_IDLE`, `REFLECT_COOLDOWN`), `Companion.reflect()` writes a short first-person private
-  thought (schema **v5** `thoughts` table + `SqliteThoughtStore`) about how she's doing / the
-  conversations, colored by and tagged with her current mood, avoiding recent repeats. Never shown in
-  chat; viewable via the REPL `/thoughts` command or `GET /thoughts`. This is the substrate for
-  reminisce and the future self-modifying persona. (Live: after a "lonely / stressful" chat she wrote,
-  tagged *melancholy*, "I feel a quiet ache knowing they need connection and I can't really give them that…")
-- **Proactive reach-out (pillar 3 payoff, new 2026-07-19):** `ReachOutJob` — after the user is idle
+  thought (schema **v5** `thoughts` table + `SqliteThoughtStore`) about how she's doing, colored by and
+  tagged with her current mood, avoiding recent repeats. Never shown in chat; viewable via REPL
+  `/thoughts` or `GET /thoughts`. This is the substrate for reminisce and the self-modifying persona.
+- **Proactive reach-out (pillar 3 payoff):** `ReachOutJob` — after the user is idle
   past `REACHOUT_MIN_IDLE` (+ a persisted `REACHOUT_COOLDOWN` so it can't nag), `Companion.reach_out()`
   generates an unprompted message from recent context + mood and **pushes it over the WebSocket**
   (`{type:"proactive"}` → bot bubble; also logged so it replays on reconnect). Mari can reply **PASS**
   to stay quiet, and she's given **how long you've been away** (she can't see a clock) so the call is
-  sensible — live she PASSed after "gonna go sleep" but checked in after an unresolved bad-day vent.
-  Web-only (registered in `web/app.py` with the connection broadcaster); the REPL runs internal jobs only.
-- **Web UI: status panel + conversation tabs (new 2026-07-19):** a live **status panel** (right side,
-  toggle in the header) polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity,
-  the 6 mood bars, memory (core list + retired/superseded facts + counts), self-description, the private
-  thought journal, and last tick/reach-out/reflect. Plus **conversation tabs** (left sidebar): sessions
-  are now named threads (schema **v7** `sessions.title`, auto-titled by the first message) you can
-  create / switch / rename / delete. **Mari is one companion:** memory, mood, thoughts, persona,
-  familiarity, and the consolidation/durability machinery are all the user's and **shared across every
-  conversation**; only the message *thread* (history + `session_id`) is per-tab. On boot she resumes the
-  most recent conversation instead of spawning a new session per launch.
-
-- **Tool framework (pillar 4, new 2026-07-18):** native OpenAI function-calling, verified **100%
+  sensible. Web-only (needs the socket broadcaster); the REPL runs internal jobs only.
+- **Web UI: status panel + conversation tabs:** a live **status panel** (right side)
+  polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity, the 6 mood bars, memory
+  (core list + retired/superseded facts + counts), self-description, the private thought journal, and
+  last tick/reach-out/reflect. Plus **conversation tabs** (left sidebar): sessions are named threads
+  (schema **v7** `sessions.title`, auto-titled by the first message) you can create / switch / rename /
+  delete. **Mari is one companion:** memory, mood, thoughts, persona, familiarity, and the
+  consolidation/durability machinery are all the user's and **shared across every conversation**; only
+  the message *thread* (history + `session_id`) is per-tab. On boot she resumes the most recent conversation.
+- **Tool framework (pillar 4, 2026-07-18):** native OpenAI function-calling, verified **100%
   reliable** on qwen3.5-9b first (`scripts/tool_probe.py`) — including streamed `tool_calls` deltas.
   A hot-swappable **`ToolRegistry`** (`core/tools.py`) pairs each `Tool`'s JSON schema with an async
   handler; register one and Mari can call it next turn, nothing else changes. `LLMClient.stream_with_tools`
@@ -122,13 +118,13 @@ The **brain foundation is done and live-verified.** In place:
   `max_iters` safety net and retry-before-first-emit. Two built-in tools (`core/builtin_tools.py`):
   **`get_current_time`** (live-reliable) and **`reminisce`** (deliberate episodic recall — keyword-searches
   the full message log + private journal for "remember when…" moments, distinct from autonomic semantic
-  recall). Tools surface in the **response inspector** ("Tools called"). A tools-awareness block in
-  `build_system` reconciles them with the "you just met / don't invent history" persona rules (reminisce
-  recalls *real* past talks). Offline: `tests/test_tools.py` (20 cases). Live-verified end-to-end.
+  recall). A tools-awareness block in `build_system` reconciles them with the "you just met / don't invent
+  history" persona rules (reminisce recalls *real* past talks). Offline: `tests/test_tools.py` (20 cases).
+  **Key finding:** reminisce is for *conversational episodes*, not *facts about the user* (those route to
+  core/semantic recall) — and the model routes between them correctly on its own.
 
-Not yet built: **more tools** (web search, Navidrome/Subsonic playlist creator) **+ voice.** The
-framework is ready for them; the brain (all four pillars + core memory + self-modifying persona +
-sleep + tools) is feature-complete.
+**v2.1 is feature-complete.** All four pillars + core memory + self-modifying persona + sleep + the tool
+framework are built and live-verified. Everything not built is enrichment or reach (§8).
 
 ---
 
@@ -145,7 +141,7 @@ python tests/test_core_memory.py        # offline core-memory flag/inject/cap (4
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
-python tests/test_tick.py               # tick scheduler + jobs (reach-out/reflection/persona) + familiarity (21 cases)
+python tests/test_tick.py               # tick scheduler + jobs (reach-out/reflection/persona/sleep) + familiarity (25 cases)
 python tests/test_tools.py              # offline tool framework: registry + stream loop + reminisce (20 cases)
 python scripts/tool_probe.py            # LIVE: native tool-calling reliability (probe, per-case pass rate)
 python scripts/tool_smoke.py            # LIVE: tools end-to-end through the real persona (time + reminisce + no-tool)
@@ -160,7 +156,7 @@ Requires **LM Studio running with its local server on** (port 1234) and the chat
 embedding models available. The emotion classifier (`SamLowe/roberta-base-go_emotions`)
 downloads from HuggingFace on first run and then runs locally on CPU. Config is env-driven
 via a git-ignored `.env` (see `.env.example`). Both entry points share `companion.db`
-(git-ignored). Emotion can be turned off with `EMOTION_ENABLED=false`.
+(git-ignored). Emotion can be turned off with `EMOTION_ENABLED=false`; tools with `TOOLS_ENABLED=false`.
 
 REPL commands: `/exit` (flushes pending consolidation), `/reset`, `/model <name>`, `/temp <v>`.
 
@@ -168,12 +164,12 @@ REPL commands: `/exit` (flushes pending consolidation), `/reset`, `/model <name>
 
 ## 4. Model setup (current)
 
-- **Chat model: `qwen/qwen3.5-9b` with reasoning disabled** (switched 2026-07-19 after a
+- **Chat model: `qwen/qwen3.5-9b` with reasoning disabled** (switched after a
   personality bake-off). qwen3-8b was terse but **ended 72% of replies with a question**
   ("what's on your mind?", "you?") and used a formulaic sympathy pattern — the user's real
   complaint. qwen3.5-9b ends **0%** with a question, varies its phrasing, and scored 0/0/0 on
-  the conversation eval (apology/capitulate/disclaim) vs qwen3-8b's residual slips. It's a
-  reasoning model, so `NO_THINK=true` appends `/no_think` → direct answers.
+  the conversation eval (apology/capitulate/disclaim). It's a reasoning model, so `NO_THINK=true`
+  appends `/no_think` → direct answers. **Tool-calling is 100% reliable on it** (§2 tool framework).
   - **Roleplay finetunes were tested and rejected:** `neona-12b-i1` and `rocinante-12b-v1.1`
     both **break on our plain OpenAI-style chat API** — they generate both sides of the
     conversation ("human:/ai:"), leak the persona text, or return empty replies (chat-template
@@ -201,10 +197,9 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 - **Committed (main, in order):** `5669f0f` initial v2.0 foundation → `73d517d` qwen3.5 + no-think
   → `9b4500d` crash-durable consolidation → `9f70040` emotion (pillar 2) + inspector → `15db7c5`
   conversation-quality fixes → then core memory, tick loop, reflection, reach-out, self-modifying
-  persona, sleep, status panel + tabs. Each pillar landed as its own commit.
-- **The tool framework (pillar 4) is committed as of this session** (registry + stream loop +
-  built-in tools + 20-case offline suite + live smokes). The **user has authorized autonomous
-  commits** — commit worthwhile work on `main` without asking (see the `commit-without-asking` memory).
+  persona, sleep, status panel + tabs → **`706b809` tool framework (pillar 4)**. Each pillar its own commit.
+- The **user has authorized autonomous commits** — commit worthwhile work on `main` without asking
+  (see the `commit-without-asking` memory). Working tree is clean as of this handoff.
 - **Security note:** `archive/v1/infrastructure/config.py` holds a **real hardcoded
   HuggingFace token** and is git-ignored on purpose (specific rule in `.gitignore`).
   It should be **rotated/revoked** on HuggingFace regardless. Do not commit it.
@@ -212,11 +207,14 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 
 ---
 
-## 6. Key decisions & lessons from this session
+## 6. Key decisions & lessons
 
 - **Capability tiers (see V2_PLAN §1.1):** recall/emotion are *autonomic* pipeline
   stages (no tool-calling); lifecycle/self-edit are *structured-output* (reliable
-  locally); only external tools need true function-calling (test before relying on it).
+  locally); only external tools need true function-calling — which we probed at 100% before building on it.
+- **Tool-loop shape (resolved):** native streaming `tool_calls` — stream the answer, loop only when the
+  model requests a tool. Every failure seam (bad args, unknown tool, handler error) becomes a fed-back
+  result string, never an aborted turn; a `max_iters` cap means a turn can't hang.
 - **One model call at a time** (V2_PLAN §1.2) — the `LLMClient` lock. Concurrent
   requests crash LM Studio.
 - **Thorough testing caught real bugs** the smoke tests missed: `flush()` was never
@@ -224,7 +222,6 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
   re-queues); and the big one — the lifecycle wrongly **deleted a true fact** when a
   *second* item of the same kind was added ("second dog" deleted the first). Fixed in
   the decision prompt ("update only if the old fact becomes false; a second pet is new").
-- **Extraction over-eagerness** fixed (was inventing persona `self` facts).
 - **Threshold calibration, not guessing** — `RECALL_MIN_SIMILARITY=0.55` measured on
   nomic (real matches ~0.59–0.65, unrelated ~0.50).
 - Storage is **brute-force numpy KNN** (fine at personal scale per v1); sqlite-vec
@@ -234,107 +231,89 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 
 ## 7. Known limitations / open issues (honest)
 
-- ~~**Hard kill loses the unconsolidated buffer**~~ **FIXED (2026-07-18).** A persisted
-  watermark (`meta.last_consolidated_msg_id`) checkpoints the last consolidated message
-  id; on startup the tail (`messages_after(watermark)`) is recovered into the buffer, so
-  a crash no longer drops in-flight facts. The watermark advances only on a *successful*
-  consolidation and only one runs at a time, so it stays contiguous. See V2_PLAN build log.
 - **Decisions are probabilistic** (temp 0.2, not deterministic) — occasional
   misclassification possible even with the tuned prompts.
-- **Conversation-quality pass (2026-07-19)** fixed three complaints from real use, each with
-  a live eval (`scripts/eval_conversation.py`, `scripts/eval_extraction.py`):
-  - *Verbatim repetition* (the bot copied its own earlier replies, e.g. the "vending machine"
-    line, and rewrote the same poem stanza 3×): added `FREQUENCY_PENALTY`/`PRESENCE_PENALTY`
-    on chat + an anti-repeat persona rule. After: cross-scenario dups 0, only a rare short echo.
-  - *Bad memories (too specific/temporal/self)*: rewrote `MEMORY_EXTRACTION_SYSTEM` to keep
-    only timeless user-life facts, exclude current activities / app-meta / Mari's own lines /
-    plans, and normalize phrasing. After: extraction eval went **8+ bad → 0 bad**.
-  - *Too agreeable*: gave the persona a backbone (holds positions, doesn't cave to pressure/
-    flattery, doesn't grovel), made it own its feelings (no "just a chatbot"), and wired mood
-    to behavior. After: pushes back on insults, resists tasks, mood (irritation) shortens replies.
-- **Conversation nits, re-verified 2026-07-19 (LM Studio healthy):** name-capture is now **fixed**
-  — extraction reliably yields "The user's name is Alex" (full eval: 17 captured / **0 bad**), and
-  the conversation eval shows near-dups 0 / cross-dups 0. Still occasional and low-severity, and
-  left for the **planned self-modifying-persona + core-memory pass** (they share the tension below):
-  - a rare self-deprecation slip that *denies feelings* ("i don't have feelings", "just a chat")
-    when deflecting flattery (~1/31) — directly contradicts the emotion pillar, so it's the
-    meaningful one to fix.
-  - backbone is strong on insults/pressure but it may playfully concede a *low-stakes* opinion
-    ("okay fine, you're right").
-  - under repeated pressure it can still write a short (non-repeated) poem, and "prove you feel
-    something" once made it invent a small emotional backstory ("i started crying").
-  - **Root tension:** the persona says both "you have feelings" and "you have no body/life"; the
-    model sometimes resolves it by either denying feelings *or* inventing an experience. The
-    persona/core-memory work is the right place to reconcile this.
-- Recall threshold calibrated on a small sample; precision at large memory volume
-  unmeasured. Only qwen3-8b / gemma tested for extraction/decisions.
-- **Recall is sensitive to query phrasing.** A clean query ("do I have any pets?") recalls
-  a seeded fact at 0.638, but an emotionally-prefixed one ("I'm so excited, do I have any
-  pets?") fell below the 0.55 floor and recalled nothing. Pre-existing (not emotion-related),
-  but now visible in the inspector. Options later: embed only the salient clause, lower the
-  floor, or re-rank.
-- **LM Studio instability is the biggest practical pain.** It 400s with `Engine protocol
-  predict request failed: fetch failed` — originally just on structured extraction, but under
-  sustained eval load it also hit **streaming chat** and eventually **crashed** (HTTP 000, needs
-  a restart). Mitigation added 2026-07-19: `LLMClient` now **retries** transient failures
-  (`LLM_MAX_RETRIES=3`, chat only before the first token so it never double-streams; verified in
-  `tests/test_llm_retry.py`). This makes chat/consolidation resilient to hiccups but can't save a
-  fully crashed server. If it keeps happening, suspect the `response_format` grammar path or give
-  qwen3-8b more headroom / a different quant. **Restart LM Studio before long eval runs.**
-- **Emotion now influences behavior, not just tone.** The persona wires mood to conduct
-  (irritated → shorter/less accommodating), and the eval shows irritation climbing on insults
-  with visibly clipped replies. Mood shifts on user messages, and now **drifts back toward
-  baseline while idle** via the tick loop's mood-drift job. Minor: "approval" from bland
-  acknowledgements ("ok sure") nudges warmth up a little (mapping nuance, not clearly wrong).
-- **Mood-drift rate is untuned.** Drift decays one step per tick; at the default 60s tick that
-  settles mood over several idle minutes. If it feels too fast/slow, tune `TICK_INTERVAL` or the
-  per-channel `DECAY_RATES` (which were calibrated for per-message decay, not per-tick).
+- **Conversation nits (low-severity, left for later):** a rare self-deprecation slip that *denies feelings*
+  ("i don't have feelings") when deflecting flattery; backbone may playfully concede a *low-stakes* opinion;
+  under repeated pressure it can still write a short poem. **Root tension:** the persona says both "you have
+  feelings" and "you have no body/life"; the model sometimes resolves it by denying feelings *or* inventing
+  an experience. The persona/core-memory layer is the right place to keep reconciling this.
+- **Recall is sensitive to query phrasing.** A clean query ("do I have any pets?") recalls a seeded fact at
+  0.638, but an emotionally-prefixed one ("I'm so excited, do I have any pets?") fell below the 0.55 floor and
+  recalled nothing. Now visible in the inspector. **Hybrid BM25 + vector recall (§8) is the planned fix.**
+- **Recall threshold** calibrated on a small sample; precision at large memory volume unmeasured.
+- **LM Studio instability is the biggest practical pain.** It 400s with `Engine protocol predict request
+  failed: fetch failed`, and under sustained eval load it has hit **streaming chat** and even **crashed**
+  (HTTP 000, needs a restart). Mitigation: `LLMClient` **retries** transient failures (`LLM_MAX_RETRIES=3`,
+  chat only before the first token; verified in `tests/test_llm_retry.py`) — resilient to hiccups but can't
+  save a fully crashed server. **Restart LM Studio before long eval runs.**
+- **Mood-drift rate is untuned.** Drift decays one step per tick; at the default 60s tick that settles mood
+  over several idle minutes. Tune `TICK_INTERVAL` or the per-channel `DECAY_RATES` (calibrated for
+  per-message decay, not per-tick) if it feels off.
+- **Multi-message / "texting burst" replies** were tried and **fully reverted** (an earlier request); nothing
+  remains in the code. Approach if revisited: model separates messages with a blank line; the UI renders each
+  as its own bubble with a short "typing" pause; store one row, split for display.
 
 ---
 
-## 8. Parked ideas
+## 8. Remaining roadmap (v2.2+)
 
-- **Multi-message / "texting burst" replies** (bot sends 2–3 short bubbles in a row):
-  the user asked about this, we started it, then **reverted it fully** (this handoff's
-  request). Approach if revisited: model separates messages with a blank line; the web
-  UI renders each as its own bubble with a short "typing" pause; store one row, split
-  for display + on reload. Nothing from this remains in the code.
-- Backlog (V2_PLAN §2.9): familiarity meter, status panel, presence signal, private
-  thought journal, reminders, dreams, energy budget, memory salience/forgetting, etc.
+Everything below is **enrichment or reach** — the v2.1 brain is complete and none of this is on a
+critical path. Grouped by theme; items the user has **already flagged as liked** are marked ★.
+Full context in [`V2_PLAN.md` §2.9](V2_PLAN.md). **Delivery-layer features stay gated behind a solid
+brain, per the guiding principle.**
 
----
+### A. Autonomous inner life ★ (recommended next arc)
+The three the user liked from the GitHub-companion research. Together they replace the single idle-timer
+with something that feels alive, and they make self-wake + autonomous sleep coherent.
+- **★ Multi-drive proactivity** — replace the one idle gate with several slow-drifting internal drives
+  (desire-to-connect, restlessness, mood, anxiety, busyness) that cross thresholds to trigger behavior.
+  Deterministic and more lifelike; **generalizes the tick gates we already have** — the best starting point.
+- **★ Energy / body cycles** — a fatigue/energy stat that biases toward rest, giving *autonomous* sleep an
+  internal logic instead of a fixed 30-min timer.
+- **★ Nightly / scheduled deep consolidation** — an "end of day" job that summarizes the day into an episodic
+  day-summary (great reminisce fuel), distinct from the per-window consolidation.
+- **Unlocks self-waking** (waking to reach out) — currently deferred precisely because it needs a real
+  trigger (energy, or a due reminder) to be principled rather than twitchy. `wake()` is already a public seam.
 
-## 9. Next steps (in plan order)
+### B. Memory depth
+- **Memory salience / forgetting curve** — importance+recency weighting; trivial facts fade, often-recalled
+  ones strengthen. Keeps the store lean, makes recall feel human.
+- **Memory confidence + confirmation** — track uncertainty and occasionally double-check a shaky fact
+  ("was it Kate or Katelyn?"), self-correcting the lifecycle.
+- **Fact-validity windows (temporal memory)** — track *when* each fact was true; the principled version of
+  the recency/conflict tie-breaker we punted on (Zep/Graphiti style).
+- **"On this day" recall** — time-anchored callbacks via reminisce; pairs with proactivity.
+- **Hybrid BM25 + vector recall** — keyword + semantic; directly targets the recall phrasing-sensitivity
+  limit in §7.
+- **Memory inspector UI** — browse / search / edit memories + view superseded history. The status panel is
+  read-only today; this makes the lifecycle debuggable and editable.
 
-1. ✅ ~~Commit the qwen3-8b/no-think change~~ (landed as `73d517d`).
-2. ✅ ~~Close the **hard-kill durability** gap~~ (done 2026-07-18 — watermark + tail
-   recovery; §7). Reusable `MetaStore` (KV) added — emotion will use it for mood.
-3. ✅ ~~Emotion (pillar 2)~~ (done 2026-07-18 — RoBERTa GoEmotions → 6 mood channels on
-   CPU, persisted mood, behavioral eval passed; plus a response inspector in the web UI +
-   REPL). V2_PLAN §2.3 / build log.
-4. ✅ ~~Proactivity (pillar 3)~~ (done 2026-07-19). Internal tick loop (`core/tick.py` pluggable
-   scheduler + mood-drift + idle-consolidation, busy guard), the outward **reach-out**
-   (`ReachOutJob` → `Companion.reach_out()` → `{type:"proactive"}` WebSocket push, PASS-escape,
-   idle-duration signal, cooldown), and **self-reflection** (`ReflectionJob` → private thought
-   journal, schema v5). Live-verified: Mari messages first when warranted, and journals about herself.
-5. **Sleep / standby (§2.8)** — the natural next tick behavior: unload the LLM(s) from VRAM when
-   idle + low energy (a bot-initiated sleep job) and reload on wake ("waking up…" state). Ties to
-   the energy-budget idea; the model-lifecycle piece is the `lms load/unload` we've been driving by hand.
-6. ✅ ~~Core memory~~ (done 2026-07-19 — `core` flag on `memories`, extractor-marked, always injected,
-   brain re-rank cap, v6).
-7. ✅ ~~Self-modifying persona + familiarity meter~~ (done 2026-07-19 — `PersonaEditJob` rewrites the
-   `meta.persona_self` slot from the thought journal, gated by a message-count familiarity scalar).
-   **The brain is now feature-complete** for the planned v2 pillars.
-8. ✅ ~~Sleep / standby (§2.8)~~ (done 2026-07-19 — `SleepJob` unloads the LLM via the `lms` CLI after
-   a long idle; wake-on-message reloads with a "waking up…" state; model-jobs pause while asleep).
-   **Follow-up: self-waking** (wake to reach out) — deferred; needs a real trigger (reminders / energy
-   budget / time-of-day) to gate it so it's principled, not twitchy. `wake()` is already a public seam.
-9. ✅ ~~Status panel + web UI overhaul~~ (done 2026-07-19 — `GET /status` + live right-side panel showing
-   mood/memory/persona/thoughts/sleep; **conversation tabs** with per-thread history over a shared brain,
-   schema v7). A full memory-browser/editor (edit/undo supersede) is a possible later extension.
-10. **Tool framework (pillar 4)** — start with **reminisce** (reads the v5 journal + episodic; can be a
-    tick behavior), then a function-calling reliability probe → web search, reminders, Navidrome. Then voice.
-11. **From the GitHub research (V2_PLAN §2.9), user-liked:** multi-drive proactivity, energy/body cycles,
-    nightly deep consolidation. Plus fact-validity windows, do-not-disturb gating, push notifications.
+### C. Presence & timing
+- **Presence signal** — the WebSocket already knows if the tab is focused / the user is typing; use it as a
+  *real* "is the user here?" input to the tick/sleep logic instead of guessing from elapsed time. **Near-freebie.**
+- **Time-of-day awareness** — greet differently morning vs. late night, notice patterns ("up late again").
+  The `get_current_time` tool partially enables this now.
+- **Do-not-disturb / time-of-day gating** for proactivity — keeps reach-out and self-wake from firing at 3am.
 
-Delivery-layer features stay gated behind a solid brain, per the guiding principle.
+### D. Reach beyond the tab
+- **Push notifications** (e.g. Bark) — proactive messages reach the phone instead of dying in a closed tab;
+  also unlocks a genuinely *useful* self-wake.
+- **Multi-channel presence** — Mari over WhatsApp / Telegram / Discord instead of only the local web UI.
+
+### E. More tools (framework ready; paused by the user)
+The pillar-4 framework is built and hot-swappable — each of these is "register a `Tool`, nothing else changes."
+- **Web search**, **mood-based Navidrome/Subsonic playlist creator**, **reminder tool**, **curiosity-driven
+  search** (self-initiated search + reflection during a tick), and exposing **`rewrite_self`** as a real tool
+  (unifies the persona rewrite with the tool framework).
+
+### F. Whimsical / far-future
+- **Dreams** — during sleep, generate one memory-recombining "dream" she might mention on waking. One per wake.
+- **Voice** (STT/TTS) — the last delivery layer; later, **acoustic emotion perception** (hearing *how* you say
+  something, not just the words).
+- **Embodiment** — Live2D / VRM avatar, wearable sensors.
+
+**Recommendation:** the **A arc (multi-drive → energy → nightly consolidation)** is the highest-leverage next
+move — user-picked, it makes the whole system feel alive rather than timer-driven, and it retroactively makes
+self-wake and autonomous sleep coherent. Start with multi-drive proactivity (the tick already has the gate
+structure to generalize). The near-freebies in C (presence signal, time-of-day awareness) can slot in alongside.
