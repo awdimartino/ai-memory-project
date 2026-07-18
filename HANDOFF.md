@@ -284,7 +284,12 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
     present, and are relieved on contact (`Companion.on_user_message`). A `DriveDriftJob` updates them every
     tick; they're surfaced **read-only** in `GET /status` + a "Drives" panel section. **Behaviors are NOT yet
     gated on them** — reach-out/reflection/sleep stay on their idle gates until the drives prove out. Live-verified
-    end-to-end (mood modulation active). **Next step:** watch the panel over real use, then flip reach-out onto
+    end-to-end (mood modulation active). **Observation from the first live demo (2 example conversations):**
+    `connection` has a healthy gradient (0.22 → 0.66/0.83 → 1.00 over 5/15/25 min) and mood modulation is real —
+    a warm/sad chat drove it to **0.83** at 15 min vs **0.66** after a neutral chat (melancholy 0.35 vs 0.10, same
+    gap). **But `restlessness` saturates too fast** — pegs at 1.00 within ~4–5 min (default rise 15/hr → ceiling in
+    4 min), so it's a step function, not a graded signal. **Next step:** drop restlessness's `RISE_PER_HOUR` ~5–8×
+    (in `core/drives.py`) so its level is meaningful, watch the panel over real use, then flip reach-out onto
     `connection` and reflection onto `restlessness` (a one-line gate change per job; `discharge()` already exists).
 - **★ Energy / body cycles** — a fatigue/energy stat that biases toward rest, giving *autonomous* sleep an
   internal logic instead of a fixed 30-min timer.
