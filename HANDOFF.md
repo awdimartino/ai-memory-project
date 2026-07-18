@@ -96,22 +96,27 @@ REPL commands: `/exit` (flushes pending consolidation), `/reset`, `/model <name>
 
 ## 4. Model setup (current)
 
-- **Chat model: `qwen3-8b` with reasoning disabled.** gemma-3-4b was too shallow
-  (dismissive, incurious, hollow "You?" deflection). qwen3-8b is markedly smarter and
-  more engaging. It's a reasoning model, so `NO_THINK=true` appends `/no_think` to the
-  system message → direct answers, ~2.2s warm ttft, no reasoning latency.
-  - Note: LM Studio's `enable_thinking=false` flag is a **no-op** here; `/no_think` in
-    the prompt is what actually works. This build streams reasoning on a separate
-    `reasoning_content` channel (not inline `<think>`), which is why a reasoning model
-    with a token cap could return an empty answer.
+- **Chat model: `qwen/qwen3.5-9b` with reasoning disabled** (switched 2026-07-19 after a
+  personality bake-off). qwen3-8b was terse but **ended 72% of replies with a question**
+  ("what's on your mind?", "you?") and used a formulaic sympathy pattern — the user's real
+  complaint. qwen3.5-9b ends **0%** with a question, varies its phrasing, and scored 0/0/0 on
+  the conversation eval (apology/capitulate/disclaim) vs qwen3-8b's residual slips. It's a
+  reasoning model, so `NO_THINK=true` appends `/no_think` → direct answers.
+  - **Roleplay finetunes were tested and rejected:** `neona-12b-i1` and `rocinante-12b-v1.1`
+    both **break on our plain OpenAI-style chat API** — they generate both sides of the
+    conversation ("human:/ai:"), leak the persona text, or return empty replies (chat-template
+    / stop-token mismatch; they're built for SillyTavern + character cards). qwen3.5-9b stays in
+    the qwen/ChatML family the app already handles cleanly.
+  - Note: LM Studio's `enable_thinking=false` flag is a **no-op** here; `/no_think` in the
+    prompt is what works. Reasoning streams on a separate `reasoning_content` channel.
 - **Embedding: `text-embedding-nomic-embed-text-v1.5`** (CPU-friendly, small).
 - **Emotion: `SamLowe/roberta-base-go_emotions`** (~125M), runs on **CPU** (`device=-1`),
   ~0.5 GB RAM, leaves all VRAM for the LLMs. Configurable via `EMOTION_MODEL`.
 - **Brain (consolidation): reuses the chat model** by default (`BRAIN_MODEL` empty),
-  so only ~5 GB (qwen3-8b) + ~0.5 GB (nomic) is resident — no second big model, no
-  load/unload thrash. Reasoning can be re-enabled (`NO_THINK=false`) for the brain /
-  future complex tasks, where latency is hidden in the background.
-- `.env` currently: `MODEL=qwen3-8b`, `NO_THINK=true`, `BOT_NAME=Mari`.
+  so only ~6.5 GB (qwen3.5-9b) + ~0.1 GB (nomic) is resident — no second big model, no
+  load/unload thrash. Extraction verified clean on qwen3.5-9b (eval: 15 captured / 0 bad).
+- `.env` now: `MODEL=qwen/qwen3.5-9b`, `NO_THINK=true`, `BOT_NAME=Mari`. Repetition penalties
+  (`FREQUENCY_PENALTY=0.4`, `PRESENCE_PENALTY=0.3`) + `LLM_MAX_RETRIES=3` also apply.
 
 To swap models one-at-a-time for testing, use `lms unload --all` between loads (LM
 Studio JIT keeps them resident otherwise and will exhaust 16 GB). Bake-off + speed
