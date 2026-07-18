@@ -53,6 +53,15 @@ MIGRATIONS = [
     INSERT INTO meta (key, value)
     VALUES ('last_consolidated_msg_id', (SELECT COALESCE(MAX(id), 0) FROM messages));
     """,
+    # v5 — Mari's private thought journal (self-reflection during idle ticks)
+    """
+    CREATE TABLE thoughts (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        content    TEXT NOT NULL,
+        mood       TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

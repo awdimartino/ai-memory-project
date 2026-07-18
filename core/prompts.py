@@ -123,6 +123,33 @@ def build_reachout_system(memories: list[str], mood: str | None = None) -> str:
     return f"{base}\n\n{_REACHOUT_ADDENDUM}"
 
 
+# --- Self-reflection (private thought journal, written during idle ticks) ---
+
+_REFLECT_ADDENDUM = """Right now you're on your own, between conversations. Take a quiet moment to think to
+yourself — a private journal entry the user will never see.
+
+Reflect on YOU: how you're actually feeling right now, what these talks are like for you,
+something they said that stuck with you, something you're curious or unsure about, who you're
+becoming as you get to know them. Be honest and a little unfiltered, the way a private thought
+is. It's fine to feel bored, fond, uneasy, or nothing much.
+
+Write one or two sentences, first person, to yourself (not to them). Don't narrate actions or
+invent events, just think. Don't repeat a thought you've already had recently."""
+
+REFLECT_CUE = "(You're alone with your thoughts for a bit. Write a short, honest note to yourself.)"
+
+
+def build_reflect_system(memories: list[str], mood: str | None,
+                         recent_thoughts: list[str]) -> str:
+    """System prompt for a private reflection: persona + memories + mood + recent thoughts."""
+    base = build_system(memories, mood)
+    parts = [base, _REFLECT_ADDENDUM]
+    if recent_thoughts:
+        joined = "\n".join(f"- {t}" for t in recent_thoughts)
+        parts.append(f"Some thoughts you've had recently (don't just repeat these):\n{joined}")
+    return "\n\n".join(parts)
+
+
 # --- Memory consolidation (Tier-2 structured output) ---
 
 MEMORY_EXTRACTION_SYSTEM = f"""You extract DURABLE facts about the USER from a conversation between the user and {BOT_NAME}.

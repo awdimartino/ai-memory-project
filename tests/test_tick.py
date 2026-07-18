@@ -14,7 +14,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.emotion_manager import EmotionManager
-from core.tick import IdleConsolidationJob, Job, MoodDriftJob, ReachOutJob, TickLoop
+from core.tick import (
+    IdleConsolidationJob,
+    Job,
+    MoodDriftJob,
+    ReachOutJob,
+    ReflectionJob,
+    TickLoop,
+)
 
 
 class Clock:
@@ -239,6 +246,46 @@ async def reach_out_decline_still_sets_cooldown():
     assert comp.reach_calls == 1, "should have attempted"
     assert pushes == [], "declined -> no push"
     assert comp.meta.get_json("last_reachout_at") == 1_000_000.0, "cooldown set even on decline"
+
+
+class ReflectCompanion:
+    def __init__(self, idle):
+        self._idle = idle
+        self.meta = InMemoryMeta()
+        self.reflect_calls = 0
+
+    def idle_seconds(self):
+        return self._idle
+
+    async def reflect(self):
+        self.reflect_calls += 1
+        return "i've been wondering what they do all day"
+
+
+@case
+async def reflection_gated_by_idle():
+    comp = ReflectCompanion(idle=30.0)   # only 30s away, min_idle 120
+    job = ReflectionJob(comp, interval=0.0, min_idle=120.0, cooldown=600.0, clock=WallClock())
+    await job.run()
+    assert comp.reflect_calls == 0, "should not reflect while barely idle"
+
+
+@case
+async def reflection_gated_by_cooldown():
+    comp = ReflectCompanion(idle=1000.0)
+    comp.meta.set_json("last_reflect_at", 1_000_000.0 - 60.0)  # reflected 60s ago (< 600)
+    job = ReflectionJob(comp, interval=0.0, min_idle=120.0, cooldown=600.0, clock=WallClock())
+    await job.run()
+    assert comp.reflect_calls == 0, "cooldown should block back-to-back reflection"
+
+
+@case
+async def reflection_fires_and_sets_cooldown():
+    comp = ReflectCompanion(idle=1000.0)
+    job = ReflectionJob(comp, interval=0.0, min_idle=120.0, cooldown=600.0, clock=WallClock())
+    await job.run()
+    assert comp.reflect_calls == 1
+    assert comp.meta.get_json("last_reflect_at") == 1_000_000.0
 
 
 @case

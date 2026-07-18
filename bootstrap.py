@@ -11,13 +11,14 @@ import config
 from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
 from core.emotion_manager import EmotionManager
 from core.memory_manager import MemoryManager
-from core.tick import IdleConsolidationJob, MoodDriftJob, TickLoop
+from core.tick import IdleConsolidationJob, MoodDriftJob, ReflectionJob, TickLoop
 from infrastructure.conversation_store import SqliteConversationStore
 from infrastructure.db import connect
 from infrastructure.embedder import Embedder
 from infrastructure.llm_client import LLMClient
 from infrastructure.memory_store import SqliteMemoryStore
 from infrastructure.meta_store import SqliteMetaStore
+from infrastructure.thought_store import SqliteThoughtStore
 
 
 def configure_logging() -> None:
@@ -39,6 +40,7 @@ async def build() -> tuple[Companion, str]:
     conv_store = SqliteConversationStore(conn)
     mem_store = SqliteMemoryStore(conn)
     meta_store = SqliteMetaStore(conn)
+    thought_store = SqliteThoughtStore(conn)
 
     llm = LLMClient(config.BASE_URL, config.API_KEY, config.MODEL, config.TEMPERATURE,
                     no_think=config.NO_THINK,
@@ -64,16 +66,20 @@ async def build() -> tuple[Companion, str]:
     unconsolidated = conv_store.messages_after(watermark)
     session_id = conv_store.create_session()
     companion = Companion(llm, conv_store, memory, meta_store, session_id,
-                          history, unconsolidated, emotion=emotion)
+                          history, unconsolidated, emotion=emotion, thoughts=thought_store)
 
-    # Proactivity heartbeat (internal jobs only for now). Created, not started;
-    # the entry point starts it so eval/test harnesses that call build() don't tick.
+    # Proactivity heartbeat. Created, not started; the entry point starts it so eval/test
+    # harnesses that call build() don't tick. Internal jobs live here; surface-specific
+    # jobs (reach-out, which needs the WebSocket) are registered by the entry point.
     if config.TICK_ENABLED:
-        companion.tick = TickLoop(
-            [MoodDriftJob(companion, emotion, config.TICK_INTERVAL, config.TICK_IDLE_SECONDS),
-             IdleConsolidationJob(companion, config.TICK_INTERVAL, config.IDLE_CONSOLIDATE_AFTER)],
-            interval=config.TICK_INTERVAL,
-        )
+        jobs = [
+            MoodDriftJob(companion, emotion, config.TICK_INTERVAL, config.TICK_IDLE_SECONDS),
+            IdleConsolidationJob(companion, config.TICK_INTERVAL, config.IDLE_CONSOLIDATE_AFTER),
+        ]
+        if config.REFLECT_ENABLED:
+            jobs.append(ReflectionJob(companion, config.TICK_INTERVAL,
+                                      config.REFLECT_MIN_IDLE, config.REFLECT_COOLDOWN))
+        companion.tick = TickLoop(jobs, interval=config.TICK_INTERVAL)
 
     logging.getLogger("bootstrap").info(
         "ready: chat=%s, brain=%s, embed=%s, emotion=%s | %d logged msgs, %d memories, "

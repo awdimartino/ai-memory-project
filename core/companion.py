@@ -24,7 +24,13 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 import config
-from core.prompts import build_reachout_cue, build_reachout_system, build_system
+from core.prompts import (
+    REFLECT_CUE,
+    build_reachout_cue,
+    build_reachout_system,
+    build_reflect_system,
+    build_system,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +72,13 @@ class Companion:
     def __init__(self, llm, store, memory, meta, session_id: int,
                  history: list[dict] | None = None,
                  unconsolidated: list[dict] | None = None,
-                 emotion=None):
+                 emotion=None, thoughts=None):
         self.llm = llm
         self.store = store
         self.memory = memory
         self.meta = meta
         self.emotion = emotion  # EmotionManager, or None when disabled
+        self.thoughts = thoughts  # ThoughtStore for the private journal, or None
         self.session_id = session_id
         self.history: list[dict] = history or []
         # Each entry carries its message id so a successful consolidation can
@@ -164,6 +171,39 @@ class Companion:
         self.history.append({"role": "assistant", "content": text})
         self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
         logger.info("reach-out: %s", text[:80])
+        return text
+
+    async def reflect(self) -> str | None:
+        """Write a short private thought to the journal (not shown to the user).
+
+        Draws on recent conversation, current mood, and recent thoughts (to avoid
+        repeating itself). Stored via the ThoughtStore; returns the thought text.
+        """
+        if self.thoughts is None:
+            return None
+        last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
+        recalled = await self.memory.recall(last_user) if last_user else []
+        mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        recent = [t["content"] for t in self.thoughts.recent(5)]
+        system = build_reflect_system([content for content, _ in recalled], mood_prompt, recent)
+
+        messages = [{"role": "system", "content": system}]
+        messages.extend(self.history[-config.HISTORY_TURNS:])
+        messages.append({"role": "user", "content": REFLECT_CUE})
+
+        async def _sink(_t):
+            pass
+
+        text, _ = await self.llm.stream(messages, _sink)
+        text = text.strip()
+        if not text:
+            return None
+
+        dom = None
+        if self.emotion is not None:
+            dom = max(self.emotion.state, key=self.emotion.state.get)
+        await asyncio.to_thread(self.thoughts.add, text, dom)
+        logger.info("reflected: %s", text[:80])
         return text
 
     def _maybe_consolidate(self) -> None:

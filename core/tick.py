@@ -142,6 +142,37 @@ class ReachOutJob(Job):
             await self.notify({"type": "proactive", "content": message})
 
 
+LAST_REFLECT_KEY = "last_reflect_at"
+
+
+class ReflectionJob(Job):
+    """While the user is away, have Mari write a short private thought to her journal.
+
+    Same gate shape as reach-out (idle >= min_idle, persisted wall-clock cooldown, mark
+    the attempt before generating), but internal: nothing is pushed to the user, the
+    thought is just stored via `companion.reflect()`.
+    """
+    name = "reflection"
+
+    def __init__(self, companion, interval: float, min_idle: float,
+                 cooldown: float, clock=time.time):
+        self.companion = companion
+        self.interval = interval
+        self.min_idle = min_idle
+        self.cooldown = cooldown
+        self.clock = clock
+
+    async def run(self) -> None:
+        if self.companion.idle_seconds() < self.min_idle:
+            return
+        now = self.clock()
+        last = self.companion.meta.get_json(LAST_REFLECT_KEY, 0) or 0
+        if now - last < self.cooldown:
+            return
+        await asyncio.to_thread(self.companion.meta.set_json, LAST_REFLECT_KEY, now)
+        await self.companion.reflect()
+
+
 class IdleConsolidationJob(Job):
     """Once the user has been away a while, consolidate any pending messages so
     facts get saved without waiting for a full context window."""

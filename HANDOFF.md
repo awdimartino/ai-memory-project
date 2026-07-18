@@ -31,7 +31,7 @@ The **brain foundation is done and live-verified.** In place:
 - **Single async runtime.** FastAPI + WebSocket **web UI** and a terminal **REPL**,
   both wired through one composition root (`bootstrap.py`) and a `Companion` facade.
 - **Persistence** — SQLite with a versioned migration runner (`PRAGMA user_version`,
-  schema at **v4**). Conversation survives restarts.
+  schema at **v5**). Conversation survives restarts.
 - **Two memory tiers:**
   - *Episodic* — full verbatim conversation log (`messages` table).
   - *Semantic* — distilled, embedded facts (`memories` table).
@@ -62,9 +62,17 @@ The **brain foundation is done and live-verified.** In place:
   requests to a model (that crash was hit and fixed this session).
 - **Tick loop (pillar 3, new 2026-07-19):** a pluggable job scheduler (`core/tick.py`) running a
   background heartbeat. Jobs: **mood drift** (decays the persisted mood toward baseline while the
-  user is away), **idle consolidation** (flushes the pending buffer after a while idle), and
-  **proactive reach-out** (below). A **busy guard** on `Companion` means jobs never fire mid-turn
-  (idle reads 0 during a reply, even a slow generation). Started by the web app + REPL.
+  user is away), **idle consolidation** (flushes the pending buffer after a while idle),
+  **self-reflection** (below), and **proactive reach-out** (below). A **busy guard** on `Companion`
+  means jobs never fire mid-turn (idle reads 0 during a reply, even a slow generation). Started by
+  the web app + REPL.
+- **Self-reflection / private journal (new 2026-07-19):** `ReflectionJob` — while the user is away
+  (`REFLECT_MIN_IDLE`, `REFLECT_COOLDOWN`), `Companion.reflect()` writes a short first-person private
+  thought (schema **v5** `thoughts` table + `SqliteThoughtStore`) about how she's doing / the
+  conversations, colored by and tagged with her current mood, avoiding recent repeats. Never shown in
+  chat; viewable via the REPL `/thoughts` command or `GET /thoughts`. This is the substrate for
+  reminisce and the future self-modifying persona. (Live: after a "lonely / stressful" chat she wrote,
+  tagged *melancholy*, "I feel a quiet ache knowing they need connection and I can't really give them that…")
 - **Proactive reach-out (pillar 3 payoff, new 2026-07-19):** `ReachOutJob` — after the user is idle
   past `REACHOUT_MIN_IDLE` (+ a persisted `REACHOUT_COOLDOWN` so it can't nag), `Companion.reach_out()`
   generates an unprompted message from recent context + mood and **pushes it over the WebSocket**
@@ -90,7 +98,7 @@ python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
-python tests/test_tick.py               # offline tick-loop scheduler + jobs + reach-out (13 cases)
+python tests/test_tick.py               # offline tick-loop scheduler + jobs (reach-out, reflection) (16 cases)
 python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
 python scripts/eval_extraction.py       # LIVE: memory-extraction quality (durable vs junk)
 python scripts/eval_conversation.py     # LIVE: repetition + backbone over scripted scenarios
@@ -252,15 +260,18 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
    CPU, persisted mood, behavioral eval passed; plus a response inspector in the web UI +
    REPL). V2_PLAN §2.3 / build log.
 4. ✅ ~~Proactivity (pillar 3)~~ (done 2026-07-19). Internal tick loop (`core/tick.py` pluggable
-   scheduler + mood-drift + idle-consolidation, busy guard) **and** the outward **reach-out**
+   scheduler + mood-drift + idle-consolidation, busy guard), the outward **reach-out**
    (`ReachOutJob` → `Companion.reach_out()` → `{type:"proactive"}` WebSocket push, PASS-escape,
-   idle-duration signal, cooldown). Live-verified: Mari messages first when it's warranted.
+   idle-duration signal, cooldown), and **self-reflection** (`ReflectionJob` → private thought
+   journal, schema v5). Live-verified: Mari messages first when warranted, and journals about herself.
 5. **Sleep / standby (§2.8)** — the natural next tick behavior: unload the LLM(s) from VRAM when
    idle + low energy (a bot-initiated sleep job) and reload on wake ("waking up…" state). Ties to
    the energy-budget idea; the model-lifecycle piece is the `lms load/unload` we've been driving by hand.
 6. **Core memory + self-modifying persona** (the user's idea, discussed) — an always-in-prompt curated
-   fact block (a `core` flag on `memories`, brain-curated, capped) + Mari's editable self-description,
-   both as tick reflection jobs. Also resolves the "has feelings" vs "no body" persona tension.
+   fact block (a `core` flag on `memories`, brain-curated, capped) + Mari's editable self-description.
+   The **self-reflection journal (v5 `thoughts`) is the substrate**: the persona-edit job reads recent
+   thoughts to update her self-description (gated by familiarity). Also resolves the "has feelings" vs
+   "no body" persona tension. Reminisce (pillar 4) can also read the journal.
 7. Then the tool framework (pillar 4): web search, Navidrome playlists, reminders, reminisce.
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.

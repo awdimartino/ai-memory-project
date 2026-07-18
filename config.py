@@ -102,6 +102,13 @@ REACHOUT_ENABLED = os.environ.get("REACHOUT_ENABLED", "true").lower() in ("1", "
 REACHOUT_MIN_IDLE = float(os.environ.get("REACHOUT_MIN_IDLE", "900"))    # 15 min away
 REACHOUT_COOLDOWN = float(os.environ.get("REACHOUT_COOLDOWN", "7200"))   # >=2h between attempts
 
+# Self-reflection: while the user is away, Mari writes a short private thought (a journal
+# to herself, never shown in chat) about how she's doing and the conversations. Internal
+# cognition — the substrate for reminisce and, later, the self-modifying persona.
+REFLECT_ENABLED = os.environ.get("REFLECT_ENABLED", "true").lower() in ("1", "true", "yes")
+REFLECT_MIN_IDLE = float(os.environ.get("REFLECT_MIN_IDLE", "120"))      # think after 2 min away
+REFLECT_COOLDOWN = float(os.environ.get("REFLECT_COOLDOWN", "600"))      # at most every ~10 min
+
 # Web server.
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))

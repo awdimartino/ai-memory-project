@@ -33,7 +33,7 @@ async def amain() -> int:
     print(f"Model: {model}  |  temp: {companion.llm.temperature}")
     if companion.history:
         print(f"(carried {len(companion.history)} messages of context from earlier)")
-    print("Commands: /exit, /reset, /model [name], /temp [value]")
+    print("Commands: /exit, /reset, /thoughts, /model [name], /temp [value]")
     print(f"\nYou're talking to {config.BOT_NAME}. Say hi.\n")
 
     async def on_token(t: str) -> None:
@@ -48,6 +48,17 @@ async def amain() -> int:
         if user == "/reset":
             companion.reset()
             print("(context cleared)\n")
+            continue
+        if user == "/thoughts":
+            recent = companion.thoughts.recent(10) if companion.thoughts else []
+            if not recent:
+                print("(no thoughts yet — Mari reflects while you're away)\n")
+            else:
+                print("(recent private thoughts, newest first)")
+                for t in recent:
+                    tag = f" [{t['mood']}]" if t.get("mood") else ""
+                    print(f"  -{tag} {t['content']}")
+                print()
             continue
         if user.startswith("/model"):
             parts = user.split(maxsplit=1)

@@ -51,6 +51,18 @@ class MemoryStore(Protocol):
         ...
 
 
+class ThoughtStore(Protocol):
+    """Persistence for Mari's private thought journal (self-reflections)."""
+
+    def add(self, content: str, mood: str | None) -> int:
+        """Store one reflection (optionally tagged with the dominant mood); return its id."""
+        ...
+
+    def recent(self, limit: int) -> list[dict]:
+        """Return up to `limit` most recent thoughts (newest first) as {content, mood, created_at}."""
+        ...
+
+
 class MetaStore(Protocol):
     """Persistence for durable scalar state (a small key/value table)."""
 

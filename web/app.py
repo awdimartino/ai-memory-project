@@ -71,6 +71,14 @@ async def index() -> FileResponse:
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
+@app.get("/thoughts")
+async def thoughts() -> dict:
+    """Mari's recent private reflections (written by the tick loop while you're away)."""
+    companion = _state.get("companion")
+    recent = companion.thoughts.recent(20) if companion and companion.thoughts else []
+    return {"thoughts": recent}
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()
