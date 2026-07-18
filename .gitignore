@@ -5,4 +5,9 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
-config.py
+
+# generated bake-off transcripts (the harness itself lives in scripts/)
+/bakeoff/
+
+# v1 archived config holds a hardcoded token; must never be committed
+/archive/v1/infrastructure/config.py

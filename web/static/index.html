@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mari</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --user: #2b5cff; --bot: #232733;
+      --text: #e6e8ee; --muted: #8b90a0; --line: #262a35;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; height: 100vh; display: flex; flex-direction: column;
+      background: var(--bg); color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    header {
+      padding: 12px 16px; border-bottom: 1px solid var(--line);
+      display: flex; align-items: baseline; gap: 10px;
+    }
+    header h1 { font-size: 16px; margin: 0; }
+    header .meta { color: var(--muted); font-size: 12px; }
+    #log {
+      flex: 1; overflow-y: auto; padding: 20px 16px;
+      display: flex; flex-direction: column; gap: 12px; max-width: 820px;
+      width: 100%; margin: 0 auto;
+    }
+    .row { display: flex; }
+    .row.user { justify-content: flex-end; }
+    .bubble {
+      max-width: 78%; padding: 9px 13px; border-radius: 14px; white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .user .bubble { background: var(--user); color: #fff; border-bottom-right-radius: 4px; }
+    .bot .bubble { background: var(--bot); border-bottom-left-radius: 4px; }
+    .stats { color: var(--muted); font-size: 11px; margin: 2px 4px 0; }
+    form {
+      display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line);
+      max-width: 820px; width: 100%; margin: 0 auto;
+    }
+    #input {
+      flex: 1; resize: none; background: var(--panel); color: var(--text);
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+      font: inherit; max-height: 140px;
+    }
+    button {
+      background: var(--user); color: #fff; border: 0; border-radius: 10px;
+      padding: 0 18px; font: inherit; cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    .dot { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="botname">Mari</h1>
+    <span class="meta" id="model">connecting...</span>
+  </header>
+  <div id="log"></div>
+  <form id="form">
+    <textarea id="input" rows="1" placeholder="Say something..." autocomplete="off"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+
+  <script>
+    const log = document.getElementById("log");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const modelEl = document.getElementById("model");
+    const botnameEl = document.getElementById("botname");
+    let botName = "Mari";
+    let current = null; // active assistant bubble while streaming
+
+    function addBubble(role, text) {
+      const row = document.createElement("div");
+      row.className = "row " + role;
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+      row.appendChild(bubble);
+      log.appendChild(row);
+      log.scrollTop = log.scrollHeight;
+      return bubble;
+    }
+
+    function addStats(s) {
+      const el = document.createElement("div");
+      el.className = "stats";
+      const approx = s.estimated ? "~" : "";
+      el.textContent = `ttft ${s.ttft.toFixed(2)}s · ${s.tok_per_s.toFixed(1)} tok/s · ${approx}${s.tokens} tok`;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${proto}://${location.host}/ws`);
+
+    socket.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "ready") {
+        botName = msg.bot;
+        botnameEl.textContent = msg.bot;
+        modelEl.textContent = msg.model;
+      } else if (msg.type === "history") {
+        addBubble(msg.role === "user" ? "user" : "bot", msg.content);
+      } else if (msg.type === "start") {
+        current = addBubble("bot", "");
+      } else if (msg.type === "token") {
+        if (!current) current = addBubble("bot", "");
+        current.textContent += msg.text;
+        log.scrollTop = log.scrollHeight;
+      } else if (msg.type === "done") {
+        current = null;
+        addStats(msg.stats);
+        setSending(false);
+      } else if (msg.type === "error") {
+        if (current) current.textContent += `\n[error: ${msg.message}]`;
+        current = null;
+        setSending(false);
+      }
+    };
+
+    socket.onclose = () => { modelEl.textContent = "disconnected"; };
+
+    function setSending(on) {
+      sendBtn.disabled = on;
+      input.disabled = on;
+      if (!on) input.focus();
+    }
+
+    function submit() {
+      const text = input.value.trim();
+      if (!text || sendBtn.disabled) return;
+      addBubble("user", text);
+      socket.send(JSON.stringify({ type: "user", text }));
+      input.value = "";
+      input.style.height = "auto";
+      setSending(true);
+    }
+
+    form.addEventListener("submit", (e) => { e.preventDefault(); submit(); });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+    });
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 140) + "px";
+    });
+  </script>
+</body>
+</html>

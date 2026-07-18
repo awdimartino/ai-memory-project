@@ -1,0 +1,67 @@
+"""SQLite connection + a minimal versioned migration runner.
+
+Migrations use SQLite's built-in `PRAGMA user_version` as the schema version.
+To evolve the schema, append a new statement to MIGRATIONS; never edit an
+existing entry (that's what keeps upgrades deterministic across machines).
+"""
+import logging
+import sqlite3
+
+logger = logging.getLogger(__name__)
+
+MIGRATIONS = [
+    # v1 — episodic conversation log
+    """
+    CREATE TABLE sessions (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at TEXT NOT NULL
+    );
+    CREATE TABLE messages (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES sessions(id),
+        role       TEXT NOT NULL,
+        content    TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_messages_session ON messages(session_id);
+    """,
+    # v2 — semantic memory tier (distilled, embedded facts)
+    """
+    CREATE TABLE memories (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        content        TEXT NOT NULL,
+        category       TEXT,
+        embedding      BLOB NOT NULL,
+        created_at     TEXT NOT NULL,
+        source_session INTEGER,
+        active         INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX idx_memories_active ON memories(active);
+    """,
+    # v3 — lifecycle: link a superseded memory to the one that replaced it
+    """
+    ALTER TABLE memories ADD COLUMN superseded_by INTEGER;
+    """,
+]
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version >= len(MIGRATIONS):
+        return
+    for i in range(version, len(MIGRATIONS)):
+        logger.info("applying migration v%d", i + 1)
+        conn.executescript(MIGRATIONS[i])
+        conn.execute(f"PRAGMA user_version = {i + 1}")
+    conn.commit()
+
+
+def connect(path: str) -> sqlite3.Connection:
+    # check_same_thread=False so the connection can be used from asyncio's
+    # threadpool executor; the store serializes writes with a lock.
+    conn = sqlite3.connect(path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA foreign_keys = ON")
+    migrate(conn)
+    return conn
