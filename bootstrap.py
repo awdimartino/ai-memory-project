@@ -8,9 +8,11 @@ import logging
 import sys
 
 import config
+from core.builtin_tools import make_reminisce_tool, make_time_tool
 from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
 from core.emotion_manager import EmotionManager
 from core.memory_manager import MemoryManager
+from core.tools import ToolRegistry
 from core.tick import (
     IdleConsolidationJob,
     MoodDriftJob,
@@ -85,9 +87,21 @@ async def build() -> tuple[Companion, str]:
     # logged after the last consolidation checkpoint (e.g. dropped by a hard kill).
     watermark = meta_store.get_int(CONSOLIDATED_WATERMARK_KEY, 0)
     unconsolidated = conv_store.messages_after(watermark)
+
+    # Tool table (pillar 4): the hot-swappable set of things Mari can call mid-turn.
+    # Add a Tool here (or at runtime via companion.tools.register) and she can use it
+    # next message — the chat loop consults this table every turn, nothing else changes.
+    tools = None
+    if config.TOOLS_ENABLED:
+        tools = ToolRegistry([
+            make_time_tool(),
+            make_reminisce_tool(thought_store, conv_store),
+        ])
+
     companion = Companion(llm, conv_store, memory, meta_store, active,
                           history, unconsolidated, emotion=emotion, thoughts=thought_store,
-                          model_manager=model_manager)
+                          model_manager=model_manager, tools=tools,
+                          tool_max_iters=config.TOOL_MAX_ITERS)
     companion._session_title = conv_store.session_title(active)
 
     # Proactivity heartbeat. Created, not started; the entry point starts it so eval/test
@@ -110,10 +124,11 @@ async def build() -> tuple[Companion, str]:
         companion.tick = TickLoop(jobs, interval=config.TICK_INTERVAL)
 
     logging.getLogger("bootstrap").info(
-        "ready: chat=%s, brain=%s, embed=%s, emotion=%s | %d logged msgs, %d memories, "
+        "ready: chat=%s, brain=%s, embed=%s, emotion=%s, tools=%s | %d logged msgs, %d memories, "
         "%d carried, %d unconsolidated recovered",
         model, brain_model, config.EMBED_MODEL,
         config.EMOTION_MODEL if emotion else "off",
+        ",".join(tools.names()) if tools else "off",
         conv_store.message_count(), mem_store.count(), len(history), len(unconsolidated),
     )
     return companion, model

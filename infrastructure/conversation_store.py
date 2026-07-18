@@ -4,6 +4,7 @@ Pure persistence: SQL in, plain dicts out. Timestamps are always UTC ISO-8601
 (a v1 rule). A lock serializes writes since the connection is shared across
 asyncio's threadpool.
 """
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -99,3 +100,26 @@ class SqliteConversationStore:
 
     def message_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+
+    def search_messages(self, query: str, limit: int) -> list[dict]:
+        """Messages matching `query` across all conversations, for the reminisce tool.
+
+        Keyword search: split the topic into words (>2 chars), gather messages
+        containing any of them (LIKE is case-insensitive for ASCII), then rank by
+        how many distinct words hit. Returns up to `limit`, oldest-first so the
+        digest reads chronologically. A pragmatic v1 — semantic search over the log
+        is a later upgrade; underscore-free word tokens keep LIKE wildcard-safe.
+        """
+        words = [w for w in re.findall(r"[^\W_]+", (query or "").lower()) if len(w) > 2]
+        if not words:
+            return []
+        clauses = " OR ".join(["content LIKE ?"] * len(words))
+        params = [f"%{w}%" for w in words]
+        rows = self.conn.execute(
+            f"SELECT id, role, content FROM messages WHERE {clauses} ORDER BY id DESC LIMIT 200",
+            params,
+        ).fetchall()
+        scored = [(sum(w in r["content"].lower() for w in words), r["id"], r) for r in rows]
+        scored.sort(key=lambda t: (-t[0], -t[1]))            # best match, then most recent
+        top = sorted(scored[:limit], key=lambda t: t[1])     # oldest-first for reading
+        return [{"id": t[2]["id"], "role": t[2]["role"], "content": t[2]["content"]} for t in top]

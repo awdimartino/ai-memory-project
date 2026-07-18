@@ -112,8 +112,23 @@ The **brain foundation is done and live-verified.** In place:
   conversation**; only the message *thread* (history + `session_id`) is per-tab. On boot she resumes the
   most recent conversation instead of spawning a new session per launch.
 
-Not yet built: **tool framework (pillar 4) + voice.** Delivery-layer extras only; the brain
-(all four pillars + core memory + self-modifying persona + sleep) is feature-complete.
+- **Tool framework (pillar 4, new 2026-07-18):** native OpenAI function-calling, verified **100%
+  reliable** on qwen3.5-9b first (`scripts/tool_probe.py`) — including streamed `tool_calls` deltas.
+  A hot-swappable **`ToolRegistry`** (`core/tools.py`) pairs each `Tool`'s JSON schema with an async
+  handler; register one and Mari can call it next turn, nothing else changes. `LLMClient.stream_with_tools`
+  runs a **streaming tool loop** that keeps token-streaming the final answer and only loops when the model
+  asks for a tool. It's **robust at every seam** — malformed-arg JSON, unknown tool, and handler
+  exceptions all become a result *string fed back to the model* (never an aborted turn), plus a
+  `max_iters` safety net and retry-before-first-emit. Two built-in tools (`core/builtin_tools.py`):
+  **`get_current_time`** (live-reliable) and **`reminisce`** (deliberate episodic recall — keyword-searches
+  the full message log + private journal for "remember when…" moments, distinct from autonomic semantic
+  recall). Tools surface in the **response inspector** ("Tools called"). A tools-awareness block in
+  `build_system` reconciles them with the "you just met / don't invent history" persona rules (reminisce
+  recalls *real* past talks). Offline: `tests/test_tools.py` (20 cases). Live-verified end-to-end.
+
+Not yet built: **more tools** (web search, Navidrome/Subsonic playlist creator) **+ voice.** The
+framework is ready for them; the brain (all four pillars + core memory + self-modifying persona +
+sleep + tools) is feature-complete.
 
 ---
 
@@ -131,6 +146,10 @@ python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
 python tests/test_tick.py               # tick scheduler + jobs (reach-out/reflection/persona) + familiarity (21 cases)
+python tests/test_tools.py              # offline tool framework: registry + stream loop + reminisce (20 cases)
+python scripts/tool_probe.py            # LIVE: native tool-calling reliability (probe, per-case pass rate)
+python scripts/tool_smoke.py            # LIVE: tools end-to-end through the real persona (time + reminisce + no-tool)
+python scripts/reminisce_smoke.py       # LIVE: reminisce recalls a past episode out of the context window
 python scripts/stress_test.py           # LIVE whole-system stress + invariant checks
 python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
 python scripts/eval_extraction.py       # LIVE: memory-extraction quality (durable vs junk)
@@ -179,12 +198,13 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 
 ## 5. Git state ⚠️
 
-- **Committed:** `5669f0f` "Initial v2.0: local AI companion brain (memory + web UI)"
-  — the full foundation incl. memory lifecycle, tests, and edge-case hardening.
-- **Uncommitted (on disk, verified, NOT yet committed):** the qwen3-8b + `/no_think`
-  model switch — `config.py` (NO_THINK), `infrastructure/llm_client.py` (no_think +
-  `_prep`), `bootstrap.py`, `V2_PLAN.md` updates, and `.env` (git-ignored). **Natural
-  next action: commit this.** Suggested message: "Switch chat to qwen3-8b + no-think".
+- **Committed (main, in order):** `5669f0f` initial v2.0 foundation → `73d517d` qwen3.5 + no-think
+  → `9b4500d` crash-durable consolidation → `9f70040` emotion (pillar 2) + inspector → `15db7c5`
+  conversation-quality fixes → then core memory, tick loop, reflection, reach-out, self-modifying
+  persona, sleep, status panel + tabs. Each pillar landed as its own commit.
+- **The tool framework (pillar 4) is committed as of this session** (registry + stream loop +
+  built-in tools + 20-case offline suite + live smokes). The **user has authorized autonomous
+  commits** — commit worthwhile work on `main` without asking (see the `commit-without-asking` memory).
 - **Security note:** `archive/v1/infrastructure/config.py` holds a **real hardcoded
   HuggingFace token** and is git-ignored on purpose (specific rule in `.gitignore`).
   It should be **rotated/revoked** on HuggingFace regardless. Do not commit it.

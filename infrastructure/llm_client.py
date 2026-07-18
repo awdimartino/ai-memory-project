@@ -168,6 +168,186 @@ class LLMClient:
         }
         return text, stats
 
+    # ---- native tool-calling (pillar 4) --------------------------------------
+    # LM Studio streams tool calls as deltas (finish_reason="tool_calls", empty
+    # content), so we keep token-streaming for the final answer and only loop when
+    # the model actually asks for a tool. The loop is defensive at every seam: a
+    # malformed-args call, an unknown tool, or a handler error all come back as a
+    # result *string* the model reads and recovers from — the turn always ends.
+
+    async def stream_with_tools(self, messages, on_token: Callable[[str], Awaitable],
+                                registry, max_iters: int = 5):
+        """Stream a reply, letting the model call tools from `registry` in a loop.
+
+        Same contract as stream(): awaits on_token(text) for each visible chunk and
+        returns (final_text, stats). Each round streams a completion with the tools
+        attached; if the model asks for tools (content empty), we run them, append
+        the results, and loop; the round that streams real content is the answer.
+        `registry` needs `.specs()` and `async .execute(name, args)`.
+        """
+        convo = self._prep([dict(m) for m in messages])
+        start = time.perf_counter()
+        first_at = None
+        total_tokens = 0
+        invocations: list[dict] = []  # what ran this turn, surfaced for the UI inspector
+
+        for _ in range(max_iters):
+            text, calls, ct, ft = await self._tool_step(convo, on_token, registry.specs())
+            if ft is not None and first_at is None:
+                first_at = ft
+            if ct:
+                total_tokens += ct
+            if not calls:  # no tool requested -> this was the final answer
+                return text, self._tool_stats(start, first_at, total_tokens, text, invocations)
+
+            # Record the assistant's tool-call turn, then feed back each result.
+            convo.append({
+                "role": "assistant",
+                "content": text or "",
+                "tool_calls": [
+                    {"id": c["id"], "type": "function",
+                     "function": {"name": c["name"], "arguments": c["raw_args"]}}
+                    for c in calls
+                ],
+            })
+            for c in calls:
+                result = await self._run_call(registry, c)
+                invocations.append({"name": c["name"], "args": c["raw_args"],
+                                    "result": result[:200]})
+                convo.append({"role": "tool", "tool_call_id": c["id"], "content": result})
+
+        # Safety net: the model kept calling tools past the cap. Force one final
+        # answer with no tools so a turn can never hang in a tool loop.
+        logger.warning("tool loop hit max_iters=%d; forcing a plain answer", max_iters)
+        text, _, ct, ft = await self._tool_step(convo, on_token, None)
+        if ft is not None and first_at is None:
+            first_at = ft
+        return text, self._tool_stats(start, first_at, total_tokens + (ct or 0), text, invocations)
+
+    async def _run_call(self, registry, call: dict) -> str:
+        """Parse one call's args and execute it, turning any failure into a result string."""
+        raw = call["raw_args"]
+        try:
+            args = json.loads(raw) if raw and raw.strip() else {}
+            if not isinstance(args, dict):
+                raise ValueError("arguments were not a JSON object")
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            logger.warning("tool %r got malformed args %r: %s", call["name"], raw, e)
+            return (f"[error: could not parse arguments for {call['name']} ({e}). "
+                    f"Call it again with a valid JSON object.]")
+        result = await registry.execute(call["name"], args)
+        logger.info("tool %s(%s) -> %s", call["name"], args, result[:120].replace("\n", " "))
+        return result
+
+    async def _tool_step(self, messages, on_token: Callable[[str], Awaitable], tools):
+        """One streaming completion, with retry-before-first-emit (like stream())."""
+        emitted = {"any": False}
+
+        async def guarded(t: str) -> None:
+            emitted["any"] = True
+            await on_token(t)
+
+        for attempt in range(self.max_retries + 1):
+            emitted["any"] = False
+            try:
+                return await self._tool_step_once(messages, guarded, tools)
+            except Exception as e:  # noqa: BLE001
+                if emitted["any"] or attempt >= self.max_retries or not _is_retryable(e):
+                    raise
+                logger.warning("tool-step failed (%s); retry %d/%d", e, attempt + 1, self.max_retries)
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+    async def _tool_step_once(self, messages, on_token: Callable[[str], Awaitable], tools):
+        """Stream one completion: emit visible content (think-stripped) AND accumulate
+        any tool_call deltas. Returns (text, calls, completion_tokens, first_token_at).
+        `calls` is [{id, name, raw_args}] — empty when the model just answered."""
+        raw = ""
+        visible_started = False
+        first_token_at = None
+        completion_tokens = None
+        tool_frags: dict[int, dict] = {}  # call index -> {id, name, args} (args arrive in pieces)
+
+        async with self._model_lock:
+            kwargs = dict(
+                model=self.model,
+                temperature=self.temperature,
+                frequency_penalty=self.frequency_penalty,
+                presence_penalty=self.presence_penalty,
+                messages=messages,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+            stream = await self.client.chat.completions.create(**kwargs)
+
+            async for chunk in stream:
+                if getattr(chunk, "usage", None):
+                    completion_tokens = chunk.usage.completion_tokens
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                for tc in (delta.tool_calls or []):  # names arrive whole, arguments streamed
+                    slot = tool_frags.setdefault(tc.index, {"id": None, "name": "", "args": ""})
+                    if tc.id:
+                        slot["id"] = tc.id
+                    if tc.function and tc.function.name:
+                        slot["name"] = tc.function.name
+                    if tc.function and tc.function.arguments:
+                        slot["args"] += tc.function.arguments
+
+                if delta.content is None:
+                    continue
+                raw += delta.content
+
+                if visible_started:
+                    await on_token(delta.content)
+                    continue
+                stripped = raw.lstrip()
+                if not stripped:
+                    continue
+                if stripped.startswith(_THINK_OPEN):
+                    if "</think>" in raw:
+                        visible_started = True
+                        first_token_at = time.perf_counter()
+                        rest = raw.split("</think>", 1)[1].lstrip()
+                        if rest:
+                            await on_token(rest)
+                elif _THINK_OPEN.startswith(stripped):
+                    continue
+                else:
+                    visible_started = True
+                    first_token_at = time.perf_counter()
+                    await on_token(raw)
+
+        text = _THINK_BLOCK.sub("", raw).strip()
+        # Flush a short answer that never tripped the emit checks — but only on a
+        # pure answer turn (when there's a tool call, content is scaffolding, not reply).
+        if not visible_started and text and not tool_frags:
+            first_token_at = first_token_at or time.perf_counter()
+            await on_token(text)
+
+        calls = [
+            {"id": v["id"] or f"call_{i}", "name": v["name"], "raw_args": v["args"]}
+            for i, v in sorted(tool_frags.items())
+            if v["name"]  # ignore an empty fragment (never a real call)
+        ]
+        return text, calls, completion_tokens, first_token_at
+
+    def _tool_stats(self, start: float, first_at: float | None, tokens: int, text: str,
+                    invocations: list[dict]) -> dict:
+        """Same stats shape as stream() plus a `tools` list; ttft spans any tool
+        round-trips (honest latency: a tool turn genuinely takes longer)."""
+        end = time.perf_counter()
+        ft = first_at or end
+        gen_time = max(end - ft, 1e-6)
+        estimated = not tokens
+        tokens = tokens or max(1, round(len(text) / 4))
+        return {"ttft": ft - start, "tok_per_s": tokens / gen_time,
+                "tokens": tokens, "estimated": estimated, "tools": invocations}
+
     async def _create_retry(self, **kwargs):
         """Non-streaming completion with the model lock + transient-error retries."""
         async with self._model_lock:

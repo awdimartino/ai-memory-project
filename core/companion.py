@@ -84,13 +84,15 @@ class TurnResult:
     recalled: list[tuple[str, float]]
     emotion: dict | None = None
     core: list[str] | None = None   # always-injected core memories about the user
+    tools: list[dict] | None = None  # tools invoked this turn: [{name, args, result}]
 
 
 class Companion:
     def __init__(self, llm, store, memory, meta, session_id: int,
                  history: list[dict] | None = None,
                  unconsolidated: list[dict] | None = None,
-                 emotion=None, thoughts=None, model_manager=None):
+                 emotion=None, thoughts=None, model_manager=None,
+                 tools=None, tool_max_iters: int = 5):
         self.llm = llm
         self.store = store
         self.memory = memory
@@ -98,6 +100,10 @@ class Companion:
         self.emotion = emotion  # EmotionManager, or None when disabled
         self.thoughts = thoughts  # ThoughtStore for the private journal, or None
         self.model_manager = model_manager  # unload/reload the LLM for sleep, or None
+        # ToolRegistry (pillar 4), or None/empty to run plain streaming turns. When
+        # non-empty, send() streams through the tool loop so Mari can call tools.
+        self.tools = tools
+        self.tool_max_iters = tool_max_iters
         self._asleep = False  # True while the LLM is unloaded from VRAM (§2.8)
         self.session_id = session_id
         self.history: list[dict] = history or []
@@ -162,13 +168,20 @@ class Companion:
 
             # Core facts are always injected; drop any recalled duplicates of them.
             extra = [content for content, _ in recalled if content not in core]
-            system = build_system(extra, mood_prompt, core=core, persona=persona)
+            tool_names = self.tools.names() if self.tools else None
+            system = build_system(extra, mood_prompt, core=core, persona=persona, tools=tool_names)
 
             messages = [{"role": "system", "content": system}]
             messages.extend(self.history[-config.HISTORY_TURNS:])
             messages.append({"role": "user", "content": user_text})
 
-            text, stats = await self.llm.stream(messages, on_token)
+            # With tools registered, stream through the tool loop (Mari may call one
+            # mid-turn); otherwise a plain streaming turn with zero tool overhead.
+            if self.tools:
+                text, stats = await self.llm.stream_with_tools(
+                    messages, on_token, self.tools, self.tool_max_iters)
+            else:
+                text, stats = await self.llm.stream(messages, on_token)
 
             uid = await asyncio.to_thread(self.store.add_message, self.session_id, "user", user_text)
             aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
@@ -184,7 +197,7 @@ class Companion:
                 self._session_title = title
 
             self._maybe_consolidate()
-            return TurnResult(text, stats, recalled, emotion_info, core)
+            return TurnResult(text, stats, recalled, emotion_info, core, stats.get("tools"))
         finally:
             self._busy = False
             self._last_activity = time.monotonic()

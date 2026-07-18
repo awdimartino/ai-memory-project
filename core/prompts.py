@@ -73,17 +73,50 @@ Also:
 Never use em dashes or hyphens as dashes."""
 
 
+def build_tools_note(tool_names: list[str] | None) -> str | None:
+    """A short capabilities block, added only when tools are registered.
+
+    Its real job is to *reconcile* the tools with the persona's hard "you just met /
+    don't invent shared history" rules: reminisce recalls REAL past conversations,
+    which is allowed — it's only fabricated history the rules forbid. Without this,
+    the model reads "do you remember...?" as a cue to disclaim memory instead of
+    reaching for the tool.
+    """
+    if not tool_names:
+        return None
+    lines = ["A few things you can actually do when they'd help (just do them naturally; never "
+             "announce that you're 'using a tool' or 'checking your records'):"]
+    if "reminisce" in tool_names:
+        lines.append(
+            "- You keep a real record of the conversations you two have actually had, plus your "
+            "own private notes. Before telling them you don't remember something they bring up, or "
+            "falling back on 'we just met', actually look back through it first. Recalling real "
+            "past talks this way is fine and encouraged; it's only *invented* history that's off "
+            "limits.")
+    if "get_current_time" in tool_names:
+        lines.append("- You can check the real current date and time when it's relevant.")
+    extra = [n for n in tool_names if n not in ("reminisce", "get_current_time")]
+    for n in extra:
+        lines.append(f"- You can use {n} when it fits.")
+    return "\n".join(lines) if len(lines) > 1 else None
+
+
 def build_system(memories: list[str], mood: str | None = None,
-                 core: list[str] | None = None, persona: str | None = None) -> str:
+                 core: list[str] | None = None, persona: str | None = None,
+                 tools: list[str] | None = None) -> str:
     """The chat system message: the persona, plus memory and mood folded in.
 
     `persona` is Mari's own evolving self-description (written by the self-modifying
     persona job). Two memory tiers go in (never as separate turns, so local chat
     templates stay happy): `core` — identity-defining facts Mari always keeps in mind
     — and `memories` — facts recall surfaced as relevant right now. The mood block
-    colors tone without being named.
+    colors tone without being named. `tools` are the names of registered tools; when
+    present, a capabilities block is added (and reconciled with the persona rules).
     """
     parts = [SYSTEM_PROMPT]
+    tools_note = build_tools_note(tools)
+    if tools_note:
+        parts.append(tools_note)
     if persona:
         parts.append(
             f"Who you've become as you've gotten to know them (your own evolving sense of "

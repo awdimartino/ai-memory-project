@@ -135,6 +135,13 @@ SLEEP_ENABLED = os.environ.get("SLEEP_ENABLED", "true").lower() in ("1", "true",
 SLEEP_AFTER_IDLE = float(os.environ.get("SLEEP_AFTER_IDLE", "1800"))   # 30 min away -> sleep
 LMS_PATH = os.environ.get("LMS_PATH", "lms")                           # LM Studio CLI
 
+# Tools (pillar 4): native function-calling. When enabled, the chat turn streams
+# through a tool loop so Mari can call registered tools (clock, reminisce, more
+# later). Verified 100% reliable on the chat model (scripts/tool_probe.py). The
+# loop is capped at TOOL_MAX_ITERS tool round-trips per turn so it can never hang.
+TOOLS_ENABLED = os.environ.get("TOOLS_ENABLED", "true").lower() in ("1", "true", "yes")
+TOOL_MAX_ITERS = int(os.environ.get("TOOL_MAX_ITERS", "5"))
+
 # Web server.
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))

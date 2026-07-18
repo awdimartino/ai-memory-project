@@ -216,18 +216,21 @@
       return s;
     }
 
-    // Render the collapsible inspector: what Mari always knows + recalled + felt this turn.
-    function addDetails(recalled, emotion, core) {
+    // Render the collapsible inspector: what Mari always knows + recalled + felt +
+    // any tools she called this turn.
+    function addDetails(recalled, emotion, core, tools) {
       recalled = recalled || [];
       core = core || [];
+      tools = tools || [];
       const hasEmotion = emotion && emotion.mood;
-      if (!recalled.length && !hasEmotion && !core.length) return;
+      if (!recalled.length && !hasEmotion && !core.length && !tools.length) return;
 
       const details = el("details", "details");
       const summary = el("summary");
       const bits = [];
       if (core.length) bits.push(`${core.length} core`);
       bits.push(`${recalled.length} ${recalled.length === 1 ? "memory" : "memories"}`);
+      if (tools.length) bits.push(`${tools.length} tool${tools.length === 1 ? "" : "s"}`);
       if (hasEmotion) {
         const top = Object.entries(emotion.mood).sort((a, b) => b[1] - a[1])[0];
         bits.push(`mood: ${top[0]}`);
@@ -236,6 +239,18 @@
       details.appendChild(summary);
 
       const body = el("div", "td-body");
+
+      if (tools.length) {
+        const ts = section("Tools called");
+        tools.forEach((t) => {
+          const row = el("div", "mem");
+          row.appendChild(el("span", null, `${t.name}(${t.args || ""})`));
+          row.appendChild(el("span", "pct", "🔧"));
+          ts.appendChild(row);
+          if (t.result) ts.appendChild(el("div", "td-empty", "→ " + t.result));
+        });
+        body.appendChild(ts);
+      }
 
       if (core.length) {
         const coreSec = section("Core memory (always known)");
@@ -313,7 +328,7 @@
       } else if (msg.type === "done") {
         current = null;
         addStats(msg.stats);
-        addDetails(msg.recalled, msg.emotion, msg.core);
+        addDetails(msg.recalled, msg.emotion, msg.core, msg.tools);
         setSending(false);
       } else if (msg.type === "error") {
         if (current) current.textContent += `\n[error: ${msg.message}]`;

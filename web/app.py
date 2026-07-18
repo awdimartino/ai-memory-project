@@ -188,6 +188,7 @@ async def ws(websocket: WebSocket) -> None:
                             "type": "done", "stats": result.stats,
                             "recalled": [{"content": c2, "similarity": s} for c2, s in result.recalled],
                             "emotion": result.emotion, "core": result.core or [],
+                            "tools": result.tools or [],
                         })
                     except Exception as e:  # noqa: BLE001 - surface to the UI
                         logger.exception("generation failed")
