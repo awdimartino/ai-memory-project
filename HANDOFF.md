@@ -60,15 +60,21 @@ The **brain foundation is done and live-verified.** In place:
 - **Concurrency safety** — a single model-access lock in `LLMClient` serializes ALL
   model calls (chat vs. background consolidation); LM Studio can't serve concurrent
   requests to a model (that crash was hit and fixed this session).
-- **Tick loop (pillar 3, internal slice, new 2026-07-19):** a pluggable job scheduler
-  (`core/tick.py`) running a background heartbeat. Two internal jobs so far: **mood drift**
-  (decays the persisted mood toward baseline while the user is away) and **idle consolidation**
-  (flushes the pending buffer after a while idle). A **busy guard** on `Companion` means jobs
-  never fire mid-turn (idle reads 0 during a reply, even a slow generation). Started by the web
-  app + REPL, stopped on shutdown. No outward messages yet — the reach-out is the next slice.
+- **Tick loop (pillar 3, new 2026-07-19):** a pluggable job scheduler (`core/tick.py`) running a
+  background heartbeat. Jobs: **mood drift** (decays the persisted mood toward baseline while the
+  user is away), **idle consolidation** (flushes the pending buffer after a while idle), and
+  **proactive reach-out** (below). A **busy guard** on `Companion` means jobs never fire mid-turn
+  (idle reads 0 during a reply, even a slow generation). Started by the web app + REPL.
+- **Proactive reach-out (pillar 3 payoff, new 2026-07-19):** `ReachOutJob` — after the user is idle
+  past `REACHOUT_MIN_IDLE` (+ a persisted `REACHOUT_COOLDOWN` so it can't nag), `Companion.reach_out()`
+  generates an unprompted message from recent context + mood and **pushes it over the WebSocket**
+  (`{type:"proactive"}` → bot bubble; also logged so it replays on reconnect). Mari can reply **PASS**
+  to stay quiet, and she's given **how long you've been away** (she can't see a clock) so the call is
+  sensible — live she PASSed after "gonna go sleep" but checked in after an unresolved bad-day vent.
+  Web-only (registered in `web/app.py` with the connection broadcaster); the REPL runs internal jobs only.
 
-Not yet built: **proactive reach-out (unprompted messages), tools, voice.** Persona
-self-modification, core memory, and the familiarity meter are planned but not started.
+Not yet built: **tools, voice, sleep/standby.** Persona self-modification, core memory,
+and the familiarity meter are planned but not started.
 
 ---
 
@@ -84,7 +90,7 @@ python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
-python tests/test_tick.py               # offline tick-loop scheduler + jobs (9 cases)
+python tests/test_tick.py               # offline tick-loop scheduler + jobs + reach-out (13 cases)
 python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
 python scripts/eval_extraction.py       # LIVE: memory-extraction quality (durable vs junk)
 python scripts/eval_conversation.py     # LIVE: repetition + backbone over scripted scenarios
@@ -245,15 +251,16 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 3. ✅ ~~Emotion (pillar 2)~~ (done 2026-07-18 — RoBERTa GoEmotions → 6 mood channels on
    CPU, persisted mood, behavioral eval passed; plus a response inspector in the web UI +
    REPL). V2_PLAN §2.3 / build log.
-4. **Proactivity (pillar 3) — IN PROGRESS.**
-   - ✅ ~~Internal tick loop~~ (done 2026-07-19 — `core/tick.py` pluggable scheduler + mood-drift
-     + idle-consolidation jobs, busy guard, wired into web/REPL, `tests/test_tick.py`).
-   - **Next slice: the outward reach-out.** A `ReachOutJob`: after enough idle + a "should I even?"
-     gate (throttle + mood/context), generate a message and **push it over the WebSocket** to the
-     web UI (needs a new `{type:"proactive"}` frame + a live connection registry in `web/app.py`,
-     since the tick has no `websocket` handle). Definition of done: a real unprompted message
-     arrives in the UI. Then **sleep/standby** (§2.8).
-5. Then the tool framework (pillar 4). Also queued: **core memory + self-modifying persona**
-   (the user's idea — an always-in-prompt curated fact block + Mari's editable self-description).
+4. ✅ ~~Proactivity (pillar 3)~~ (done 2026-07-19). Internal tick loop (`core/tick.py` pluggable
+   scheduler + mood-drift + idle-consolidation, busy guard) **and** the outward **reach-out**
+   (`ReachOutJob` → `Companion.reach_out()` → `{type:"proactive"}` WebSocket push, PASS-escape,
+   idle-duration signal, cooldown). Live-verified: Mari messages first when it's warranted.
+5. **Sleep / standby (§2.8)** — the natural next tick behavior: unload the LLM(s) from VRAM when
+   idle + low energy (a bot-initiated sleep job) and reload on wake ("waking up…" state). Ties to
+   the energy-budget idea; the model-lifecycle piece is the `lms load/unload` we've been driving by hand.
+6. **Core memory + self-modifying persona** (the user's idea, discussed) — an always-in-prompt curated
+   fact block (a `core` flag on `memories`, brain-curated, capped) + Mari's editable self-description,
+   both as tick reflection jobs. Also resolves the "has feelings" vs "no body" persona tension.
+7. Then the tool framework (pillar 4): web search, Navidrome playlists, reminders, reminisce.
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.

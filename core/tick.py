@@ -65,6 +65,11 @@ class TickLoop:
             except asyncio.TimeoutError:
                 pass
 
+    def register(self, job: "Job") -> None:
+        """Add a job. Entry points use this to plug in surface-specific jobs (e.g. the
+        web app adds the reach-out job with its WebSocket notifier) before start()."""
+        self.jobs.append(job)
+
     def start(self) -> None:
         if self._task is None:
             self._stop.clear()
@@ -97,6 +102,44 @@ class MoodDriftJob(Job):
         mood = await self.emotion.drift()
         dom = max(mood, key=mood.get)
         logger.info("mood drift (idle): %s %.2f", dom, mood[dom])
+
+
+LAST_REACHOUT_KEY = "last_reachout_at"
+
+
+class ReachOutJob(Job):
+    """Once the user has been away a while, maybe send an unprompted message.
+
+    A cheap gate first (idle >= min_idle, and a persisted cooldown so attempts can't
+    hammer — restart-safe via wall clock), then one model call via `companion.reach_out()`,
+    which may decline. The attempt timestamp is written *before* generating, so the
+    cooldown holds even on a decline and two reach-outs can't overlap. `notify` pushes
+    the message to the surface (the web app's WebSocket broadcaster).
+    """
+    name = "reach_out"
+
+    def __init__(self, companion, notify, interval: float, min_idle: float,
+                 cooldown: float, clock=time.time):
+        self.companion = companion
+        self.notify = notify
+        self.interval = interval
+        self.min_idle = min_idle
+        self.cooldown = cooldown
+        self.clock = clock
+
+    async def run(self) -> None:
+        if self.companion.idle_seconds() < self.min_idle:
+            return
+        now = self.clock()
+        last = self.companion.meta.get_json(LAST_REACHOUT_KEY, 0) or 0
+        if now - last < self.cooldown:
+            return
+        # Mark the attempt before generating: enforces the cooldown even if she declines,
+        # and stops a slow generation from letting the next tick start a second reach-out.
+        await asyncio.to_thread(self.companion.meta.set_json, LAST_REACHOUT_KEY, now)
+        message = await self.companion.reach_out()
+        if message:
+            await self.notify({"type": "proactive", "content": message})
 
 
 class IdleConsolidationJob(Job):

@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.emotion_manager import EmotionManager
-from core.tick import IdleConsolidationJob, Job, MoodDriftJob, TickLoop
+from core.tick import IdleConsolidationJob, Job, MoodDriftJob, ReachOutJob, TickLoop
 
 
 class Clock:
@@ -171,6 +171,74 @@ async def busy_guard_makes_idle_zero():
     assert c.idle_seconds() > 400.0
     c._busy = True
     assert c.idle_seconds() == 0.0, "busy turn must read as not idle"
+
+
+class ReachCompanion:
+    def __init__(self, idle, reach_result):
+        self._idle = idle
+        self.meta = InMemoryMeta()
+        self._reach_result = reach_result
+        self.reach_calls = 0
+
+    def idle_seconds(self):
+        return self._idle
+
+    async def reach_out(self):
+        self.reach_calls += 1
+        return self._reach_result
+
+
+class WallClock:
+    # Realistic wall-clock magnitude: with last-attempt defaulting to 0, a companion
+    # that has never reached out is always past the cooldown (as with real time.time()).
+    def __init__(self, t=1_000_000.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+def _reach_job(comp, clock, pushes):
+    async def notify(m):
+        pushes.append(m)
+    return ReachOutJob(comp, notify, interval=0.0, min_idle=900.0, cooldown=7200.0, clock=clock)
+
+
+@case
+async def reach_out_gated_by_idle():
+    comp = ReachCompanion(idle=10.0, reach_result="hey")   # user still around
+    pushes = []
+    await _reach_job(comp, WallClock(), pushes).run()
+    assert comp.reach_calls == 0 and pushes == [], "should not reach out while active"
+
+
+@case
+async def reach_out_gated_by_cooldown():
+    comp = ReachCompanion(idle=1000.0, reach_result="hey")
+    comp.meta.set_json("last_reachout_at", 1_000_000.0 - 100.0)  # attempted 100s ago (< 7200)
+    pushes = []
+    await _reach_job(comp, WallClock(), pushes).run()
+    assert comp.reach_calls == 0 and pushes == [], "cooldown should block a second attempt"
+
+
+@case
+async def reach_out_fires_and_pushes():
+    comp = ReachCompanion(idle=1000.0, reach_result="hey, was thinking about that game")
+    pushes = []
+    await _reach_job(comp, WallClock(), pushes).run()
+    assert comp.reach_calls == 1
+    assert pushes == [{"type": "proactive", "content": "hey, was thinking about that game"}], pushes
+    assert comp.meta.get_json("last_reachout_at") == 1_000_000.0
+
+
+@case
+async def reach_out_decline_still_sets_cooldown():
+    comp = ReachCompanion(idle=1000.0, reach_result=None)  # Mari stays quiet
+    pushes = []
+    await _reach_job(comp, WallClock(), pushes).run()
+    assert comp.reach_calls == 1, "should have attempted"
+    assert pushes == [], "declined -> no push"
+    assert comp.meta.get_json("last_reachout_at") == 1_000_000.0, "cooldown set even on decline"
 
 
 @case

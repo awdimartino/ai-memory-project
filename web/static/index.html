@@ -220,6 +220,10 @@
         modelEl.textContent = msg.model;
       } else if (msg.type === "history") {
         addBubble(msg.role === "user" ? "user" : "bot", msg.content);
+      } else if (msg.type === "proactive") {
+        // Mari reached out on her own (from the tick loop) — render as a bot bubble.
+        current = null;
+        addBubble("bot", msg.content);
       } else if (msg.type === "start") {
         current = addBubble("bot", "");
       } else if (msg.type === "token") {

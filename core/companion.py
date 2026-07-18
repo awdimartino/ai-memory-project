@@ -24,13 +24,28 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 import config
-from core.prompts import build_system
+from core.prompts import build_reachout_cue, build_reachout_system, build_system
 
 logger = logging.getLogger(__name__)
 
 # Key for the consolidation checkpoint in the MetaStore. Shared with bootstrap,
 # which reads it on startup to recover the unconsolidated tail.
 CONSOLIDATED_WATERMARK_KEY = "last_consolidated_msg_id"
+
+
+def _humanize_away(seconds: float) -> str:
+    """Rough, human phrasing for how long the user has been gone (for the reach-out cue)."""
+    minutes = seconds / 60
+    if minutes < 2:
+        return "a couple minutes"
+    if minutes < 60:
+        return f"{round(minutes)} minutes"
+    hours = minutes / 60
+    if hours < 2:
+        return "an hour"
+    if hours < 24:
+        return f"{round(hours)} hours"
+    return "a while"
 
 
 @dataclass
@@ -119,6 +134,37 @@ class Companion:
         finally:
             self._busy = False
             self._last_activity = time.monotonic()
+
+    async def reach_out(self) -> str | None:
+        """Generate an unprompted message from recent context, or None to stay quiet.
+
+        Mari decides: the prompt lets her reply "PASS" when nothing feels natural. A real
+        message is logged as an assistant turn (so it also shows up on reconnect) and
+        folded into history/the consolidation buffer, just like a normal reply.
+        """
+        last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
+        recalled = await self.memory.recall(last_user) if last_user else []
+        mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        system = build_reachout_system([content for content, _ in recalled], mood_prompt)
+
+        messages = [{"role": "system", "content": system}]
+        messages.extend(self.history[-config.HISTORY_TURNS:])
+        messages.append({"role": "user", "content": build_reachout_cue(_humanize_away(self.idle_seconds()))})
+
+        async def _sink(_t):
+            pass
+
+        text, _ = await self.llm.stream(messages, _sink)
+        text = text.strip()
+        if not text or text.rstrip(".!").strip().upper() == "PASS":
+            logger.info("reach-out: stayed quiet")
+            return None
+
+        aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
+        self.history.append({"role": "assistant", "content": text})
+        self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+        logger.info("reach-out: %s", text[:80])
+        return text
 
     def _maybe_consolidate(self) -> None:
         """At the end of a context window, consolidate in the background (non-blocking).

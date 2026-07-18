@@ -16,13 +16,28 @@ from fastapi.responses import FileResponse
 
 import config
 from bootstrap import build, configure_logging
+from core.tick import ReachOutJob
 
 logger = logging.getLogger("web")
 
 app = FastAPI()
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
-_state: dict = {"companion": None, "model": None, "lock": asyncio.Lock()}
+# `connections` holds the live WebSockets so the tick loop can push proactive
+# messages to whoever's looking.
+_state: dict = {"companion": None, "model": None, "lock": asyncio.Lock(), "connections": set()}
+
+
+async def _broadcast(message: dict) -> None:
+    """Push a message (e.g. a proactive reach-out) to every open WebSocket."""
+    dead = []
+    for ws in list(_state["connections"]):
+        try:
+            await ws.send_json(message)
+        except Exception:  # noqa: BLE001 - a dead socket just gets dropped
+            dead.append(ws)
+    for ws in dead:
+        _state["connections"].discard(ws)
 
 
 @app.on_event("startup")
@@ -32,7 +47,13 @@ async def _startup() -> None:
     _state["companion"] = companion
     _state["model"] = model
     if companion.tick is not None:
-        companion.tick.start()  # proactivity heartbeat (internal jobs for now)
+        # Reach-out is a web-surface job (it needs the WebSocket broadcaster), so it's
+        # registered here rather than in the shared bootstrap.
+        if config.REACHOUT_ENABLED:
+            companion.tick.register(ReachOutJob(
+                companion, _broadcast, config.TICK_INTERVAL,
+                config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN))
+        companion.tick.start()  # proactivity heartbeat
     logger.info("web ready at http://%s:%d (model=%s)", config.WEB_HOST, config.WEB_PORT, model)
 
 
@@ -54,9 +75,11 @@ async def index() -> FileResponse:
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()
     companion = _state["companion"]
+    _state["connections"].add(websocket)
     await websocket.send_json({"type": "ready", "model": _state["model"], "bot": config.BOT_NAME})
 
-    # Replay carried context so a refresh shows the ongoing conversation.
+    # Replay carried context so a refresh shows the ongoing conversation (proactive
+    # messages were logged as assistant turns, so they replay here too).
     for m in companion.history:
         await websocket.send_json({"type": "history", "role": m["role"], "content": m["content"]})
 
@@ -90,6 +113,8 @@ async def ws(websocket: WebSocket) -> None:
                     await websocket.send_json({"type": "error", "message": str(e)})
     except WebSocketDisconnect:
         pass
+    finally:
+        _state["connections"].discard(websocket)
 
 
 if __name__ == "__main__":

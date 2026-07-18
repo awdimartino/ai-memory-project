@@ -93,6 +93,36 @@ def build_system(memories: list[str], mood: str | None = None) -> str:
     return "\n\n".join(parts)
 
 
+# --- Proactive reach-out (tick loop pushes this to the web UI) ---
+
+_REACHOUT_ADDENDUM = f"""The user has been away for a while and it's quiet. You can message them first if you
+actually feel like it, the way you'd text a friend out of nowhere.
+
+Only reach out if something feels genuine: following up on something they mentioned, a
+thought that's stuck with you, or just missing the chat. Keep it short, like one text.
+Don't ask a survey question, don't be needy, and don't message just to message.
+
+If nothing feels natural to say right now, reply with exactly: PASS
+(just that one word, nothing else). Staying quiet is fine, but if real time has passed and
+something's worth saying, it's also natural to check in like a friend would."""
+
+
+def build_reachout_cue(away: str) -> str:
+    """The last (user-role) turn: a nudge carrying how long they've actually been gone.
+
+    Local chat templates want the last turn to be `user`; this isn't the user talking, it's
+    the signal the model needs (it can't see a clock) to judge whether enough time has passed.
+    """
+    return (f"(It's been about {away} since they last said anything. If there's something "
+            f"you'd genuinely want to say to them now, say it. If not, just: PASS.)")
+
+
+def build_reachout_system(memories: list[str], mood: str | None = None) -> str:
+    """System prompt for a proactive message: persona + memories + mood + reach-out framing."""
+    base = build_system(memories, mood)
+    return f"{base}\n\n{_REACHOUT_ADDENDUM}"
+
+
 # --- Memory consolidation (Tier-2 structured output) ---
 
 MEMORY_EXTRACTION_SYSTEM = f"""You extract DURABLE facts about the USER from a conversation between the user and {BOT_NAME}.

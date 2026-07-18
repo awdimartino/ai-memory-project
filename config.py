@@ -94,6 +94,14 @@ TICK_IDLE_SECONDS = float(os.environ.get("TICK_IDLE_SECONDS", "90"))  # "user is
 # Consolidate a non-empty pending buffer once the user has been idle this long.
 IDLE_CONSOLIDATE_AFTER = float(os.environ.get("IDLE_CONSOLIDATE_AFTER", "180"))
 
+# Proactive reach-out: after the user has been away REACHOUT_MIN_IDLE seconds, the
+# tick may generate an unprompted message (Mari decides whether it's worth it and can
+# decline). REACHOUT_COOLDOWN throttles attempts (persisted across restarts) so she's
+# a companion, not a nag. Only the web UI surfaces these; the REPL runs internal jobs only.
+REACHOUT_ENABLED = os.environ.get("REACHOUT_ENABLED", "true").lower() in ("1", "true", "yes")
+REACHOUT_MIN_IDLE = float(os.environ.get("REACHOUT_MIN_IDLE", "900"))    # 15 min away
+REACHOUT_COOLDOWN = float(os.environ.get("REACHOUT_COOLDOWN", "7200"))   # >=2h between attempts
+
 # Web server.
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
