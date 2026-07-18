@@ -60,10 +60,15 @@ The **brain foundation is done and live-verified.** In place:
 - **Concurrency safety** — a single model-access lock in `LLMClient` serializes ALL
   model calls (chat vs. background consolidation); LM Studio can't serve concurrent
   requests to a model (that crash was hit and fixed this session).
+- **Tick loop (pillar 3, internal slice, new 2026-07-19):** a pluggable job scheduler
+  (`core/tick.py`) running a background heartbeat. Two internal jobs so far: **mood drift**
+  (decays the persisted mood toward baseline while the user is away) and **idle consolidation**
+  (flushes the pending buffer after a while idle). A **busy guard** on `Companion` means jobs
+  never fire mid-turn (idle reads 0 during a reply, even a slow generation). Started by the web
+  app + REPL, stopped on shutdown. No outward messages yet — the reach-out is the next slice.
 
-Not yet built: **tick/proactivity, tools, voice.** Persona self-modification and
-familiarity meter are planned but not started. Emotion is done but not yet wired into
-a tick (mood drift on idle) — that lands with proactivity (pillar 3).
+Not yet built: **proactive reach-out (unprompted messages), tools, voice.** Persona
+self-modification, core memory, and the familiarity meter are planned but not started.
 
 ---
 
@@ -79,6 +84,7 @@ python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
+python tests/test_tick.py               # offline tick-loop scheduler + jobs (9 cases)
 python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
 python scripts/eval_extraction.py       # LIVE: memory-extraction quality (durable vs junk)
 python scripts/eval_conversation.py     # LIVE: repetition + backbone over scripted scenarios
@@ -210,9 +216,12 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
   qwen3-8b more headroom / a different quant. **Restart LM Studio before long eval runs.**
 - **Emotion now influences behavior, not just tone.** The persona wires mood to conduct
   (irritated → shorter/less accommodating), and the eval shows irritation climbing on insults
-  with visibly clipped replies. Still: "approval" from bland acknowledgements ("ok sure") nudges
-  warmth up a little (mapping nuance, not clearly wrong); mood only shifts on user messages; idle
-  mood-drift waits for the tick (pillar 3).
+  with visibly clipped replies. Mood shifts on user messages, and now **drifts back toward
+  baseline while idle** via the tick loop's mood-drift job. Minor: "approval" from bland
+  acknowledgements ("ok sure") nudges warmth up a little (mapping nuance, not clearly wrong).
+- **Mood-drift rate is untuned.** Drift decays one step per tick; at the default 60s tick that
+  settles mood over several idle minutes. If it feels too fast/slow, tune `TICK_INTERVAL` or the
+  per-channel `DECAY_RATES` (which were calibrated for per-message decay, not per-tick).
 
 ---
 
@@ -236,11 +245,15 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 3. ✅ ~~Emotion (pillar 2)~~ (done 2026-07-18 — RoBERTa GoEmotions → 6 mood channels on
    CPU, persisted mood, behavioral eval passed; plus a response inspector in the web UI +
    REPL). V2_PLAN §2.3 / build log.
-4. **Proactivity (pillar 3)** — the tick loop. A pluggable job scheduler that on each tick
-   does: **mood drift** (decay the now-persisted mood toward baseline while idle — the
-   emotion hook is ready), internal reflection, and the "should I reach out?" gate that
-   pushes an unprompted, model-generated message over the **WebSocket**. Definition of done:
-   a real unprompted message arrives in the UI. Pairs with **sleep/standby** (§2.8). V2_PLAN §2.4.
-5. Then the tool framework (pillar 4).
+4. **Proactivity (pillar 3) — IN PROGRESS.**
+   - ✅ ~~Internal tick loop~~ (done 2026-07-19 — `core/tick.py` pluggable scheduler + mood-drift
+     + idle-consolidation jobs, busy guard, wired into web/REPL, `tests/test_tick.py`).
+   - **Next slice: the outward reach-out.** A `ReachOutJob`: after enough idle + a "should I even?"
+     gate (throttle + mood/context), generate a message and **push it over the WebSocket** to the
+     web UI (needs a new `{type:"proactive"}` frame + a live connection registry in `web/app.py`,
+     since the tick has no `websocket` handle). Definition of done: a real unprompted message
+     arrives in the UI. Then **sleep/standby** (§2.8).
+5. Then the tool framework (pillar 4). Also queued: **core memory + self-modifying persona**
+   (the user's idea — an always-in-prompt curated fact block + Mari's editable self-description).
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.

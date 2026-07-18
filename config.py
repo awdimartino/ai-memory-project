@@ -83,6 +83,17 @@ EMOTION_MODEL = os.environ.get("EMOTION_MODEL", "SamLowe/roberta-base-go_emotion
 EMOTION_PULL_STRENGTH = float(os.environ.get("EMOTION_PULL_STRENGTH", "0.4"))
 EMOTION_NOISE_FLOOR = float(os.environ.get("EMOTION_NOISE_FLOOR", "0.05"))
 
+# Tick loop (pillar 3, proactivity). An internal heartbeat that runs background jobs
+# on a cadence: for this slice, mood drift toward baseline while the user is away, and
+# idle consolidation of the pending buffer. Outward reach-out (unprompted messages) is
+# a later slice. Jobs only act once the user has been idle for TICK_IDLE_SECONDS, so
+# nothing fires mid-conversation.
+TICK_ENABLED = os.environ.get("TICK_ENABLED", "true").lower() in ("1", "true", "yes")
+TICK_INTERVAL = float(os.environ.get("TICK_INTERVAL", "60"))          # base loop cadence (s)
+TICK_IDLE_SECONDS = float(os.environ.get("TICK_IDLE_SECONDS", "90"))  # "user is away" threshold
+# Consolidate a non-empty pending buffer once the user has been idle this long.
+IDLE_CONSOLIDATE_AFTER = float(os.environ.get("IDLE_CONSOLIDATE_AFTER", "180"))
+
 # Web server.
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))

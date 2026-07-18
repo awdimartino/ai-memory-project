@@ -125,6 +125,17 @@ class EmotionManager:
                        if s >= self.noise and l != "neutral"]
         return {"detected": significant[:6], "mood": dict(self.state)}
 
+    async def drift(self) -> dict:
+        """Decay mood one step toward baseline without any new input, and persist.
+
+        Called by the tick loop while the user is away, so mood settles over time
+        instead of freezing wherever the last message left it. Returns the new mood.
+        """
+        self._decay()
+        if self.meta is not None:
+            await asyncio.to_thread(self.meta.set_json, MOOD_STATE_KEY, self.state)
+        return dict(self.state)
+
     def _decay(self) -> None:
         for c in CHANNELS:
             self.state[c] += DECAY_RATES[c] * (BASELINE_STATE[c] - self.state[c])

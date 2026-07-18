@@ -31,6 +31,8 @@ async def _startup() -> None:
     companion, model = await build()
     _state["companion"] = companion
     _state["model"] = model
+    if companion.tick is not None:
+        companion.tick.start()  # proactivity heartbeat (internal jobs for now)
     logger.info("web ready at http://%s:%d (model=%s)", config.WEB_HOST, config.WEB_PORT, model)
 
 
@@ -38,6 +40,8 @@ async def _startup() -> None:
 async def _shutdown() -> None:
     companion = _state.get("companion")
     if companion is not None:
+        if companion.tick is not None:
+            await companion.tick.stop()
         await companion.flush()  # consolidate whatever didn't fill a window
 
 

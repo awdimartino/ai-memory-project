@@ -19,6 +19,7 @@ strictly contiguous (a failed, re-queued chunk can't be jumped over).
 """
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
@@ -64,37 +65,60 @@ class Companion:
         # Serializes consolidation so watermark advancement stays contiguous and
         # a background pass can't overlap a shutdown flush.
         self._consol_lock = asyncio.Lock()
+        # When the last turn finished, so the tick loop can tell if the user is
+        # away. Set to "now" on startup (a fresh session isn't instantly idle).
+        self._last_activity = time.monotonic()
+        # True while a turn is being processed; the tick treats this as "not idle"
+        # so autonomy jobs never fire mid-reply (even during a slow generation).
+        self._busy = False
+        # The proactivity heartbeat, attached by bootstrap; started by the entry point.
+        self.tick = None
+
+    def idle_seconds(self) -> float:
+        """Seconds since the last turn finished (0 while a turn is in progress)."""
+        if self._busy:
+            return 0.0
+        return time.monotonic() - self._last_activity
+
+    def pending_count(self) -> int:
+        """Messages awaiting consolidation (the tick may flush these while idle)."""
+        return len(self._unconsolidated)
 
     async def send(self, user_text: str, on_token: Callable[[str], Awaitable]) -> TurnResult:
         """Recall + react, stream a reply, log, and maybe consolidate. Returns a TurnResult."""
-        recalled = await self.memory.recall(user_text)
+        self._busy = True  # the tick treats an in-progress turn as "not idle"
+        try:
+            recalled = await self.memory.recall(user_text)
 
-        # Emotion is autonomic (Tier-1): the user's message shifts mood, which
-        # then colors this reply's tone via the system prompt.
-        emotion_info = None
-        mood_prompt = None
-        if self.emotion is not None:
-            emotion_info = await self.emotion.react(user_text)
-            mood_prompt = self.emotion.as_prompt()
+            # Emotion is autonomic (Tier-1): the user's message shifts mood, which
+            # then colors this reply's tone via the system prompt.
+            emotion_info = None
+            mood_prompt = None
+            if self.emotion is not None:
+                emotion_info = await self.emotion.react(user_text)
+                mood_prompt = self.emotion.as_prompt()
 
-        system = build_system([content for content, _ in recalled], mood_prompt)
+            system = build_system([content for content, _ in recalled], mood_prompt)
 
-        messages = [{"role": "system", "content": system}]
-        messages.extend(self.history[-config.HISTORY_TURNS:])
-        messages.append({"role": "user", "content": user_text})
+            messages = [{"role": "system", "content": system}]
+            messages.extend(self.history[-config.HISTORY_TURNS:])
+            messages.append({"role": "user", "content": user_text})
 
-        text, stats = await self.llm.stream(messages, on_token)
+            text, stats = await self.llm.stream(messages, on_token)
 
-        uid = await asyncio.to_thread(self.store.add_message, self.session_id, "user", user_text)
-        aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
+            uid = await asyncio.to_thread(self.store.add_message, self.session_id, "user", user_text)
+            aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
 
-        self.history.append({"role": "user", "content": user_text})
-        self.history.append({"role": "assistant", "content": text})
-        self._unconsolidated.append({"id": uid, "role": "user", "content": user_text})
-        self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+            self.history.append({"role": "user", "content": user_text})
+            self.history.append({"role": "assistant", "content": text})
+            self._unconsolidated.append({"id": uid, "role": "user", "content": user_text})
+            self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
 
-        self._maybe_consolidate()
-        return TurnResult(text, stats, recalled, emotion_info)
+            self._maybe_consolidate()
+            return TurnResult(text, stats, recalled, emotion_info)
+        finally:
+            self._busy = False
+            self._last_activity = time.monotonic()
 
     def _maybe_consolidate(self) -> None:
         """At the end of a context window, consolidate in the background (non-blocking).

@@ -11,6 +11,7 @@ import config
 from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
 from core.emotion_manager import EmotionManager
 from core.memory_manager import MemoryManager
+from core.tick import IdleConsolidationJob, MoodDriftJob, TickLoop
 from infrastructure.conversation_store import SqliteConversationStore
 from infrastructure.db import connect
 from infrastructure.embedder import Embedder
@@ -64,6 +65,15 @@ async def build() -> tuple[Companion, str]:
     session_id = conv_store.create_session()
     companion = Companion(llm, conv_store, memory, meta_store, session_id,
                           history, unconsolidated, emotion=emotion)
+
+    # Proactivity heartbeat (internal jobs only for now). Created, not started;
+    # the entry point starts it so eval/test harnesses that call build() don't tick.
+    if config.TICK_ENABLED:
+        companion.tick = TickLoop(
+            [MoodDriftJob(companion, emotion, config.TICK_INTERVAL, config.TICK_IDLE_SECONDS),
+             IdleConsolidationJob(companion, config.TICK_INTERVAL, config.IDLE_CONSOLIDATE_AFTER)],
+            interval=config.TICK_INTERVAL,
+        )
 
     logging.getLogger("bootstrap").info(
         "ready: chat=%s, brain=%s, embed=%s, emotion=%s | %d logged msgs, %d memories, "

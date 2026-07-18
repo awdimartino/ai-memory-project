@@ -26,6 +26,9 @@ async def amain() -> int:
         print("Is LM Studio running with a model loaded?", file=sys.stderr)
         return 1
 
+    if companion.tick is not None:
+        companion.tick.start()  # proactivity heartbeat (internal jobs for now)
+
     print(f"Connected to {config.BASE_URL}")
     print(f"Model: {model}  |  temp: {companion.llm.temperature}")
     if companion.history:
@@ -93,7 +96,9 @@ async def amain() -> int:
             print(f"  [detected: {felt or 'neutral'} | mood: {top}]")
         print()
 
-    # Consolidate anything that didn't fill a window before quitting.
+    # Stop the heartbeat, then consolidate anything that didn't fill a window.
+    if companion.tick is not None:
+        await companion.tick.stop()
     print("(consolidating memory...)")
     await companion.flush()
     return 0
