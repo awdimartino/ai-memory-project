@@ -35,7 +35,8 @@ async def build() -> tuple[Companion, str]:
     conv_store = SqliteConversationStore(conn)
     mem_store = SqliteMemoryStore(conn)
 
-    llm = LLMClient(config.BASE_URL, config.API_KEY, config.MODEL, config.TEMPERATURE)
+    llm = LLMClient(config.BASE_URL, config.API_KEY, config.MODEL, config.TEMPERATURE,
+                    no_think=config.NO_THINK)
     model = await llm.resolve_model()
 
     embedder = Embedder(llm.client, config.EMBED_MODEL)

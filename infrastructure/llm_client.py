@@ -24,11 +24,24 @@ _THINK_BLOCK = re.compile(r"(?s)^\s*<think>.*?</think>\s*")
 
 
 class LLMClient:
-    def __init__(self, base_url: str, api_key: str, model: str, temperature: float):
+    def __init__(self, base_url: str, api_key: str, model: str, temperature: float,
+                 no_think: bool = False):
         self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self.model = model
         self.temperature = temperature
+        self.no_think = no_think
         self._model_lock = asyncio.Lock()
+
+    def _prep(self, messages):
+        """Optionally append the /no_think directive to the system message."""
+        if not self.no_think:
+            return messages
+        out = [dict(m) for m in messages]
+        for m in out:
+            if m.get("role") == "system":
+                m["content"] = m["content"].rstrip() + "\n\n/no_think"
+                return out
+        return [{"role": "system", "content": "/no_think"}, *out]
 
     async def resolve_model(self) -> str:
         """Return the configured model, or auto-detect the first one LM Studio has loaded."""
@@ -57,7 +70,7 @@ class LLMClient:
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 temperature=self.temperature,
-                messages=messages,
+                messages=self._prep(messages),
                 stream=True,
                 stream_options={"include_usage": True},
             )
@@ -126,7 +139,7 @@ class LLMClient:
             resp = await self.client.chat.completions.create(
                 model=model or self.model,
                 temperature=0.2,
-                messages=messages,
+                messages=self._prep(messages),
                 response_format=schema,
             )
         content = resp.choices[0].message.content
@@ -150,7 +163,7 @@ class LLMClient:
             resp = await self.client.chat.completions.create(
                 model=model or self.model,
                 temperature=0.2,
-                messages=messages,
+                messages=self._prep(messages),
                 response_format=schema,
             )
         content = resp.choices[0].message.content

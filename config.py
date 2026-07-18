@@ -33,6 +33,11 @@ API_KEY = os.environ.get("LMSTUDIO_API_KEY", "lm-studio")  # value is ignored on
 MODEL = os.environ.get("MODEL", "")
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.8"))
 
+# For reasoning models (qwen3 etc.), append "/no_think" so they answer directly
+# instead of spending latency (and token budget) on hidden reasoning. Set true
+# when MODEL is a reasoning model; harmless-but-pointless on non-reasoning ones.
+NO_THINK = os.environ.get("NO_THINK", "false").lower() in ("1", "true", "yes")
+
 BOT_NAME = os.environ.get("BOT_NAME", "Mari")
 
 # Max number of prior messages (user+assistant) kept in the prompt / carried
