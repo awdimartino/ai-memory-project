@@ -49,6 +49,13 @@ class MemoryManager:
         """Active core facts, always injected into the prompt (identity-defining)."""
         return [m["content"] for m in self.store.core()]
 
+    async def edit_memory(self, memory_id: int, content: str) -> None:
+        """Replace a memory's text and re-embed it so recall still matches (inspector edit)."""
+        content = content.strip()
+        vec = np.asarray(await self.embedder.embed_document(content), dtype=np.float32)
+        self.store.update_content(memory_id, content, vec.tobytes())
+        logger.info("edited memory %d", memory_id)
+
     def _search(self, vec: np.ndarray, top_k: int, min_sim: float) -> list[tuple[dict, float]]:
         """Cosine KNN over active memories. Returns (memory, similarity), best first."""
         mems = self.store.active()

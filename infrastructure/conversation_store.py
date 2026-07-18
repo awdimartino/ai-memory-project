@@ -74,6 +74,13 @@ class SqliteConversationStore:
             self.conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             self.conn.commit()
 
+    def clear(self) -> None:
+        """Delete every conversation and message (the full-reset admin op)."""
+        with self._lock:
+            self.conn.execute("DELETE FROM messages")
+            self.conn.execute("DELETE FROM sessions")
+            self.conn.commit()
+
     def add_message(self, session_id: int, role: str, content: str) -> int:
         with self._lock:
             cur = self.conn.execute(

@@ -54,3 +54,9 @@ class SqliteMetaStore:
 
     def set_json(self, key: str, value) -> None:
         self.set(key, json.dumps(value))
+
+    def clear(self) -> None:
+        """Delete every key (mood, drives, persona, watermark, cooldowns) — full-reset op."""
+        with self._lock:
+            self.conn.execute("DELETE FROM meta")
+            self.conn.commit()

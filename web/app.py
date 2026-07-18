@@ -146,6 +146,76 @@ async def status() -> dict:
     }
 
 
+@app.get("/memories")
+async def memories() -> dict:
+    """Every memory (active + retired) with ids/flags — for the inspector modal."""
+    c = _state.get("companion")
+    return {"memories": c.memory.store.all() if c else []}
+
+
+@app.post("/memory/edit")
+async def memory_edit(payload: dict) -> dict:
+    """Rewrite a memory's text and re-embed it so recall still matches (hits LM Studio)."""
+    c = _state.get("companion")
+    if not c:
+        return {"ok": False, "error": "not ready"}
+    content = (payload.get("content") or "").strip()
+    if not content:
+        return {"ok": False, "error": "empty content"}
+    async with _state["lock"]:  # don't race a generation/consolidation
+        try:
+            await c.memory.edit_memory(int(payload["id"]), content)
+        except Exception as e:  # noqa: BLE001 - re-embed can fail if LM Studio is down
+            logger.exception("memory edit failed")
+            return {"ok": False, "error": str(e)}
+    return {"ok": True}
+
+
+@app.post("/memory/delete")
+async def memory_delete(payload: dict) -> dict:
+    """Hard-delete a single memory (active or retired)."""
+    c = _state.get("companion")
+    if not c:
+        return {"ok": False}
+    async with _state["lock"]:
+        c.memory.store.delete(int(payload["id"]))
+    return {"ok": True}
+
+
+@app.post("/memory/core")
+async def memory_core(payload: dict) -> dict:
+    """Toggle a memory's core flag (always-injected vs. recall-only)."""
+    c = _state.get("companion")
+    if not c:
+        return {"ok": False}
+    c.memory.store.set_core(int(payload["id"]), bool(payload.get("core")))
+    return {"ok": True}
+
+
+@app.post("/memory/clear")
+async def memory_clear() -> dict:
+    """Wipe the semantic memory store (keeps conversations, mood, persona, thoughts)."""
+    c = _state.get("companion")
+    if not c:
+        return {"ok": False}
+    async with _state["lock"]:
+        n = await c.clear_memories()
+    return {"ok": True, "cleared": n}
+
+
+@app.post("/admin/factory_reset")
+async def factory_reset(payload: dict) -> dict:
+    """Wipe everything to a factory-fresh companion. Requires an explicit confirm flag."""
+    if not payload.get("confirm"):
+        return {"ok": False, "error": "confirmation required"}
+    c = _state.get("companion")
+    if not c:
+        return {"ok": False}
+    async with _state["lock"]:
+        await c.factory_reset()
+    return {"ok": True}
+
+
 async def _send_conversations(ws: WebSocket) -> None:
     c = _state["companion"]
     await ws.send_json({"type": "conversations",

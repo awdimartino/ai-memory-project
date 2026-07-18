@@ -157,6 +157,12 @@ class DriveManager:
         self._clamp()
         await self._persist()
 
+    async def reset(self) -> None:
+        """Reset all drives to baseline and persist (admin full-reset)."""
+        self.state = {d: BASELINE[d] for d in DRIVES}
+        self._last = self.clock()
+        await self._persist()
+
     def get(self, drive: str) -> float:
         return self.state[drive]
 

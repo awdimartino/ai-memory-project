@@ -136,6 +136,12 @@ class EmotionManager:
             await asyncio.to_thread(self.meta.set_json, MOOD_STATE_KEY, self.state)
         return dict(self.state)
 
+    async def reset(self) -> None:
+        """Reset mood to baseline and persist (admin full-reset)."""
+        self.state = {c: BASELINE_STATE[c] for c in CHANNELS}
+        if self.meta is not None:
+            await asyncio.to_thread(self.meta.set_json, MOOD_STATE_KEY, self.state)
+
     def _decay(self) -> None:
         for c in CHANNELS:
             self.state[c] += DECAY_RATES[c] * (BASELINE_STATE[c] - self.state[c])

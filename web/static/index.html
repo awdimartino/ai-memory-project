@@ -108,10 +108,65 @@
       padding: 14px 14px 40px; display: flex; flex-direction: column; gap: 18px; background: #12141a;
     }
     body.no-status #status { display: none; }
-    #toggleStatus {
+    .hbtn {
       background: transparent; color: var(--muted); border: 1px solid var(--line);
-      padding: 3px 12px; margin-left: auto; font-size: 12px; border-radius: 8px;
+      padding: 3px 12px; font-size: 12px; border-radius: 8px;
     }
+    #manageMem { margin-left: auto; }
+    .hbtn:hover { color: var(--text); }
+
+    /* Memory inspector modal */
+    .modal {
+      position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .modal.hidden { display: none; }
+    .modal-box {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      width: min(760px, 94vw); max-height: 86vh; display: flex; flex-direction: column;
+    }
+    .modal-head {
+      display: flex; align-items: center; padding: 13px 16px;
+      border-bottom: 1px solid var(--line); font-weight: 600;
+    }
+    .modal-head .sub { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 8px; }
+    .modal-head .xbtn {
+      margin-left: auto; background: transparent; color: var(--muted); border: 0;
+      font-size: 22px; line-height: 1; padding: 0 4px;
+    }
+    .mem-list {
+      overflow-y: auto; padding: 6px 12px; display: flex; flex-direction: column;
+    }
+    .mem-row {
+      display: flex; align-items: center; gap: 8px; padding: 7px 2px;
+      border-bottom: 1px solid var(--line);
+    }
+    .mem-row .star {
+      background: transparent; border: 0; color: var(--muted); font-size: 15px;
+      padding: 0 2px; cursor: pointer; flex: none;
+    }
+    .mem-row .star.on { color: #e0a458; }
+    .mem-row input.mc {
+      flex: 1; min-width: 0; background: var(--bg); color: var(--text);
+      border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; font: inherit; font-size: 13px;
+    }
+    .mem-row s { flex: 1; min-width: 0; color: #6b7080; font-size: 13px; }
+    .mem-row .cat { color: var(--muted); font-size: 11px; flex: none; }
+    .mem-row .mbtn {
+      background: var(--bot); color: var(--text); border: 1px solid var(--line);
+      padding: 4px 9px; font-size: 12px; border-radius: 7px; flex: none;
+    }
+    .mem-row .mbtn.del:hover { color: #e5534b; border-color: #e5534b; }
+    .modal-foot {
+      display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line);
+    }
+    .modal-foot .grow { flex: 1; }
+    .danger {
+      background: #3a1f22; color: #f0a8a0; border: 1px solid #5a2a2a;
+      padding: 7px 14px; font-size: 13px; border-radius: 8px;
+    }
+    .danger:hover { background: #4a2529; }
+    .mem-empty { color: var(--muted); font-size: 13px; padding: 24px; text-align: center; }
     .st-h {
       color: var(--muted); font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
       margin-bottom: 7px;
@@ -136,7 +191,8 @@
   <header>
     <h1 id="botname">Mari</h1>
     <span class="meta" id="model">connecting...</span>
-    <button id="toggleStatus" type="button">status</button>
+    <button id="manageMem" class="hbtn" type="button">memory</button>
+    <button id="toggleStatus" class="hbtn" type="button">status</button>
   </header>
   <div id="main">
     <aside id="sidebar">
@@ -151,6 +207,21 @@
       </form>
     </div>
     <aside id="status"><div class="st-empty">loading…</div></aside>
+  </div>
+
+  <div id="memModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        Memory inspector <span class="sub" id="memCount"></span>
+        <button id="memClose" class="xbtn" type="button" title="close">×</button>
+      </div>
+      <div id="memList" class="mem-list"></div>
+      <div class="modal-foot">
+        <button id="memClear" class="danger" type="button">clear all memories</button>
+        <span class="grow"></span>
+        <button id="memReset" class="danger" type="button">full reset</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -465,6 +536,89 @@
       document.body.classList.toggle("no-status");
     setInterval(pollStatus, 3000);
     pollStatus();
+
+    // --- Memory inspector modal: view / edit / delete / clear / full reset ---
+    const memModal = document.getElementById("memModal");
+
+    async function postJSON(url, body) {
+      try {
+        const r = await fetch(url, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
+        });
+        return await r.json();
+      } catch (e) { return { ok: false, error: String(e) }; }
+    }
+
+    async function loadMemories() {
+      const box = document.getElementById("memList");
+      box.innerHTML = "";
+      let data;
+      try { data = await (await fetch("/memories")).json(); }
+      catch (e) { box.innerHTML = '<div class="mem-empty">could not load memories</div>'; return; }
+      const mems = data.memories || [];
+      const active = mems.filter((m) => m.active).length;
+      document.getElementById("memCount").textContent =
+        `${active} active · ${mems.length - active} retired`;
+      if (!mems.length) {
+        box.innerHTML = '<div class="mem-empty">no memories yet — they form as you talk</div>';
+        return;
+      }
+      mems.forEach((m) => box.appendChild(memRow(m)));
+    }
+
+    function memRow(m) {
+      const row = el("div", "mem-row");
+      if (m.active) {
+        const star = el("button", "star" + (m.core ? " on" : ""), m.core ? "★" : "☆");
+        star.title = m.core ? "core — always in mind (click to demote)" : "click to make core";
+        star.onclick = async () => { await postJSON("/memory/core", { id: m.id, core: !m.core }); loadMemories(); };
+        row.appendChild(star);
+
+        const inp = el("input", "mc"); inp.type = "text"; inp.value = m.content;
+        row.appendChild(inp);
+        if (m.category) row.appendChild(el("span", "cat", m.category));
+
+        const save = el("button", "mbtn", "save");
+        save.onclick = async () => {
+          const v = inp.value.trim();
+          if (!v || v === m.content) return;
+          save.textContent = "…"; save.disabled = true;
+          const r = await postJSON("/memory/edit", { id: m.id, content: v });
+          if (!r.ok) alert("edit failed: " + (r.error || "unknown"));
+          loadMemories();
+        };
+        row.appendChild(save);
+      } else {
+        row.classList.add("retired");
+        row.appendChild(el("s", null, m.content));
+        row.appendChild(el("span", "cat", "retired"));
+      }
+      const del = el("button", "mbtn del", "delete");
+      del.onclick = async () => { await postJSON("/memory/delete", { id: m.id }); loadMemories(); };
+      row.appendChild(del);
+      return row;
+    }
+
+    document.getElementById("manageMem").onclick = async () => {
+      await loadMemories();
+      memModal.classList.remove("hidden");
+    };
+    document.getElementById("memClose").onclick = () => memModal.classList.add("hidden");
+    memModal.onclick = (e) => { if (e.target === memModal) memModal.classList.add("hidden"); };
+
+    document.getElementById("memClear").onclick = async () => {
+      if (!confirm("Delete ALL memories (active + retired)?\n\nConversations, mood and persona are kept. This cannot be undone.")) return;
+      const r = await postJSON("/memory/clear");
+      alert(r.ok ? `Cleared ${r.cleared} memories.` : "clear failed");
+      loadMemories();
+    };
+    document.getElementById("memReset").onclick = async () => {
+      if (!confirm("FULL RESET\n\nWipe ALL memories, conversations, mood, drives, persona and thoughts — a factory-fresh Mari. This cannot be undone.\n\nContinue?")) return;
+      const r = await postJSON("/admin/factory_reset", { confirm: true });
+      if (r.ok) location.reload();
+      else alert("reset failed: " + (r.error || "unknown"));
+    };
 
     // --- Conversation tabs (sidebar) ---
     function renderConversations(list, active) {

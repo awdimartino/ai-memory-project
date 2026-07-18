@@ -39,3 +39,9 @@ class SqliteThoughtStore:
 
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM thoughts").fetchone()[0]
+
+    def clear(self) -> None:
+        """Delete every private thought (the full-reset admin op)."""
+        with self._lock:
+            self.conn.execute("DELETE FROM thoughts")
+            self.conn.commit()

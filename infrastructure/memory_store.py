@@ -46,6 +46,41 @@ class SqliteMemoryStore:
         ).fetchall()
         return [{"id": r["id"], "content": r["content"], "category": r["category"]} for r in rows]
 
+    def all(self) -> list[dict]:
+        """Every memory, active and retired, newest first — for the inspector/admin UI."""
+        rows = self.conn.execute(
+            "SELECT id, content, category, core, active, superseded_by, created_at "
+            "FROM memories ORDER BY id DESC"
+        ).fetchall()
+        return [
+            {"id": r["id"], "content": r["content"], "category": r["category"],
+             "core": bool(r["core"]), "active": bool(r["active"]),
+             "superseded_by": r["superseded_by"], "created_at": r["created_at"]}
+            for r in rows
+        ]
+
+    def update_content(self, memory_id: int, content: str, embedding: bytes) -> None:
+        """Replace a memory's text and its embedding (the inspector's edit — re-embedded
+        so recall still matches the new wording)."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE memories SET content = ?, embedding = ? WHERE id = ?",
+                (content, embedding, memory_id),
+            )
+            self.conn.commit()
+
+    def delete(self, memory_id: int) -> None:
+        """Hard-delete one memory (unlike deactivate, which soft-deletes and keeps history)."""
+        with self._lock:
+            self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            self.conn.commit()
+
+    def clear(self) -> None:
+        """Delete ALL memories (active + retired). Destructive; admin-only."""
+        with self._lock:
+            self.conn.execute("DELETE FROM memories")
+            self.conn.commit()
+
     def set_core(self, memory_id: int, core: bool) -> None:
         """Promote a memory into (or demote it out of) the always-injected core set."""
         with self._lock:

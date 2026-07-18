@@ -122,6 +122,15 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   delete. **Mari is one companion:** memory, mood, thoughts, persona, familiarity, and the
   consolidation/durability machinery are all the user's and **shared across every conversation**; only
   the message *thread* (history + `session_id`) is per-tab. On boot she resumes the most recent conversation.
+- **Memory inspector + admin (debug, 2026-07-18):** a "memory" button in the header opens a modal that lists
+  **every** memory (active + retired) and lets you **edit** a fact's text (re-embedded via
+  `MemoryManager.edit_memory` so recall still matches), **delete** one (hard, unlike the lifecycle's
+  soft-delete), toggle its **core** star, **clear all memories** (keeps chats/mood/persona), or **full reset**
+  (wipe everything to a factory-fresh companion — `Companion.factory_reset` also resets in-memory mood/drives/
+  history and starts a new conversation, no reload needed). New store ops (`all`/`update_content`/`delete`/
+  `clear` on memory; `clear` on conversation/thought/meta) + HTTP routes (`GET /memories`,
+  `POST /memory/{edit,delete,core,clear}`, `POST /admin/factory_reset` — confirm-gated). Both destructive
+  actions confirm in the browser first.
 - **Tool framework (pillar 4, 2026-07-18):** native OpenAI function-calling, verified **100%
   reliable** on qwen3.5-9b first (`scripts/tool_probe.py`) — including streamed `tool_calls` deltas.
   A hot-swappable **`ToolRegistry`** (`core/tools.py`) pairs each `Tool`'s JSON schema with an async
@@ -152,6 +161,7 @@ python main.py          # same brain, terminal REPL
 python tests/test_memory_lifecycle.py   # offline, no LM Studio needed
 python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
 python tests/test_core_memory.py        # offline core-memory flag/inject/cap (4 cases)
+python tests/test_memory_admin.py       # offline memory admin: all/edit/delete/clear + factory reset (7 cases)
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
@@ -312,8 +322,9 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
 - **"On this day" recall** — time-anchored callbacks via reminisce; pairs with proactivity.
 - **Hybrid BM25 + vector recall** — keyword + semantic; directly targets the recall phrasing-sensitivity
   limit in §7.
-- **Memory inspector UI** — browse / search / edit memories + view superseded history. The status panel is
-  read-only today; this makes the lifecycle debuggable and editable.
+- ~~**Memory inspector UI** — browse / edit memories + view superseded history.~~ **DONE (2026-07-18):** the
+  header "memory" modal browses all memories (active + retired), edits (re-embed), deletes, toggles core, and
+  clears / full-resets. Still open here: *search/filter* within the inspector (fine at current volume).
 
 ### C. Presence & timing
 - **Presence signal** — the WebSocket already knows if the tab is focused / the user is typing; use it as a

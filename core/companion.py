@@ -388,3 +388,32 @@ class Companion:
     def reset(self) -> None:
         """Clear in-memory context only (logs and memories on disk are kept)."""
         self.history.clear()
+
+    async def clear_memories(self) -> int:
+        """Admin: wipe the semantic memory store (keeps conversations, mood, persona,
+        thoughts). Returns how many memories were removed."""
+        n = len(self.memory.store.all())
+        self.memory.store.clear()
+        logger.info("admin: cleared %d memories", n)
+        return n
+
+    async def factory_reset(self) -> None:
+        """Admin: wipe EVERYTHING back to a factory-fresh companion — memories,
+        conversations, private thoughts, and all persisted scalar state (mood, drives,
+        persona, consolidation watermark, reach-out/reflect cooldowns) — then start a
+        fresh conversation. In-memory state is reset to match so no reload is required."""
+        self.memory.store.clear()
+        self.store.clear()                       # messages + sessions
+        if self.thoughts is not None:
+            self.thoughts.clear()
+        self.meta.clear()                        # mood, drives, persona, watermark, cooldowns
+        self.history = []
+        self._unconsolidated = []
+        self._session_title = None
+        if self.emotion is not None:
+            await self.emotion.reset()           # re-persist baseline mood
+        if self.drives is not None:
+            await self.drives.reset()            # re-persist baseline drives
+        sid = self.store.create_session()        # a clean conversation to land in
+        self.switch_conversation(sid)
+        logger.info("admin: factory reset complete; fresh session %d", sid)

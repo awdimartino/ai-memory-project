@@ -29,6 +29,10 @@ class ConversationStore(Protocol):
         """
         ...
 
+    def clear(self) -> None:
+        """Delete every conversation and message (the full-reset admin op)."""
+        ...
+
 
 class MemoryStore(Protocol):
     """Persistence for the semantic tier: distilled, embedded facts."""
@@ -46,12 +50,28 @@ class MemoryStore(Protocol):
         """Return active core memories (always injected) as {id, content, category}."""
         ...
 
+    def all(self) -> list[dict]:
+        """Every memory (active + retired), newest first — for the inspector/admin UI."""
+        ...
+
     def set_core(self, memory_id: int, core: bool) -> None:
         """Promote a memory into (or demote it out of) the always-injected core set."""
         ...
 
+    def update_content(self, memory_id: int, content: str, embedding: bytes) -> None:
+        """Replace a memory's text + embedding (the inspector's edit)."""
+        ...
+
     def deactivate(self, memory_id: int, superseded_by: int | None) -> None:
         """Soft-delete a memory, optionally linking the memory that replaced it."""
+        ...
+
+    def delete(self, memory_id: int) -> None:
+        """Hard-delete one memory (unlike deactivate, which keeps history)."""
+        ...
+
+    def clear(self) -> None:
+        """Delete ALL memories (active + retired); admin-only."""
         ...
 
     def count(self) -> int:
@@ -72,6 +92,10 @@ class ThoughtStore(Protocol):
 
     def recent(self, limit: int) -> list[dict]:
         """Return up to `limit` most recent thoughts (newest first) as {content, mood, created_at}."""
+        ...
+
+    def clear(self) -> None:
+        """Delete every private thought (the full-reset admin op)."""
         ...
 
 
@@ -104,4 +128,8 @@ class MetaStore(Protocol):
 
     def set_json(self, key: str, value) -> None:
         """Write a JSON-serializable value."""
+        ...
+
+    def clear(self) -> None:
+        """Delete every key (mood, drives, persona, watermark, cooldowns) — full-reset op."""
         ...
