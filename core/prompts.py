@@ -73,19 +73,24 @@ Also:
 Never use em dashes or hyphens as dashes."""
 
 
-def build_system(memories: list[str], mood: str | None = None) -> str:
-    """The chat system message: the persona, plus recalled memories and mood folded in.
+def build_system(memories: list[str], mood: str | None = None,
+                 core: list[str] | None = None) -> str:
+    """The chat system message: the persona, plus memory and mood folded in.
 
-    Both memories and the mood block go in the system message (never as separate
-    turns) so local chat templates stay happy. Memories are framed as things Mari
-    simply knows; the mood colors tone without being named.
+    Two memory tiers go in (never as separate turns, so local chat templates stay
+    happy): `core` — identity-defining facts Mari always keeps in mind — and
+    `memories` — other facts recall surfaced as relevant right now. The mood block
+    colors tone without being named.
     """
     parts = [SYSTEM_PROMPT]
+    if core:
+        lines = "\n".join(f"- {m}" for m in core)
+        parts.append(f"The core things you always know about them (never forget these):\n{lines}")
     if memories:
         lines = "\n".join(f"- {m}" for m in memories)
         parts.append(
-            f"Some things you already know about them (from earlier talks). Use them "
-            f"naturally when relevant, and never mention that you 'stored' or 'retrieved' "
+            f"Some other things that might be relevant right now (from earlier talks). Use "
+            f"them naturally when they fit, and never mention that you 'stored' or 'retrieved' "
             f"anything:\n{lines}"
         )
     if mood:
@@ -117,9 +122,10 @@ def build_reachout_cue(away: str) -> str:
             f"you'd genuinely want to say to them now, say it. If not, just: PASS.)")
 
 
-def build_reachout_system(memories: list[str], mood: str | None = None) -> str:
+def build_reachout_system(memories: list[str], mood: str | None = None,
+                          core: list[str] | None = None) -> str:
     """System prompt for a proactive message: persona + memories + mood + reach-out framing."""
-    base = build_system(memories, mood)
+    base = build_system(memories, mood, core=core)
     return f"{base}\n\n{_REACHOUT_ADDENDUM}"
 
 
@@ -140,9 +146,9 @@ REFLECT_CUE = "(You're alone with your thoughts for a bit. Write a short, honest
 
 
 def build_reflect_system(memories: list[str], mood: str | None,
-                         recent_thoughts: list[str]) -> str:
+                         recent_thoughts: list[str], core: list[str] | None = None) -> str:
     """System prompt for a private reflection: persona + memories + mood + recent thoughts."""
-    base = build_system(memories, mood)
+    base = build_system(memories, mood, core=core)
     parts = [base, _REFLECT_ADDENDUM]
     if recent_thoughts:
         joined = "\n".join(f"- {t}" for t in recent_thoughts)
@@ -178,6 +184,11 @@ DO NOT capture (these are NOT durable facts):
 - one-off plans or errands ("appointment tomorrow", "getting groceries tonight")
 - greetings, small talk, jokes, insults, or anything you had to infer or guess
 
+For each fact, also mark whether it is CORE: an identity-defining fact you'd always want to
+keep in front of you. Core = the user's name (a name is ALWAYS core), the key people in their
+life, what they do, where they live, or a defining trait or major ongoing life thing. Everyday
+tastes, minor preferences, and small details are NOT core (core=false).
+
 Write each fact as ONE short, TIMELESS sentence in the third person, referring to the human
 as "the user". Do not use words like "recently", "just", "now", "currently", or "today":
 state it plainly. Write "The user is a teacher", not "The user recently started a job as a
@@ -197,8 +208,9 @@ MEMORY_SCHEMA = {
                         "properties": {
                             "content": {"type": "string"},
                             "category": {"type": "string", "enum": ["user"]},
+                            "core": {"type": "boolean"},
                         },
-                        "required": ["content", "category"],
+                        "required": ["content", "category", "core"],
                         "additionalProperties": False,
                     },
                 }
@@ -255,3 +267,30 @@ MEMORY_DECISION_SCHEMA = {
 def build_decision_user(candidate: str, related_contents: list[str]) -> str:
     lines = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(related_contents))
     return f'New candidate fact:\n"{candidate}"\n\nExisting related memories:\n{lines}'
+
+
+# --- Core-memory re-rank (enforce the cap; Tier-2 structured output) ---
+
+CORE_RERANK_SYSTEM = f"""{BOT_NAME} keeps a handful of "core" facts always in front of her about the user, but the set
+has grown too large. Given the current core facts (numbered) and a limit, keep only the most
+important, identity-defining ones up to the limit: the user's name, the closest people in their
+life, what they do, where they live, and defining life facts. The rest stay remembered but move
+out of the always-present core set. Return the numbers to KEEP (most important first)."""
+
+CORE_RERANK_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "core_keep",
+        "schema": {
+            "type": "object",
+            "properties": {"keep": {"type": "array", "items": {"type": "integer"}}},
+            "required": ["keep"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def build_core_rerank_user(core_contents: list[str], max_keep: int) -> str:
+    lines = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(core_contents))
+    return f"Keep at most {max_keep}.\n\nCurrent core facts:\n{lines}\n\nReturn the numbers to keep."

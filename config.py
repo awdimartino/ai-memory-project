@@ -74,6 +74,12 @@ CONSOLIDATE_WINDOW = int(os.environ.get("CONSOLIDATE_WINDOW", str(HISTORY_TURNS)
 MEMORY_RELATE_SIMILARITY = float(os.environ.get("MEMORY_RELATE_SIMILARITY", "0.6"))
 MEMORY_RELATE_TOP_K = int(os.environ.get("MEMORY_RELATE_TOP_K", "5"))
 
+# Core memory: a small set of identity-defining facts (name, key people, job, where they
+# live, defining traits) that are ALWAYS injected into the prompt, not just when recall
+# surfaces them. The extractor marks facts as core; when the set exceeds this cap, the
+# brain re-ranks and demotes the least essential back to regular (searchable) memory.
+CORE_MEMORY_MAX = int(os.environ.get("CORE_MEMORY_MAX", "12"))
+
 # Emotion (pillar 2). A local RoBERTa GoEmotions classifier maps each message to
 # 28 emotions, folded into 6 mood channels that decay toward a baseline. Runs on
 # CPU (the 9070XT can't use the v1 CUDA path) so it keeps all VRAM for the LLMs.

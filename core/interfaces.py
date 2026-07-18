@@ -34,12 +34,20 @@ class MemoryStore(Protocol):
     """Persistence for the semantic tier: distilled, embedded facts."""
 
     def add(self, content: str, category: str | None, embedding: bytes,
-            source_session: int | None) -> int:
+            source_session: int | None, core: bool = False) -> int:
         """Store one fact + its embedding (float32 bytes); return its id."""
         ...
 
     def active(self) -> list[dict]:
-        """Return all active memories as {id, content, category, embedding(bytes)}."""
+        """Return all active memories as {id, content, category, embedding(bytes), core(bool)}."""
+        ...
+
+    def core(self) -> list[dict]:
+        """Return active core memories (always injected) as {id, content, category}."""
+        ...
+
+    def set_core(self, memory_id: int, core: bool) -> None:
+        """Promote a memory into (or demote it out of) the always-injected core set."""
         ...
 
     def deactivate(self, memory_id: int, superseded_by: int | None) -> None:
@@ -48,6 +56,10 @@ class MemoryStore(Protocol):
 
     def count(self) -> int:
         """Number of active memories."""
+        ...
+
+    def count_core(self) -> int:
+        """Number of active core memories."""
         ...
 
 

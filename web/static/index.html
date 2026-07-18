@@ -156,15 +156,17 @@
       return s;
     }
 
-    // Render the collapsible inspector: what Mari recalled + felt this turn.
-    function addDetails(recalled, emotion) {
+    // Render the collapsible inspector: what Mari always knows + recalled + felt this turn.
+    function addDetails(recalled, emotion, core) {
       recalled = recalled || [];
+      core = core || [];
       const hasEmotion = emotion && emotion.mood;
-      if (!recalled.length && !hasEmotion) return;
+      if (!recalled.length && !hasEmotion && !core.length) return;
 
       const details = el("details", "details");
       const summary = el("summary");
       const bits = [];
+      if (core.length) bits.push(`${core.length} core`);
       bits.push(`${recalled.length} ${recalled.length === 1 ? "memory" : "memories"}`);
       if (hasEmotion) {
         const top = Object.entries(emotion.mood).sort((a, b) => b[1] - a[1])[0];
@@ -174,6 +176,12 @@
       details.appendChild(summary);
 
       const body = el("div", "td-body");
+
+      if (core.length) {
+        const coreSec = section("Core memory (always known)");
+        core.forEach((c) => coreSec.appendChild(el("div", "mem", c)));
+        body.appendChild(coreSec);
+      }
 
       const mem = section("Recalled memories");
       if (recalled.length) {
@@ -233,7 +241,7 @@
       } else if (msg.type === "done") {
         current = null;
         addStats(msg.stats);
-        addDetails(msg.recalled, msg.emotion);
+        addDetails(msg.recalled, msg.emotion, msg.core);
         setSending(false);
       } else if (msg.type === "error") {
         if (current) current.textContent += `\n[error: ${msg.message}]`;

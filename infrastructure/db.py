@@ -62,6 +62,11 @@ MIGRATIONS = [
         created_at TEXT NOT NULL
     );
     """,
+    # v6 — core memory: identity-defining facts always injected into the prompt
+    """
+    ALTER TABLE memories ADD COLUMN core INTEGER NOT NULL DEFAULT 0;
+    CREATE INDEX idx_memories_core ON memories(core);
+    """,
 ]
 
 

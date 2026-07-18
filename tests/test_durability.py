@@ -49,6 +49,9 @@ class FakeMemory:
     async def recall(self, text):
         return []
 
+    def core_memories(self):
+        return []
+
     async def consolidate(self, chunk, session_id):
         if self.fail:
             raise RuntimeError("boom")

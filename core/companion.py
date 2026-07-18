@@ -66,6 +66,7 @@ class TurnResult:
     stats: dict
     recalled: list[tuple[str, float]]
     emotion: dict | None = None
+    core: list[str] | None = None   # always-injected core memories about the user
 
 
 class Companion:
@@ -111,6 +112,7 @@ class Companion:
         self._busy = True  # the tick treats an in-progress turn as "not idle"
         try:
             recalled = await self.memory.recall(user_text)
+            core = self.memory.core_memories()
 
             # Emotion is autonomic (Tier-1): the user's message shifts mood, which
             # then colors this reply's tone via the system prompt.
@@ -120,7 +122,9 @@ class Companion:
                 emotion_info = await self.emotion.react(user_text)
                 mood_prompt = self.emotion.as_prompt()
 
-            system = build_system([content for content, _ in recalled], mood_prompt)
+            # Core facts are always injected; drop any recalled duplicates of them.
+            extra = [content for content, _ in recalled if content not in core]
+            system = build_system(extra, mood_prompt, core=core)
 
             messages = [{"role": "system", "content": system}]
             messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -137,7 +141,7 @@ class Companion:
             self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
 
             self._maybe_consolidate()
-            return TurnResult(text, stats, recalled, emotion_info)
+            return TurnResult(text, stats, recalled, emotion_info, core)
         finally:
             self._busy = False
             self._last_activity = time.monotonic()
@@ -151,8 +155,10 @@ class Companion:
         """
         last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
         recalled = await self.memory.recall(last_user) if last_user else []
+        core = self.memory.core_memories()
+        extra = [content for content, _ in recalled if content not in core]
         mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
-        system = build_reachout_system([content for content, _ in recalled], mood_prompt)
+        system = build_reachout_system(extra, mood_prompt, core=core)
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -183,9 +189,11 @@ class Companion:
             return None
         last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
         recalled = await self.memory.recall(last_user) if last_user else []
+        core = self.memory.core_memories()
+        extra = [content for content, _ in recalled if content not in core]
         mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
         recent = [t["content"] for t in self.thoughts.recent(5)]
-        system = build_reflect_system([content for content, _ in recalled], mood_prompt, recent)
+        system = build_reflect_system(extra, mood_prompt, recent, core=core)
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])

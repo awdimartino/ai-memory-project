@@ -79,6 +79,14 @@ async def thoughts() -> dict:
     return {"thoughts": recent}
 
 
+@app.get("/core")
+async def core() -> dict:
+    """The core memory: identity-defining facts Mari always keeps in mind."""
+    companion = _state.get("companion")
+    facts = companion.memory.core_memories() if companion else []
+    return {"core": facts}
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -115,6 +123,7 @@ async def ws(websocket: WebSocket) -> None:
                             {"content": c, "similarity": s} for c, s in result.recalled
                         ],
                         "emotion": result.emotion,  # {detected, mood} or None
+                        "core": result.core or [],  # always-known facts about the user
                     })
                 except Exception as e:  # noqa: BLE001 - surface to the UI
                     logger.exception("generation failed")

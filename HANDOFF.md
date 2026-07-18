@@ -31,16 +31,24 @@ The **brain foundation is done and live-verified.** In place:
 - **Single async runtime.** FastAPI + WebSocket **web UI** and a terminal **REPL**,
   both wired through one composition root (`bootstrap.py`) and a `Companion` facade.
 - **Persistence** — SQLite with a versioned migration runner (`PRAGMA user_version`,
-  schema at **v5**). Conversation survives restarts.
-- **Two memory tiers:**
+  schema at **v6**). Conversation survives restarts.
+- **Memory tiers:**
   - *Episodic* — full verbatim conversation log (`messages` table).
-  - *Semantic* — distilled, embedded facts (`memories` table).
+  - *Semantic* — distilled, embedded facts (`memories` table), surfaced by recall.
+  - *Core* — the subset of semantic facts flagged `core` (identity-defining), **always injected**
+    into the prompt regardless of recall (below).
 - **Recall (every turn, autonomic):** embed the incoming message (nomic
   asymmetric `search_query:`/`search_document:` prefixes — fixes the v1 first-person vs
   third-person mismatch), brute-force cosine KNN, inject hits into the system prompt.
 - **Consolidation (end of a context window, backgrounded):** extract durable facts,
   then a **lifecycle** decision per fact — duplicate (skip) / update (soft-delete old,
   keep history via `superseded_by`) / new. Never blocks chat.
+- **Core memory (new 2026-07-19):** the extractor marks identity-defining facts (name, key people,
+  job, where they live) as `core`; `build_system` **always injects** the core set (deduped against
+  recall) so Mari never depends on a similarity search to know your name. Bounded by `CORE_MEMORY_MAX`
+  — when exceeded, the brain re-ranks and demotes the least essential back to regular. Visible via the
+  inspector's "Core memory" section, `GET /core`, and the REPL `/core` command. (Live: name/nurse/Seattle
+  → core; hiking/coffee → regular.) This directly fixes the recall-fragility that dropped "Alex".
 - **Crash-durable consolidation (new 2026-07-18):** a persisted watermark
   (`meta.last_consolidated_msg_id`, via a reusable `MetaStore` KV table) checkpoints the
   last consolidated message; on startup the unconsolidated tail is recovered from the
@@ -95,6 +103,7 @@ python main.py          # same brain, terminal REPL
 
 python tests/test_memory_lifecycle.py   # offline, no LM Studio needed
 python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
+python tests/test_core_memory.py        # offline core-memory flag/inject/cap (4 cases)
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
@@ -267,11 +276,13 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 5. **Sleep / standby (§2.8)** — the natural next tick behavior: unload the LLM(s) from VRAM when
    idle + low energy (a bot-initiated sleep job) and reload on wake ("waking up…" state). Ties to
    the energy-budget idea; the model-lifecycle piece is the `lms load/unload` we've been driving by hand.
-6. **Core memory + self-modifying persona** (the user's idea, discussed) — an always-in-prompt curated
-   fact block (a `core` flag on `memories`, brain-curated, capped) + Mari's editable self-description.
-   The **self-reflection journal (v5 `thoughts`) is the substrate**: the persona-edit job reads recent
-   thoughts to update her self-description (gated by familiarity). Also resolves the "has feelings" vs
-   "no body" persona tension. Reminisce (pillar 4) can also read the journal.
-7. Then the tool framework (pillar 4): web search, Navidrome playlists, reminders, reminisce.
+6. ✅ ~~Core memory~~ (done 2026-07-19 — `core` flag on `memories`, extractor-marked, always injected,
+   brain re-rank cap, v6). **Self-modifying persona** remains: a reflection tick job that rewrites
+   Mari's own self-description slot in the persona, reading her **thought journal** (v5) as input,
+   gated by familiarity. That's the piece that also resolves the "has feelings" vs "no body" tension.
+7. **Familiarity meter** (V2_PLAN §2.9) — a slow persistent scalar that gates how far the self-modifying
+   persona may drift; the natural companion to #6.
+8. Then the tool framework (pillar 4): web search, Navidrome playlists, reminders, reminisce (which
+   reads the v5 thought journal + episodic log).
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.
