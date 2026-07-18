@@ -174,12 +174,20 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
   - *Too agreeable*: gave the persona a backbone (holds positions, doesn't cave to pressure/
     flattery, doesn't grovel), made it own its feelings (no "just a chatbot"), and wired mood
     to behavior. After: pushes back on insults, resists tasks, mood (irritation) shortens replies.
-- **Remaining conversation nits (honest, low-severity):** (1) extraction still sometimes drops
-  the user's **name** ("I'm Alex" read as a greeting) — strengthened the prompt with an explicit
-  name example on 2026-07-19, **pending live re-verification** (LM Studio was down at commit time);
-  (2) an occasional "just a chatbot" self-deprecation slip (tightened, also pending re-verify);
-  (3) under enough repeated pressure it may still write a short (non-repeated) poem instead of
-  fully refusing. Re-run the two eval scripts once LM Studio is healthy to confirm 1 and 2.
+- **Conversation nits, re-verified 2026-07-19 (LM Studio healthy):** name-capture is now **fixed**
+  — extraction reliably yields "The user's name is Alex" (full eval: 17 captured / **0 bad**), and
+  the conversation eval shows near-dups 0 / cross-dups 0. Still occasional and low-severity, and
+  left for the **planned self-modifying-persona + core-memory pass** (they share the tension below):
+  - a rare self-deprecation slip that *denies feelings* ("i don't have feelings", "just a chat")
+    when deflecting flattery (~1/31) — directly contradicts the emotion pillar, so it's the
+    meaningful one to fix.
+  - backbone is strong on insults/pressure but it may playfully concede a *low-stakes* opinion
+    ("okay fine, you're right").
+  - under repeated pressure it can still write a short (non-repeated) poem, and "prove you feel
+    something" once made it invent a small emotional backstory ("i started crying").
+  - **Root tension:** the persona says both "you have feelings" and "you have no body/life"; the
+    model sometimes resolves it by either denying feelings *or* inventing an experience. The
+    persona/core-memory work is the right place to reconcile this.
 - Recall threshold calibrated on a small sample; precision at large memory volume
   unmeasured. Only qwen3-8b / gemma tested for extraction/decisions.
 - **Recall is sensitive to query phrasing.** A clean query ("do I have any pets?") recalls
