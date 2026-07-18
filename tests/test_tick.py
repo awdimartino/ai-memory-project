@@ -21,6 +21,7 @@ from core.tick import (
     PersonaEditJob,
     ReachOutJob,
     ReflectionJob,
+    SleepJob,
     TickLoop,
 )
 
@@ -52,13 +53,17 @@ class FailingJob(Job):
 
 
 class FakeCompanion:
-    def __init__(self, idle=0.0, pending=0):
+    def __init__(self, idle=0.0, pending=0, asleep=False):
         self._idle = idle
         self._pending = pending
         self.flushed = 0
+        self._asleep = asleep
 
     def idle_seconds(self):
         return self._idle
+
+    def is_asleep(self):
+        return self._asleep
 
     def pending_count(self):
         return self._pending
@@ -182,14 +187,18 @@ async def busy_guard_makes_idle_zero():
 
 
 class ReachCompanion:
-    def __init__(self, idle, reach_result):
+    def __init__(self, idle, reach_result, asleep=False):
         self._idle = idle
         self.meta = InMemoryMeta()
         self._reach_result = reach_result
         self.reach_calls = 0
+        self._asleep = asleep
 
     def idle_seconds(self):
         return self._idle
+
+    def is_asleep(self):
+        return self._asleep
 
     async def reach_out(self):
         self.reach_calls += 1
@@ -250,13 +259,17 @@ async def reach_out_decline_still_sets_cooldown():
 
 
 class ReflectCompanion:
-    def __init__(self, idle):
+    def __init__(self, idle, asleep=False):
         self._idle = idle
         self.meta = InMemoryMeta()
         self.reflect_calls = 0
+        self._asleep = asleep
 
     def idle_seconds(self):
         return self._idle
+
+    def is_asleep(self):
+        return self._asleep
 
     async def reflect(self):
         self.reflect_calls += 1
@@ -298,14 +311,18 @@ class _Store:
 
 
 class PersonaCompanion:
-    def __init__(self, idle, messages):
+    def __init__(self, idle, messages, asleep=False):
         self._idle = idle
         self.meta = InMemoryMeta()
         self.store = _Store(messages)
         self.edit_calls = 0
+        self._asleep = asleep
 
     def idle_seconds(self):
         return self._idle
+
+    def is_asleep(self):
+        return self._asleep
 
     async def edit_persona(self):
         self.edit_calls += 1
@@ -360,6 +377,56 @@ async def familiarity_scales_with_messages():
     assert c.familiarity() == 1.0  # capped
     assert "stranger" in familiarity_label(0.0)
     assert "close" in familiarity_label(0.95)
+
+
+class SleepCompanion:
+    def __init__(self, idle, asleep=False):
+        self._idle = idle
+        self._asleep = asleep
+        self.sleep_calls = 0
+
+    def idle_seconds(self):
+        return self._idle
+
+    def is_asleep(self):
+        return self._asleep
+
+    async def sleep(self):
+        self.sleep_calls += 1
+        self._asleep = True
+
+
+@case
+async def sleep_gated_by_idle():
+    comp = SleepCompanion(idle=100.0)   # not idle long enough (sleep_after 1800)
+    await SleepJob(comp, interval=0.0, sleep_after=1800.0).run()
+    assert comp.sleep_calls == 0
+
+
+@case
+async def sleep_skipped_when_already_asleep():
+    comp = SleepCompanion(idle=99999.0, asleep=True)
+    await SleepJob(comp, interval=0.0, sleep_after=1800.0).run()
+    assert comp.sleep_calls == 0
+
+
+@case
+async def sleep_fires_after_long_idle():
+    comp = SleepCompanion(idle=99999.0)
+    await SleepJob(comp, interval=0.0, sleep_after=1800.0).run()
+    assert comp.sleep_calls == 1 and comp.is_asleep()
+
+
+@case
+async def model_jobs_skip_while_asleep():
+    # reflection and reach-out must not fire a model call while she's asleep
+    refl = ReflectCompanion(idle=99999.0, asleep=True)
+    await ReflectionJob(refl, 0.0, 1.0, 1.0, clock=WallClock()).run()
+    assert refl.reflect_calls == 0, "reflection should skip while asleep"
+
+    reach = ReachCompanion(idle=99999.0, reach_result="hi", asleep=True)
+    await _reach_job(reach, WallClock(), []).run()
+    assert reach.reach_calls == 0, "reach-out should skip while asleep"
 
 
 @case

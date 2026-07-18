@@ -232,6 +232,13 @@
         // Mari reached out on her own (from the tick loop) — render as a bot bubble.
         current = null;
         addBubble("bot", msg.content);
+      } else if (msg.type === "waking") {
+        // She was asleep (model unloaded); a cold reload is coming.
+        const el = document.createElement("div");
+        el.className = "stats";
+        el.textContent = "waking up… (reloading the model)";
+        log.appendChild(el);
+        log.scrollTop = log.scrollHeight;
       } else if (msg.type === "start") {
         current = addBubble("bot", "");
       } else if (msg.type === "token") {

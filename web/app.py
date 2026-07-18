@@ -122,6 +122,9 @@ async def ws(websocket: WebSocket) -> None:
                 continue
 
             async with _state["lock"]:
+                if companion.is_asleep():
+                    # cold model reload is coming; tell the UI so it doesn't look hung
+                    await websocket.send_json({"type": "waking"})
                 await websocket.send_json({"type": "start"})
 
                 async def on_token(t: str) -> None:

@@ -11,13 +11,21 @@ import config
 from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
 from core.emotion_manager import EmotionManager
 from core.memory_manager import MemoryManager
-from core.tick import IdleConsolidationJob, MoodDriftJob, PersonaEditJob, ReflectionJob, TickLoop
+from core.tick import (
+    IdleConsolidationJob,
+    MoodDriftJob,
+    PersonaEditJob,
+    ReflectionJob,
+    SleepJob,
+    TickLoop,
+)
 from infrastructure.conversation_store import SqliteConversationStore
 from infrastructure.db import connect
 from infrastructure.embedder import Embedder
 from infrastructure.llm_client import LLMClient
 from infrastructure.memory_store import SqliteMemoryStore
 from infrastructure.meta_store import SqliteMetaStore
+from infrastructure.model_manager import LmsModelManager
 from infrastructure.thought_store import SqliteThoughtStore
 
 
@@ -60,6 +68,16 @@ async def build() -> tuple[Companion, str]:
 
     emotion = await _build_emotion(meta_store)
 
+    # Sleep/standby needs the `lms` CLI; auto-disable if it isn't on this machine.
+    model_manager = None
+    if config.SLEEP_ENABLED:
+        mm = LmsModelManager(config.LMS_PATH)
+        if mm.available():
+            model_manager = mm
+        else:
+            logging.getLogger("bootstrap").warning(
+                "SLEEP_ENABLED but `%s` CLI not found; sleep/standby disabled", config.LMS_PATH)
+
     history = conv_store.recent_messages(config.HISTORY_TURNS)
     # Recover the unconsolidated tail: any messages logged after the last
     # consolidation checkpoint (e.g. dropped by a hard kill before flush).
@@ -67,7 +85,8 @@ async def build() -> tuple[Companion, str]:
     unconsolidated = conv_store.messages_after(watermark)
     session_id = conv_store.create_session()
     companion = Companion(llm, conv_store, memory, meta_store, session_id,
-                          history, unconsolidated, emotion=emotion, thoughts=thought_store)
+                          history, unconsolidated, emotion=emotion, thoughts=thought_store,
+                          model_manager=model_manager)
 
     # Proactivity heartbeat. Created, not started; the entry point starts it so eval/test
     # harnesses that call build() don't tick. Internal jobs live here; surface-specific
@@ -84,6 +103,8 @@ async def build() -> tuple[Companion, str]:
             jobs.append(PersonaEditJob(companion, config.TICK_INTERVAL,
                                        config.PERSONA_EDIT_MIN_IDLE, config.PERSONA_EDIT_COOLDOWN,
                                        config.PERSONA_MIN_MESSAGES))
+        if model_manager is not None:
+            jobs.append(SleepJob(companion, config.TICK_INTERVAL, config.SLEEP_AFTER_IDLE))
         companion.tick = TickLoop(jobs, interval=config.TICK_INTERVAL)
 
     logging.getLogger("bootstrap").info(

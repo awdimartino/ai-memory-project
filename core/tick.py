@@ -128,7 +128,7 @@ class ReachOutJob(Job):
         self.clock = clock
 
     async def run(self) -> None:
-        if self.companion.idle_seconds() < self.min_idle:
+        if self.companion.is_asleep() or self.companion.idle_seconds() < self.min_idle:
             return
         now = self.clock()
         last = self.companion.meta.get_json(LAST_REACHOUT_KEY, 0) or 0
@@ -163,7 +163,7 @@ class ReflectionJob(Job):
         self.clock = clock
 
     async def run(self) -> None:
-        if self.companion.idle_seconds() < self.min_idle:
+        if self.companion.is_asleep() or self.companion.idle_seconds() < self.min_idle:
             return
         now = self.clock()
         last = self.companion.meta.get_json(LAST_REFLECT_KEY, 0) or 0
@@ -195,7 +195,7 @@ class PersonaEditJob(Job):
         self.clock = clock
 
     async def run(self) -> None:
-        if self.companion.idle_seconds() < self.min_idle:
+        if self.companion.is_asleep() or self.companion.idle_seconds() < self.min_idle:
             return
         if self.companion.store.message_count() < self.min_messages:
             return  # too early in the relationship to have a developed self
@@ -205,6 +205,24 @@ class PersonaEditJob(Job):
             return
         await asyncio.to_thread(self.companion.meta.set_json, LAST_PERSONA_EDIT_KEY, now)
         await self.companion.edit_persona()
+
+
+class SleepJob(Job):
+    """After a long idle, put Mari into standby: unload the LLM from VRAM to free the
+    machine. The heartbeat keeps ticking (mood still drifts); the next message wakes her."""
+    name = "sleep"
+
+    def __init__(self, companion, interval: float, sleep_after: float):
+        self.companion = companion
+        self.interval = interval
+        self.sleep_after = sleep_after
+
+    async def run(self) -> None:
+        if self.companion.is_asleep():
+            return
+        if self.companion.idle_seconds() < self.sleep_after:
+            return
+        await self.companion.sleep()
 
 
 class IdleConsolidationJob(Job):
@@ -218,6 +236,8 @@ class IdleConsolidationJob(Job):
         self.idle_after = idle_after
 
     async def run(self) -> None:
+        if self.companion.is_asleep():
+            return  # a model call would defeat standby
         if self.companion.idle_seconds() < self.idle_after:
             return
         if self.companion.pending_count() == 0:

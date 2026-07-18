@@ -90,13 +90,15 @@ class Companion:
     def __init__(self, llm, store, memory, meta, session_id: int,
                  history: list[dict] | None = None,
                  unconsolidated: list[dict] | None = None,
-                 emotion=None, thoughts=None):
+                 emotion=None, thoughts=None, model_manager=None):
         self.llm = llm
         self.store = store
         self.memory = memory
         self.meta = meta
         self.emotion = emotion  # EmotionManager, or None when disabled
         self.thoughts = thoughts  # ThoughtStore for the private journal, or None
+        self.model_manager = model_manager  # unload/reload the LLM for sleep, or None
+        self._asleep = False  # True while the LLM is unloaded from VRAM (§2.8)
         self.session_id = session_id
         self.history: list[dict] = history or []
         # Each entry carries its message id so a successful consolidation can
@@ -128,6 +130,8 @@ class Companion:
         """Recall + react, stream a reply, log, and maybe consolidate. Returns a TurnResult."""
         self._busy = True  # the tick treats an in-progress turn as "not idle"
         try:
+            if self._asleep:
+                await self.wake()  # reload the LLM before the first reply after standby
             recalled = await self.memory.recall(user_text)
             core = self.memory.core_memories()
             persona = self.meta.get(PERSONA_SELF_KEY)
@@ -237,6 +241,36 @@ class Companion:
     def familiarity(self) -> float:
         """Relationship depth 0..1, from how much you two have talked (gates persona drift)."""
         return min(1.0, self.store.message_count() / max(1, config.FAMILIARITY_MESSAGES))
+
+    def is_asleep(self) -> bool:
+        return self._asleep
+
+    async def sleep(self) -> None:
+        """Go to standby: save pending work, then unload the LLM from VRAM (§2.8).
+
+        The tick keeps running (mood still drifts), but model-using jobs pause until wake.
+        """
+        if self._asleep or self.model_manager is None:
+            return
+        await self.flush()  # don't lose the unconsolidated buffer before unloading
+        self._asleep = True
+        try:
+            await self.model_manager.unload_all()
+        except Exception:  # noqa: BLE001 - never let sleep crash the tick
+            logger.exception("sleep: unload failed")
+        logger.info("went to sleep (LLM unloaded)")
+
+    async def wake(self) -> None:
+        """Reload the models so the next reply can be generated (best-effort)."""
+        if not self._asleep:
+            return
+        logger.info("waking up (reloading models)...")
+        try:
+            if self.model_manager is not None:
+                await self.model_manager.load([self.llm.model, config.EMBED_MODEL])
+        except Exception:  # noqa: BLE001 - if reload fails, the LLM call will JIT-load or error+retry
+            logger.exception("wake: reload failed; relying on JIT / retry")
+        self._asleep = False
 
     async def edit_persona(self) -> str | None:
         """Rewrite Mari's own self-description slot from her thoughts + core memories, gated by

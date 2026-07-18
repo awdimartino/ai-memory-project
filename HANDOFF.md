@@ -74,6 +74,13 @@ The **brain foundation is done and live-verified.** In place:
   **self-reflection** (below), and **proactive reach-out** (below). A **busy guard** on `Companion`
   means jobs never fire mid-turn (idle reads 0 during a reply, even a slow generation). Started by
   the web app + REPL.
+- **Sleep / standby (§2.8, new 2026-07-19):** after a long idle (`SLEEP_AFTER_IDLE`, default 30 min)
+  `SleepJob` calls `Companion.sleep()` — flush pending, then **unload the LLM from VRAM** via the `lms`
+  CLI (`infrastructure/model_manager.py`) to free the machine. The heartbeat keeps ticking (mood still
+  drifts) but the model-using jobs (reflection, reach-out, persona, idle-consolidation) pause while
+  asleep. The next message **wakes** her (`send()` reloads the model first; the web UI shows a "waking
+  up…" frame for the cold-load delay). Auto-disables if `lms` isn't on PATH. Wake is **on-message only**
+  for now — self-waking (wake to reach out) is a deliberate follow-up, gated on reminders/energy/time-of-day.
 - **Self-modifying persona (new 2026-07-19):** `PersonaEditJob` — during idle (min-messages + long
   cooldown), `Companion.edit_persona()` rewrites a bot-owned self-description slot (`meta.persona_self`,
   injected by `build_system` into chat/reach-out/reflect) from her **thought journal** + core memories,
@@ -289,9 +296,14 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 7. ✅ ~~Self-modifying persona + familiarity meter~~ (done 2026-07-19 — `PersonaEditJob` rewrites the
    `meta.persona_self` slot from the thought journal, gated by a message-count familiarity scalar).
    **The brain is now feature-complete** for the planned v2 pillars.
-8. **Sleep / standby (§2.8)** — bot-initiated tick job: unload the LLM from VRAM when idle + low
-   energy, reload on wake ("waking up…" state). The remaining hardware/lifecycle piece.
-9. **Tool framework (pillar 4)** — web search, Navidrome playlists, reminders, and **reminisce**
-   (reads the v5 thought journal + episodic log). Then voice.
+8. ✅ ~~Sleep / standby (§2.8)~~ (done 2026-07-19 — `SleepJob` unloads the LLM via the `lms` CLI after
+   a long idle; wake-on-message reloads with a "waking up…" state; model-jobs pause while asleep).
+   **Follow-up: self-waking** (wake to reach out) — deferred; needs a real trigger (reminders / energy
+   budget / time-of-day) to gate it so it's principled, not twitchy. `wake()` is already a public seam.
+9. **Status panel + memory inspector (web UI)** — one live view of mood / core+semantic memory (and
+   superseded history) / thoughts / persona+familiarity / sleep state / last tick. Attacks the v1
+   "invisible bugs" pain; ties together everything built.
+10. **Tool framework (pillar 4)** — start with **reminisce** (reads the v5 journal + episodic; can be a
+    tick behavior), then a function-calling reliability probe → web search, reminders, Navidrome. Then voice.
 
 Delivery-layer features stay gated behind a solid brain, per the guiding principle.

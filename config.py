@@ -127,6 +127,14 @@ PERSONA_MAX_CHARS = int(os.environ.get("PERSONA_MAX_CHARS", "600"))             
 # Messages of interaction to reach full familiarity (stranger -> close friend), roughly.
 FAMILIARITY_MESSAGES = int(os.environ.get("FAMILIARITY_MESSAGES", "400"))
 
+# Sleep / standby (§2.8): after a long idle, Mari unloads the LLM from VRAM to free the
+# machine (the brain sleeps; the heartbeat keeps ticking). The next message wakes her,
+# reloading the model ("waking up…"). Model-using tick jobs pause while she's asleep.
+# Requires the LM Studio `lms` CLI; auto-disables if it isn't found.
+SLEEP_ENABLED = os.environ.get("SLEEP_ENABLED", "true").lower() in ("1", "true", "yes")
+SLEEP_AFTER_IDLE = float(os.environ.get("SLEEP_AFTER_IDLE", "1800"))   # 30 min away -> sleep
+LMS_PATH = os.environ.get("LMS_PATH", "lms")                           # LM Studio CLI
+
 # Web server.
 WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))

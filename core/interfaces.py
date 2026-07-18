@@ -75,6 +75,18 @@ class ThoughtStore(Protocol):
         ...
 
 
+class ModelManager(Protocol):
+    """Loads/unloads LLMs from VRAM (the sleep/standby seam)."""
+
+    async def unload_all(self) -> None:
+        """Unload all resident models (free VRAM)."""
+        ...
+
+    async def load(self, models: list[str]) -> None:
+        """Load the given models (on wake)."""
+        ...
+
+
 class MetaStore(Protocol):
     """Persistence for durable scalar state (a small key/value table)."""
 
