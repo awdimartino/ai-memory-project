@@ -112,6 +112,15 @@ REACHOUT_ENABLED = os.environ.get("REACHOUT_ENABLED", "true").lower() in ("1", "
 REACHOUT_MIN_IDLE = float(os.environ.get("REACHOUT_MIN_IDLE", "900"))    # 15 min away
 REACHOUT_COOLDOWN = float(os.environ.get("REACHOUT_COOLDOWN", "7200"))   # >=2h between attempts
 
+# Phone push (self-hosted Bark, §8-D): when Mari *reaches out* (a proactive message) and NOTIFY_URL
+# is set, POST it to your Bark server so it pushes to your phone via APNs even with the tab closed.
+# Empty => disabled (no-op). NOTIFY_URL is the full Bark device endpoint, e.g.
+# http://alex-pi:8090/<device_key>. NOTIFY_UI_URL is an optional tap-to-open link (your Tailscale web
+# UI address) so tapping the notification opens Mari to reply. Follow-ups stay in-tab (not pushed).
+NOTIFY_URL = os.environ.get("NOTIFY_URL", "")
+NOTIFY_UI_URL = os.environ.get("NOTIFY_UI_URL", "")
+NOTIFY_TITLE = os.environ.get("NOTIFY_TITLE", BOT_NAME)
+
 # Follow-up messages: after Mari replies, she may fire off a spontaneous second message a tick
 # or a few later (an afterthought / "double-text"), if she genuinely has something to add — she
 # decides and can PASS. A per-tick CHANCE spreads the timing so it isn't clockwork; it only fires

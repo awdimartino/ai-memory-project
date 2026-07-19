@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 import config
 from bootstrap import build, configure_logging
 from core.tick import FollowUpJob, ReachOutJob
+from infrastructure.notifier import PhonePush
 
 logger = logging.getLogger("web")
 
@@ -40,18 +41,28 @@ async def _broadcast(message: dict) -> None:
         _state["connections"].discard(ws)
 
 
+async def _notify_reachout(message: dict) -> None:
+    """Reach-out notifier: push to open browser tabs AND (if configured) the user's phone."""
+    await _broadcast(message)
+    phone = _state.get("phone")
+    if phone is not None:
+        await phone.push(message.get("content", ""))
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     configure_logging()
     companion, model = await build()
     _state["companion"] = companion
     _state["model"] = model
+    # Optional phone push (self-hosted Bark): fires on reach-out only, no-op when NOTIFY_URL unset.
+    _state["phone"] = PhonePush(config.NOTIFY_URL, config.NOTIFY_TITLE, config.NOTIFY_UI_URL)
     if companion.tick is not None:
         # Reach-out is a web-surface job (it needs the WebSocket broadcaster), so it's
         # registered here rather than in the shared bootstrap.
         if config.REACHOUT_ENABLED:
             companion.tick.register(ReachOutJob(
-                companion, _broadcast, config.TICK_INTERVAL,
+                companion, _notify_reachout, config.TICK_INTERVAL,
                 config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN,
                 drives=companion.drives, threshold=config.DRIVE_CONNECTION_THRESHOLD))
         if config.FOLLOWUP_ENABLED:
@@ -60,7 +71,8 @@ async def _startup() -> None:
                 companion, _broadcast, config.TICK_INTERVAL, config.FOLLOWUP_CHANCE,
                 config.FOLLOWUP_MIN_DELAY, config.FOLLOWUP_WINDOW))
         companion.tick.start()  # proactivity heartbeat
-    logger.info("web ready at http://%s:%d (model=%s)", config.WEB_HOST, config.WEB_PORT, model)
+    logger.info("web ready at http://%s:%d (model=%s, phone push=%s)", config.WEB_HOST,
+                config.WEB_PORT, model, "on" if _state["phone"].enabled() else "off")
 
 
 @app.on_event("shutdown")
