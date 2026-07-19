@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mari</title>
+  <link rel="icon" id="favicon" href="data:," />
   <style>
     :root {
       --bg: #0d0f15; --bg2: #101320; --panel: #151926; --elev: #1b2130;
@@ -261,6 +262,22 @@
     .danger:hover { background: color-mix(in srgb, var(--bad) 26%, transparent); }
     .mem-empty { color: var(--muted); font-size: 13px; padding: 28px; text-align: center; }
 
+    .avatar.asleep { background: linear-gradient(145deg, #6b5fa0, #48416e); color: #e8e6f5; box-shadow: none; }
+    .avatar { transition: box-shadow .5s; }
+
+    /* copy-on-hover for bot messages */
+    .row .copy { opacity: 0; background: transparent; border: 0; color: var(--faint); cursor: pointer; font-size: 11px; padding: 2px 4px; transition: opacity .15s; align-self: flex-end; margin-bottom: 3px; }
+    .row.bot:hover .copy { opacity: .65; }
+    .row .copy:hover { color: var(--text); }
+
+    /* collapsible status cards */
+    .st-h { cursor: pointer; user-select: none; }
+    .st-h .st-h-title { flex: 1; }
+    .st-h .chev { color: var(--faint); font-size: 9px; transition: transform .15s; }
+    .card.collapsed .chev { transform: rotate(-90deg); }
+    .card.collapsed > *:not(.st-h) { display: none; }
+    .st-h .count-chip { margin-left: 0; }
+
     /* Responsive: fold panels away on narrow screens */
     @media (max-width: 1080px) { #status { display: none; } }
     @media (max-width: 760px) { #sidebar { display: none; } }
@@ -347,6 +364,45 @@
     jumpBtn.onclick = () => scrollDown(true);
     function updateEmpty() { emptyEl.classList.toggle("hide", !!log.querySelector(".row")); }
 
+    // --- proactive alerts: tab-title badge + browser notification + soft chime ---
+    const favEl = document.getElementById("favicon");
+    let unread = 0, curAsleep = false, audioCtx = null;
+    function setFavicon() {
+      const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+      const x = cv.getContext("2d");
+      x.fillStyle = curAsleep ? "#6b5fa0" : "#e0a458";
+      x.beginPath(); x.arc(32, 32, 30, 0, 7); x.fill();
+      x.fillStyle = curAsleep ? "#e8e6f5" : "#1a1205";
+      x.font = "bold 38px system-ui"; x.textAlign = "center"; x.textBaseline = "middle";
+      x.fillText((botName[0] || "M"), 32, 35);
+      if (unread > 0) { x.fillStyle = "#e5534b"; x.beginPath(); x.arc(50, 15, 13, 0, 7); x.fill(); }
+      favEl.href = cv.toDataURL("image/png");
+    }
+    function chime() {
+      if (!audioCtx) return;
+      try {
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.value = 660; o.connect(g); g.connect(audioCtx.destination);
+        g.gain.value = 0.05; o.start();
+        o.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.12);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+        o.stop(audioCtx.currentTime + 0.26);
+      } catch (e) {}
+    }
+    function notify(text) {
+      if (!document.hidden) return;   // she only "pings" you when you're looking elsewhere
+      unread++; document.title = `(${unread}) ${botName}`; setFavicon(); chime();
+      if ("Notification" in window && Notification.permission === "granted")
+        try { new Notification(`${botName} messaged you`, { body: (text || "").slice(0, 120) }); } catch (e) {}
+    }
+    function armNotifs() {   // first user gesture: unlock audio + ask for notification permission
+      if (!audioCtx) try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) { unread = 0; document.title = botName; setFavicon(); }
+    });
+
     function addBubble(role, text, opts = {}) {
       const row = el("div", "row " + role);
       if (opts.proactive) log.appendChild(el("div", "tag", "· reached out"));
@@ -354,7 +410,16 @@
       const bubble = el("div", "bubble");
       bubble.textContent = text;
       if (role === "user") { row.appendChild(el("span", "time", opts.time || "")); row.appendChild(bubble); }
-      else { row.appendChild(bubble); row.appendChild(el("span", "time", opts.time || "")); }
+      else {
+        row.appendChild(bubble); row.appendChild(el("span", "time", opts.time || ""));
+        const copy = el("button", "copy", "copy");
+        copy.title = "copy message";
+        copy.onclick = () => {
+          if (navigator.clipboard) navigator.clipboard.writeText(bubble.textContent);
+          copy.textContent = "copied"; setTimeout(() => (copy.textContent = "copy"), 1000);
+        };
+        row.appendChild(copy);
+      }
       log.appendChild(row);
       updateEmpty();
       scrollDown(role === "user");
@@ -484,6 +549,7 @@
         addBubble(msg.role === "user" ? "user" : "bot", msg.content);
       } else if (msg.type === "proactive") {
         current = null; addBubble("bot", msg.content, { proactive: true, time: now() });
+        notify(msg.content);
       } else if (msg.type === "waking") {
         addSys("waking up… reloading the model");
       } else if (msg.type === "start") {
@@ -510,6 +576,7 @@
     function submit() {
       const text = input.value.trim();
       if (!text || sendBtn.disabled) return;
+      armNotifs();
       addBubble("user", text, { time: now() });
       wsSend({ type: "user", text });
       input.value = ""; input.style.height = "auto"; setSending(true);
@@ -539,15 +606,26 @@
       return Math.round(secs / 3600) + "h ago";
     }
     function kvRow(k, v) { const r = el("div", "st-kv"); r.appendChild(el("span", "k", k)); r.appendChild(el("span", "v", v)); return r; }
+    const COLLAPSE_KEY = "mari-collapsed";
+    const collapsedSet = () => new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"));
     function card(title, chip) {
       const c = el("div", "card");
-      const h = el("div", "st-h"); h.appendChild(el("span", null, title));
+      const h = el("div", "st-h");
+      h.appendChild(el("span", "st-h-title", title));
       if (chip != null) h.appendChild(el("span", "count-chip", chip));
+      h.appendChild(el("span", "chev", "▾"));
+      if (collapsedSet().has(title)) c.classList.add("collapsed");
+      h.onclick = () => {
+        const on = c.classList.toggle("collapsed");
+        const s = collapsedSet(); on ? s.add(title) : s.delete(title);
+        localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...s]));
+      };
       c.appendChild(h); return c;
     }
     function renderStatus(s) {
       const box = document.getElementById("status");
       box.innerHTML = "";
+      const topMood = s.mood ? Object.entries(s.mood).sort((a, b) => b[1] - a[1])[0] : null;
 
       const ov = card("Mari");
       const state = el("div", "st-kv");
@@ -560,6 +638,7 @@
       ov.appendChild(kvRow("familiarity", `${s.familiarity.value.toFixed(2)} · ${s.familiarity.label}`));
       const track = el("div", "fam-track"); const fi = el("i");
       fi.style.width = Math.round(s.familiarity.value * 100) + "%"; track.appendChild(fi); ov.appendChild(track);
+      if (topMood && !s.asleep) ov.appendChild(kvRow("feeling", topMood[0]));
       box.appendChild(ov);
 
       if (s.mood) {
@@ -604,6 +683,16 @@
       a.appendChild(kvRow("last reflection", fmtAgo(s.last.reflect_secs_ago)));
       a.appendChild(kvRow("last persona edit", fmtAgo(s.last.persona_edit_secs_ago)));
       box.appendChild(a);
+
+      // reflect her state in the header avatar + favicon
+      curAsleep = !!s.asleep;
+      if (s.asleep) {
+        avatarEl.textContent = "😴"; avatarEl.classList.add("asleep"); avatarEl.style.boxShadow = "";
+      } else {
+        avatarEl.textContent = (botName[0] || "M"); avatarEl.classList.remove("asleep");
+        avatarEl.style.boxShadow = (topMood && topMood[1] > 0.15) ? `0 0 12px ${MOOD_COLORS[topMood[0]]}` : "";
+      }
+      setFavicon();
     }
     async function pollStatus() {
       try { const s = await (await fetch("/status")).json(); if (s.ready) renderStatus(s); }
