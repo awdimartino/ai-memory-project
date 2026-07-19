@@ -108,6 +108,17 @@ REACHOUT_ENABLED = os.environ.get("REACHOUT_ENABLED", "true").lower() in ("1", "
 REACHOUT_MIN_IDLE = float(os.environ.get("REACHOUT_MIN_IDLE", "900"))    # 15 min away
 REACHOUT_COOLDOWN = float(os.environ.get("REACHOUT_COOLDOWN", "7200"))   # >=2h between attempts
 
+# Follow-up messages: after Mari replies, she may fire off a spontaneous second message a tick
+# or a few later (an afterthought / "double-text"), if she genuinely has something to add — she
+# decides and can PASS. A per-tick CHANCE spreads the timing so it isn't clockwork; it only fires
+# within a short WINDOW after her reply (long idle is reach-out's job) and is capped per turn.
+# Web-only (pushed over the WebSocket, like reach-out).
+FOLLOWUP_ENABLED = os.environ.get("FOLLOWUP_ENABLED", "true").lower() in ("1", "true", "yes")
+FOLLOWUP_CHANCE = float(os.environ.get("FOLLOWUP_CHANCE", "0.5"))        # chance per eligible tick
+FOLLOWUP_MIN_DELAY = float(os.environ.get("FOLLOWUP_MIN_DELAY", "0"))    # min secs after her reply
+FOLLOWUP_WINDOW = float(os.environ.get("FOLLOWUP_WINDOW", "300"))        # after this, the moment passed
+FOLLOWUP_MAX_PER_TURN = int(os.environ.get("FOLLOWUP_MAX_PER_TURN", "1"))  # follow-ups per user turn
+
 # Self-reflection: while the user is away, Mari writes a short private thought (a journal
 # to herself, never shown in chat) about how she's doing and the conversations. Internal
 # cognition — the substrate for reminisce and, later, the self-modifying persona.

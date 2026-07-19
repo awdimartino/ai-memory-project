@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 
 import config
 from bootstrap import build, configure_logging
-from core.tick import ReachOutJob
+from core.tick import FollowUpJob, ReachOutJob
 
 logger = logging.getLogger("web")
 
@@ -54,6 +54,11 @@ async def _startup() -> None:
                 companion, _broadcast, config.TICK_INTERVAL,
                 config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN,
                 drives=companion.drives, threshold=config.DRIVE_CONNECTION_THRESHOLD))
+        if config.FOLLOWUP_ENABLED:
+            # A spontaneous "double-text" right after her own reply; also needs the broadcaster.
+            companion.tick.register(FollowUpJob(
+                companion, _broadcast, config.TICK_INTERVAL, config.FOLLOWUP_CHANCE,
+                config.FOLLOWUP_MIN_DELAY, config.FOLLOWUP_WINDOW))
         companion.tick.start()  # proactivity heartbeat
     logger.info("web ready at http://%s:%d (model=%s)", config.WEB_HOST, config.WEB_PORT, model)
 

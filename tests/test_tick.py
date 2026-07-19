@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.emotion_manager import EmotionManager
 from core.tick import (
     DriveDriftJob,
+    FollowUpJob,
     IdleConsolidationJob,
     Job,
     MoodDriftJob,
@@ -359,6 +360,97 @@ async def reach_out_drive_still_respects_cooldown():
     pushes = []
     await _reach_drive_job(comp, drv, pushes).run()
     assert comp.reach_calls == 0 and drv.discharged == [], "cooldown is a hard floor over the drive"
+
+
+class FollowCompanion:
+    """Fake for the follow-up job: exposes the small surface the job reads + follow_up()."""
+
+    def __init__(self, left, since, asleep=False, busy=False, result="oh and one more thing"):
+        self._left = left
+        self._since = since
+        self._asleep = asleep
+        self._busy = busy
+        self._result = result
+        self.follow_calls = 0
+        self.cancelled = 0
+
+    def is_asleep(self):
+        return self._asleep
+
+    def is_busy(self):
+        return self._busy
+
+    def followups_pending(self):
+        return self._left
+
+    def seconds_since_reply(self):
+        return self._since
+
+    def cancel_followups(self):
+        self.cancelled += 1
+        self._left = 0
+
+    async def follow_up(self):
+        self.follow_calls += 1
+        if self._result:
+            self._left -= 1
+        else:
+            self._left = 0
+        return self._result
+
+
+def _follow_job(comp, pushes, chance=0.5, rng=lambda: 0.0):
+    async def notify(m):
+        pushes.append(m)
+    return FollowUpJob(comp, notify, interval=0.0, chance=chance,
+                       min_delay=30.0, window=300.0, rng=rng)
+
+
+@case
+async def follow_up_fires_within_window_and_pushes():
+    comp = FollowCompanion(left=1, since=60.0)          # in-window, has budget
+    pushes = []
+    await _follow_job(comp, pushes, rng=lambda: 0.0).run()   # 0.0 < 0.5 chance -> fire
+    assert comp.follow_calls == 1
+    assert pushes == [{"type": "proactive", "content": "oh and one more thing"}], pushes
+
+
+@case
+async def follow_up_gated_when_none_left():
+    comp = FollowCompanion(left=0, since=60.0)
+    await _follow_job(comp, []).run()
+    assert comp.follow_calls == 0
+
+
+@case
+async def follow_up_gated_before_min_delay():
+    comp = FollowCompanion(left=1, since=10.0)           # 10 < 30 min_delay
+    await _follow_job(comp, []).run()
+    assert comp.follow_calls == 0
+
+
+@case
+async def follow_up_window_expiry_cancels():
+    comp = FollowCompanion(left=1, since=600.0)          # 600 > 300 window
+    await _follow_job(comp, []).run()
+    assert comp.follow_calls == 0 and comp.cancelled == 1
+
+
+@case
+async def follow_up_chance_gate_can_skip():
+    comp = FollowCompanion(left=1, since=60.0)
+    await _follow_job(comp, [], rng=lambda: 0.9).run()   # 0.9 >= 0.5 -> skip this tick
+    assert comp.follow_calls == 0 and comp.cancelled == 0  # still eligible next tick
+
+
+@case
+async def follow_up_skips_when_asleep_or_busy():
+    asleep = FollowCompanion(left=1, since=60.0, asleep=True)
+    await _follow_job(asleep, []).run()
+    assert asleep.follow_calls == 0
+    busy = FollowCompanion(left=1, since=60.0, busy=True)
+    await _follow_job(busy, []).run()
+    assert busy.follow_calls == 0
 
 
 class ReflectCompanion:

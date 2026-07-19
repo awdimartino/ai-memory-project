@@ -15,6 +15,7 @@ never kills the loop.
 """
 import asyncio
 import logging
+import random
 import time
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,45 @@ class ReachOutJob(Job):
         if self.drives is not None:
             await self.drives.discharge("connection")
         message = await self.companion.reach_out()
+        if message:
+            await self.notify({"type": "proactive", "content": message})
+
+
+class FollowUpJob(Job):
+    """After Mari replies, maybe fire a spontaneous follow-up a tick or a few later — like
+    double-texting to add or elaborate on a thought.
+
+    Distinct from reach-out (which is about long idle): this only fires in a short WINDOW right
+    after her own message, while she's still the last speaker. Per-turn budget + a per-tick
+    CHANCE keep it occasional and off-clockwork; `companion.follow_up()` generates and may PASS.
+    Web-only (needs the socket broadcaster). `rng`/`clock` are injectable for tests.
+    """
+    name = "follow_up"
+
+    def __init__(self, companion, notify, interval: float, chance: float,
+                 min_delay: float, window: float, rng=random.random, clock=time.monotonic):
+        self.companion = companion
+        self.notify = notify
+        self.interval = interval
+        self.chance = chance
+        self.min_delay = min_delay
+        self.window = window
+        self.rng = rng
+        self.clock = clock
+
+    async def run(self) -> None:
+        c = self.companion
+        if c.is_asleep() or c.is_busy() or c.followups_pending() <= 0:
+            return
+        elapsed = c.seconds_since_reply()
+        if elapsed > self.window:
+            c.cancel_followups()  # the moment has passed; don't follow up on a stale reply
+            return
+        if elapsed < self.min_delay:
+            return
+        if self.rng() >= self.chance:
+            return  # not this tick — another roll next tick while still in the window
+        message = await c.follow_up()
         if message:
             await self.notify({"type": "proactive", "content": message})
 

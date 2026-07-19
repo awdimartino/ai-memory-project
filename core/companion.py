@@ -25,7 +25,9 @@ from typing import Awaitable, Callable
 
 import config
 from core.prompts import (
+    FOLLOWUP_CUE,
     REFLECT_CUE,
+    build_followup_system,
     build_persona_edit_system,
     build_persona_edit_user,
     build_reachout_cue,
@@ -122,6 +124,10 @@ class Companion:
         # True while a turn is being processed; the tick treats this as "not idle"
         # so autonomy jobs never fire mid-reply (even during a slow generation).
         self._busy = False
+        # Follow-up state: after a reply, how many spontaneous follow-ups she may still send
+        # this turn, and when her last message went out (to bound the follow-up window).
+        self._followups_left = 0
+        self._last_reply_at = time.monotonic()
         # Title of the active conversation (None => untitled; set from the first user message).
         self._session_title: str | None = None
         # The proactivity heartbeat, attached by bootstrap; started by the entry point.
@@ -202,6 +208,11 @@ class Companion:
             if self.drives is not None:
                 await self.drives.on_user_message()  # contact relieves connection/restlessness
 
+            # Arm a possible spontaneous follow-up to this reply (the web follow-up job
+            # decides, a tick or a few later, and may PASS).
+            self._followups_left = config.FOLLOWUP_MAX_PER_TURN
+            self._last_reply_at = time.monotonic()
+
             self._maybe_consolidate()
             return TurnResult(text, stats, recalled, emotion_info, core, stats.get("tools"))
         finally:
@@ -240,6 +251,63 @@ class Companion:
         self.history.append({"role": "assistant", "content": text})
         self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
         logger.info("reach-out: %s", text[:80])
+        return text
+
+    def is_busy(self) -> bool:
+        """True while a turn is being generated (the follow-up job skips mid-turn)."""
+        return self._busy
+
+    def followups_pending(self) -> int:
+        """Spontaneous follow-ups Mari may still send for the current turn."""
+        return self._followups_left
+
+    def seconds_since_reply(self) -> float:
+        """How long since her last message went out (bounds the follow-up window)."""
+        return time.monotonic() - self._last_reply_at
+
+    def cancel_followups(self) -> None:
+        """Close the follow-up window for this turn (moment passed / she declined)."""
+        self._followups_left = 0
+
+    async def follow_up(self) -> str | None:
+        """Maybe fire a spontaneous follow-up to her own last message (an afterthought).
+
+        Only when her message is still the most recent one (the user hasn't replied yet). She
+        may reply PASS to stay quiet. A real message decrements the per-turn budget and extends
+        the window (so a rare second one can chain); a PASS closes follow-ups for this turn. Like
+        reach-out, the text is logged as an assistant turn so it replays on reconnect.
+        """
+        if not self.history or self.history[-1]["role"] != "assistant":
+            self._followups_left = 0  # she's no longer the last speaker; nothing to follow up
+            return None
+        last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
+        recalled = await self.memory.recall(last_user) if last_user else []
+        core = self.memory.core_memories()
+        extra = [content for content, _ in recalled if content not in core]
+        mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        system = build_followup_system(extra, mood_prompt, core=core,
+                                       persona=self.meta.get(PERSONA_SELF_KEY))
+
+        messages = [{"role": "system", "content": system}]
+        messages.extend(self.history[-config.HISTORY_TURNS:])
+        messages.append({"role": "user", "content": FOLLOWUP_CUE})
+
+        async def _sink(_t):
+            pass
+
+        text, _ = await self.llm.stream(messages, _sink)
+        text = text.strip()
+        if not text or text.rstrip(".!").strip().upper() == "PASS":
+            self._followups_left = 0
+            logger.info("follow-up: stayed quiet")
+            return None
+
+        aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
+        self.history.append({"role": "assistant", "content": text})
+        self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+        self._followups_left -= 1
+        self._last_reply_at = time.monotonic()  # extend the window for a possible next one
+        logger.info("follow-up: %s", text[:80])
         return text
 
     async def reflect(self) -> str | None:

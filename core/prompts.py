@@ -168,6 +168,29 @@ def build_reachout_system(memories: list[str], mood: str | None = None,
     return f"{base}\n\n{_REACHOUT_ADDENDUM}"
 
 
+# --- Follow-up (a spontaneous second message right after her own reply) ---
+
+_FOLLOWUP_ADDENDUM = """You just sent them a message a moment ago, and they haven't said anything back yet.
+
+Sometimes, right after texting someone, you fire off a quick second message: an afterthought, a
+small thing you forgot to add, or a spontaneous extra reaction to what you were just saying. If one
+of those genuinely comes to you right now, send just that, the way you'd naturally double-text.
+
+Keep it short, and do NOT repeat, restate, or re-explain what you already said. Most messages stand
+fine on their own, so only add something if it's real. If you've got nothing worth adding, reply with
+exactly: PASS (that one word, nothing else)."""
+
+FOLLOWUP_CUE = ("(You just messaged them and they haven't replied yet. If a quick follow-up thought "
+                "genuinely comes to you, add it now. If not, just: PASS.)")
+
+
+def build_followup_system(memories: list[str], mood: str | None = None,
+                          core: list[str] | None = None, persona: str | None = None) -> str:
+    """System prompt for a spontaneous follow-up: the normal chat context + follow-up framing."""
+    base = build_system(memories, mood, core=core, persona=persona)
+    return f"{base}\n\n{_FOLLOWUP_ADDENDUM}"
+
+
 # --- Self-reflection (private thought journal, written during idle ticks) ---
 
 _REFLECT_ADDENDUM = """Right now you're on your own, between conversations. Take a quiet moment to think to

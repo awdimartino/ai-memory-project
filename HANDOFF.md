@@ -114,6 +114,14 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   (`{type:"proactive"}` → bot bubble; also logged so it replays on reconnect). Mari can reply **PASS**
   to stay quiet, and she's given **how long you've been away** (she can't see a clock) so the call is
   sensible. Web-only (needs the socket broadcaster); the REPL runs internal jobs only.
+- **Follow-up messages ("double-text", 2026-07-18):** `FollowUpJob` — after Mari replies, she may fire a
+  spontaneous *second* message a tick or a few later (an afterthought / addition), if she genuinely has one.
+  Each user turn arms a per-turn budget (`FOLLOWUP_MAX_PER_TURN`, default 1); the job fires within a short
+  `FOLLOWUP_WINDOW` (default 5 min) after her reply, gated by a per-tick `FOLLOWUP_CHANCE` (default 0.5) so
+  it's off-clockwork, and `Companion.follow_up()` generates it (can reply **PASS** → closes the window; a real
+  message is logged + pushed like reach-out). This replaces the old reverted "two messages split by a line
+  break" approach with a **re-prompt** ("got a quick follow-up?"), which reads more natural. Distinct from
+  reach-out (long idle → `connection` drive); this is the just-replied window. Web-only.
 - **Web UI: status panel + conversation tabs:** a live **status panel** (right side)
   polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity, the 6 mood bars, memory
   (core list + retired/superseded facts + counts), self-description, the private thought journal, and
@@ -276,9 +284,10 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 - **Mood-drift rate is untuned.** Drift decays one step per tick; at the default 60s tick that settles mood
   over several idle minutes. Tune `TICK_INTERVAL` or the per-channel `DECAY_RATES` (calibrated for
   per-message decay, not per-tick) if it feels off.
-- **Multi-message / "texting burst" replies** were tried and **fully reverted** (an earlier request); nothing
-  remains in the code. Approach if revisited: model separates messages with a blank line; the UI renders each
-  as its own bubble with a short "typing" pause; store one row, split for display.
+- **Multi-message / "texting burst" replies** — the original "one reply, two messages split by a blank line"
+  approach was **fully reverted**. **Revisited differently (2026-07-18):** the follow-up feature (§2) sends a
+  *separate, later* second message by **re-prompting** ("got a quick follow-up?") a tick or a few after the
+  reply, rather than splitting one generation — reads more natural and each message is a real turn.
 
 ---
 
