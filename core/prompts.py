@@ -303,10 +303,11 @@ MEMORY_SCHEMA = {
                         "type": "object",
                         "properties": {
                             "content": {"type": "string"},
-                            "category": {"type": "string", "enum": ["user"]},
                             "core": {"type": "boolean"},
                         },
-                        "required": ["content", "category", "core"],
+                        # `category` dropped: it was always "user" (single-value enum) — pure
+                        # dead output tokens on every fact, ~20% of the extraction generation.
+                        "required": ["content", "core"],
                         "additionalProperties": False,
                     },
                 }

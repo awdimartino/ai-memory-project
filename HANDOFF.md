@@ -201,6 +201,17 @@ REPL commands: `/exit` (flushes pending consolidation), `/reset`, `/model <name>
 
 ## 4. Model setup (current)
 
+- **⚠️ REQUIRED LM Studio template edit (huge consolidation speedup):** qwen3.5-9b is a reasoning
+  model, and on the **structured (`response_format`) brain path** neither `/no_think` nor
+  `enable_thinking=false` nor `chat_template_kwargs` suppresses reasoning (LM Studio bug #1990 —
+  all confirmed no-ops here). Without the fix it reasons **~2,000 hidden tokens per extraction/decision
+  call** → consolidation ~20× slower (~50s/call). **Fix (one-time, persists across loads):** in LM Studio
+  edit qwen3.5-9b's **Prompt Template** (My Models → gear → 🧪 Advanced Config → right-click →
+  *Always Show Prompt Template*, in Jinja mode) and **prepend** `{% set enable_thinking = false %}` to the
+  existing template. qwen's template defaults `enable_thinking` to *on* when the var is undefined (LM Studio
+  never sets it), so this initializes it false. **Verified: extraction ~50s → ~3.5s, reasoning_content 0.**
+  **Tradeoff:** this disables thinking for the whole instance including chat, which modestly lowers
+  tool-calling reliability (see §7). App code needs no change — it just gets fast.
 - **Chat model: `qwen/qwen3.5-9b` with reasoning disabled** (switched after a
   personality bake-off). qwen3-8b was terse but **ended 72% of replies with a question**
   ("what's on your mind?", "you?") and used a formulaic sympathy pattern — the user's real
@@ -268,6 +279,14 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 
 ## 7. Known limitations / open issues (honest)
 
+- **Thinking-off vs tool-calling (tradeoff from the §4 consolidation fix):** the `enable_thinking=false`
+  template edit that makes consolidation ~20× faster disables reasoning on the **chat** path too, which
+  modestly lowered tool-call reliability. In a 4-run smoke, `get_current_time` fired 3× but once she
+  *disclaimed* ("I don't have a way to check the time") instead of calling it (~75%); reminisce sometimes
+  answers from context rather than firing. Tools still work, just less reliably (the framework probed 100%
+  *with* thinking on). Small sample — watch it in real use. **If it bugs you:** strengthen the tools note in
+  `build_system`, or run a separate **thinking-on chat + thinking-off brain** instance (best of both, ~2× VRAM).
+  Backgrounded-consolidation speed was judged the priority.
 - **Decisions are probabilistic** (temp 0.2, not deterministic) — occasional
   misclassification possible even with the tuned prompts.
 - **Conversation nits (low-severity, left for later):** a rare self-deprecation slip that *denies feelings*
