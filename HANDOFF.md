@@ -183,7 +183,7 @@ python tests/test_memory_lifecycle.py   # offline, no LM Studio needed
 python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
 python tests/test_core_memory.py        # offline core-memory flag/inject/cap (4 cases)
 python tests/test_memory_admin.py       # offline memory admin: all/edit/delete/clear + factory reset (7 cases)
-python tests/test_notifier.py           # offline phone-push (Bark) via httpx MockTransport (4 cases)
+python tests/test_notifier.py           # offline phone-push (Bark) via httpx MockTransport (6 cases)
 python tests/test_durability.py         # offline hard-kill recovery (4 cases)
 python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
 python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
@@ -404,14 +404,20 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
 - **Do-not-disturb / time-of-day gating** for proactivity — keeps reach-out and self-wake from firing at 3am.
 
 ### D. Reach beyond the tab
-- ~~**Push notifications** (e.g. Bark)~~ **DONE (2026-07-19):** a **reach-out** now pushes to the user's iPhone
-  via a **self-hosted Bark server** (on their Raspberry Pi) → APNs. Wired as a config-gated `PhonePush`
-  (`infrastructure/notifier.py`) on the reach-out path: `_notify_reachout` in `web/app.py` broadcasts to open
-  tabs AND POSTs `{title, body, url, group}` to `NOTIFY_URL` (no-op when unset; failures logged + swallowed so
-  they can't break a reach-out). Tapping the notification opens the web UI over **Tailscale** (`NOTIFY_UI_URL`
-  deep-link). Follow-ups stay in-tab (not pushed). iOS forces APNs (the one unavoidable online hop; Bark can
-  E2E-encrypt so Apple sees only ciphertext). Offline-tested via httpx MockTransport. Groundwork for a
-  genuinely *useful* self-wake later.
+- ~~**Push notifications** (e.g. Bark)~~ **DONE + LIVE-VERIFIED (2026-07-19):** a **reach-out** now pushes to the
+  user's iPhone via a **self-hosted Bark server** (on their Raspberry Pi `alex-pi:8090`, also a tailnet node) →
+  APNs. Wired as a config-gated `PhonePush` (`infrastructure/notifier.py`) on the reach-out path:
+  `_notify_reachout` in `web/app.py` broadcasts to open tabs AND POSTs `{title, body, url, group, icon}` to
+  `NOTIFY_URL` (no-op when unset; failures logged + swallowed so they can't break a reach-out; a trailing slash
+  on the url is stripped — Bark routes `/<key>/` differently). Tapping the notification opens the web UI over
+  **Tailscale** (`NOTIFY_UI_URL` deep-link). `NOTIFY_ICON` adds a custom notification image — served from
+  `web/static/` (now mounted at `/static`) so the phone fetches it over Tailscale; iOS caches it by URL.
+  Follow-ups stay in-tab (not pushed). `POST /admin/test_notify` fires a one-off push on demand. iOS forces APNs
+  (the one unavoidable online hop; Bark can E2E-encrypt so Apple sees only ciphertext). Offline-tested via httpx
+  MockTransport (6 cases). Confirmed end-to-end on the user's phone, icon included. Groundwork for a genuinely
+  *useful* self-wake later. **Gotcha for next time:** the Bark device key must be issued *by* the self-hosted
+  server (register the iOS app against `alex-pi:8090`); a key from the public `api.day.app` returns
+  "failed to get device token from database".
 - **Multi-channel presence** — Mari over WhatsApp / Telegram / Discord instead of only the local web UI.
 
 ### E. More tools (framework ready; paused by the user)
