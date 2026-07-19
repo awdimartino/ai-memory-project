@@ -30,6 +30,12 @@ import config
 from core.prompts import SYSTEM_PROMPT
 from infrastructure.llm_client import LLMClient
 
+# Optional persona override (a model-specific variant) so we don't touch the live prompt.
+_PERSONA_FILE = os.environ.get("PERSONA_FILE")
+if _PERSONA_FILE:
+    with open(_PERSONA_FILE, encoding="utf-8") as _f:
+        SYSTEM_PROMPT = _f.read()
+
 # Fresh-context openers: each starts a new conversation (variety of opening moves).
 OPENERS = [
     "hey",

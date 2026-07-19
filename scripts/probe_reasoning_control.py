@@ -40,7 +40,13 @@ def main():
     run(model, "extra_body reasoning_budget=200", extra_body={"reasoning_budget": 200})
     run(model, "extra_body max_thinking_tokens=200", extra_body={"max_thinking_tokens": 200})
     run(model, "extra_body thinking_budget=200", extra_body={"thinking_budget": 200})
+    # llama.cpp's native per-request reasoning-budget field (added 2026-03; injects the
+    # end-of-thought token once the budget is hit). Works only if LM Studio's bundled
+    # engine surfaces it AND --reasoning-budget wasn't pinned at server launch.
+    run(model, "extra_body thinking_budget_tokens=64", extra_body={"thinking_budget_tokens": 64})
+    run(model, "extra_body thinking_budget_tokens=256", extra_body={"thinking_budget_tokens": 256})
     print("\n(if any row's reasoning chars << baseline, LM Studio honors that knob)")
+    print("(if baseline itself reads ~0, thinking is OFF — revert the template line and rerun)")
 
 
 if __name__ == "__main__":

@@ -12,16 +12,15 @@ panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **mult
 and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
 batching). All live-verified; offline suite **107 green**.
 
-**⚠️ ACTIVE THREAD — stepped back 2026-07-19 for a reset; resume via §0.** Production is **thinking-OFF and
-stable**, and the *speed* escape-hatches are proven dead ends (spec decoding is a net loss; LM Studio honors
-no reasoning-cap knob — details in §0). **Two things stay open:** **(1)** the user's steer — thinking-*off*
-may cost intelligence, so **bounded thinking** (a little reasoning, not none) is worth pursuing; **(2)
-tool-calling reliability** — the eval is noisy (22 / 23 / 25 across runs), and the fix splits by cause:
-**TIME inconsistency is TEMPERATURE** (0.8 is too hot for a routing decision — low temp took TIME 5→7/8),
-while **REMINISCE (~3–4/8) is a REASONING problem** (the model *affirms* "yeah, Japan!" instead of
-*retrieving*) — the concrete case bounded thinking would fix. A prompt tweak was tried, didn't beat baseline,
-and sits **uncommitted** in `core/prompts.py` (decide keep/revert — §0). Full picture + the two-prong plan in
-§0. Everything else is enrichment/reach — see §8.
+**⚠️ ACTIVE THREAD — PARKED 2026-07-19, waiting on LM Studio; full detail in §0.** Production stays **thinking-OFF
+and stable on qwen3.5-9b.** This session confirmed **bounded thinking is impossible in LM Studio today** — llama.cpp
+has a native reasoning budget (`thinking_budget_tokens`) but LM Studio *strips* it (probed); getting it needs
+llama-server (AMD-build risk + sleep/embed rewire) or vLLM, neither worth it now → **wait for LM Studio to expose it
+(bug #1838 / #1974).** A **three-model bake-off** (qwen vs gpt-oss vs Gemma 4 12B QAT) also ran: **gpt-oss rejected**
+(88% question-ending — it interrogates; plus dashes), **tuned Gemma is a viable fallback** (non-interrogative, clean,
+reasoning 2–4× less circular than qwen, but ~13s and its thinking-off speed is untested). **Decision: stay on qwen,
+wait.** Still open + unblocked: **tool-calling prong A (per-call temperature)** — the cheap win, no migration. The
+`core/prompts.py` tweak is still uncommitted. Everything else is enrichment/reach — see §8.
 
 ---
 
@@ -343,50 +342,60 @@ critical path. Grouped by theme; items the user has **already flagged as liked**
 Full context in [`V2_PLAN.md` §2.9](V2_PLAN.md). **Delivery-layer features stay gated behind a solid
 brain, per the guiding principle.**
 
-### 0. ⚠️ ACTIVE — thinking depth + tool-calling reliability (stepped back 2026-07-19 for a reset)
-Production is **thinking-OFF and stable**; what's open is (1) whether to add *bounded* reasoning back to
-recover intelligence, and (2) making tool-calling consistent. **Decide the direction from a fresh context.**
+### 0. thinking depth + tool-calling reliability — PARKED 2026-07-19 (waiting on LM Studio)
+Production is **thinking-OFF and stable on qwen3.5-9b.** After a full investigation this session the decision is to
+**stay on qwen thinking-off and WAIT for LM Studio to expose a reasoning budget** rather than migrate serving or swap
+the model. Resume when LM Studio ships budget control (watch bug-tracker **#1838 / #1974**); or, independently, do
+tool-calling **prong A** below (no migration, still worthwhile).
 
-**Settled — don't relitigate the speed levers:**
-- **Speculative decoding — net loss, not used.** Same-family **Qwen3.5-0.8B** draft (no existing Qwen3/2.5
-  small is vocab-compatible, so a 3.5-family draft was downloaded — `qwen3.5-0.8b@q6_k` + `@q8_0` are in LM
-  Studio if ever revisited). Vs a **45 tok/s** thinking-off baseline: predictable **57.6 (+27%)** but
-  creative/chat **22.8 (−50%)** → net loss for the chat-dominant path. A lighter Q6 only reshapes the curve.
-- **Reasoning-cap knobs — all no-ops.** With thinking ON (reasoning on `reasoning_content`, ~3245 chars
-  baseline), `reasoning_effort=low/minimal` + `reasoning_budget`/`max_thinking_tokens`/`thinking_budget=200`
-  every left reasoning ~2900–3700 chars. LM Studio caps nothing (bug #1990); thinking is template-global (no
-  per-request toggle). So within *supported params* thinking is binary: OFF (~3–9s) or ON (unbounded 20–45s).
+**Bounded thinking — confirmed impossible in LM Studio today (probed 2026-07-19).**
+- llama.cpp *added a real reasoning budget* in March 2026: `--reasoning-budget` (launch) + per-request
+  **`thinking_budget_tokens`** — a sampler that injects the end-of-thought token once the budget is hit (the TIL
+  `ThinkingTokenBudgetProcessor` technique, native), and it works on Qwen3-family GGUF. **But LM Studio does not
+  surface it.** `scripts/probe_reasoning_control.py` (now also tests `thinking_budget_tokens` 64/256) with thinking
+  ON: baseline **5212** reasoning chars; every knob — `reasoning_effort`, `reasoning_budget`, `max_thinking_tokens`,
+  `thinking_budget`, **`thinking_budget_tokens`** — left reasoning ~2700–3700 chars and did **not** scale with the
+  budget (64 and 256 both ~3500). All stripped. So bounded thinking needs **llama-server** (real cost: AMD Vulkan/ROCm
+  build risk on the 9070XT + rewiring the `lms` sleep/unload in `model_manager.py` + a 2nd server for nomic embeddings)
+  or **vLLM** — both abandon LM Studio's conveniences. Not worth it now → **wait for #1838/#1974**, which would give
+  bounded thinking on the *current* stack with zero migration and no personality risk.
+- Still-settled dead ends (don't relitigate): **spec decoding** net loss (see below); **reasoning_effort/budget API
+  knobs** no-ops for qwen (bug #1990). Thinking stays template-global binary: OFF (~3–9s) / ON (unbounded 20–45s).
 
-**Reopened by the user (2026-07-19) — two live questions:**
-1. **Bounded thinking is worth pursuing.** The steer: thinking-*off* may cost intelligence, and a *little*
-   reasoning (not none) may be the sweet spot. Supported knobs can't do it; unsupported routes exist (below).
-2. **Tool-calling reliability** (the real pain). `scripts/tool_eval.py` is **noisy — always run it 2–3×**
-   (22 / 23 / 25 across runs). Failures split by cause:
-   - **TIME inconsistency = TEMPERATURE.** At 0.8 even "what time is it?" randomly no-fires; at 0.2 TIME → 7/8.
-     0.8 is too hot for a routing decision.
-   - **REMINISCE (~3–4/8) = REASONING.** Stuck low regardless of temp/prompt. Failure mode: the model *affirms*
-     ("aw yeah, Japan!") instead of *retrieving*. The concrete case **bounded thinking would help.**
+**Model alternatives explored 2026-07-19 — qwen stays; tuned-Gemma is the fallback.**
+- **qwen3.5-9b is current-gen, not old.** It's the **March 2026 Qwen 3.5 small series** (0.8/2/4/9B) and beats
+  gpt-oss-120b on several benches; **gpt-oss (Aug 2025) is the OLDER model.** No "newness" reason to switch.
+- **Three-model bake-off** via new `scripts/model_tryout.py` (per-model 11-question run: answer + reasoning-chars +
+  wall-time, reasoning split from the answer) + `scripts/bakeoff_personality.py` (bounce / q-end / sameness). Outputs
+  in `bakeoff/gpt-oss-20b_results.md`, `bakeoff/gemma-4-12b-qat_results.md` (+ `_v1_liveprompt` backup):
+  - **gpt-oss-20b — REJECTED on personality.** Fast (3.6s low / 6.5s medium), the `reasoning_effort` dial *genuinely
+    works* (bat_ball WRONG→OK low→medium), hallucination-disciplined. BUT **88% q-end** (interrogates — the exact
+    thing that killed qwen3-8b), em-dashes everywhere, occasional harmony-format `500`s. Not Mari.
+  - **Gemma 4 12B QAT — viable challenger.** `google/gemma-4-12b-qat` (Q4_0, 6.66 GiB). **0% bounce / low q-end**
+    (non-interrogative like qwen), **0 dashes**, reasoning **2–4× less circular than qwen** (~1300–2000 chars,
+    *completes* answers, ~13s vs qwen 20–45s — validates "qwen thinks in circles"). Two initial flaws (over-refused
+    casual Qs like jet-lag/story; "That's the worst" sympathy reflex ×5) **were fixed** with a Gemma-specific persona
+    variant **`bakeoff/gemma_persona.txt`** (loaded via the new **`PERSONA_FILE`** env override in both scripts — live
+    prompt untouched): narrowed task-refusal to real deliverables + added a "vary stock reactions" rule → jet-lag/story/
+    bat-ball now engage, cover-letter still refused, sympathy varied; q-end stayed 11%. The "no body" honesty was
+    **kept** (user's call — it's true). **Only open gap: SPEED ~13s** (thinking-on; efficient but not fast). **NOT yet
+    tested: Gemma thinking-OFF** (needs the same template edit as qwen) — the deciding data point if switching is ever
+    revisited (goal: ~5s + still coherent). Thinking on/off is template-controlled (chat_template_kwargs/reasoning_effort
+    are no-ops, same as qwen).
 
-**Two-prong plan (pick from a fresh context):**
-- **A. Per-call temperature (quick; fixes TIME-style noise).** Split the tool loop in `infrastructure/
-  llm_client.py`: run the *tool-decision* pass cool (~0.2–0.3, reliable routing), keep the *final-answer* pass
-  at 0.8 (lively chat). No serving change. Re-score with `tool_eval.py` (×3).
-- **B. Bounded thinking (targets REMINISCE + general intelligence; the user's steer).** Cheapest first:
-  **(i)** `logit_bias` nudge on the `</think>` token in LM Studio — crude budget; find the token id, sweep the
-  bias, measure reasoning length + reminisce; **(ii)** app-layer **two-phase** generation (call 1: reasoning
-  with `max_tokens=N` + `stop=["</think>"]`; call 2: force-close `</think>` and answer via raw
-  `/v1/completions`) — a real `LLMClient` change; **(iii)** move serving to vLLM/transformers to use the TIL's
-  `ThinkingTokenBudgetProcessor` (https://muellerzr.github.io/til/end_thinking.html) — abandons LM Studio.
+**Tool-calling reliability — plan still valid, unstarted.** `tool_eval.py` noisy (22/23/25, run ×3). **TIME
+inconsistency = temperature** (0.8 too hot for routing; 0.2 → TIME 7/8) → **prong A: per-call temperature** in
+`infrastructure/llm_client.py` (cool the tool-decision pass ~0.2–0.3, keep the answer at 0.8). No serving change,
+independent of the thinking question — the cheapest real win, do it anytime. **REMINISCE (~3–4/8) = reasoning** (the
+model *affirms* instead of *retrieving*) — the case bounded thinking would help, so it's blocked on the same wait.
 
-**Staged & undecided — `core/prompts.py` has an UNCOMMITTED change (left in the tree on purpose):**
-`build_tools_note` was strengthened — the reminisce rule now says shared history lives in earlier
-conversations *not in front of you*, so **retrieve, don't affirm/guess**, plus a few-shot calibration block
-(positive time/reminisce + negative idiom/opinion examples). It scored **22–23 vs the 25 baseline** (no clear
-help; TRICKY stayed 6/6). **Decide: revert (`git restore core/prompts.py`) or rework** — don't build on it
-unexamined.
+**`core/prompts.py` still has the UNCOMMITTED `build_tools_note` change** (left on purpose; strengthened reminisce
+rule + few-shot calibration; scored 22–23 vs 25 baseline — decide revert/rework; **not** committed this session).
 
-**Production config right now:** thinking OFF (template `{% set enable_thinking = false %}`), `NO_THINK=true`,
-spec decoding OFF, `TEMPERATURE=0.8`.
+**Production config right now:** qwen3.5-9b, thinking OFF (template `{% set enable_thinking = false %}`),
+`NO_THINK=true`, spec decoding OFF, `TEMPERATURE=0.8`. ⚠️ **The template was flipped to `= true` for the 2026-07-19
+probe; flip it back to `= false` in LM Studio to restore thinking-off** (verify: `probe_reasoning_control.py` baseline
+reads ~0).
 
 ### A. Autonomous inner life ★ (recommended next arc)
 The three the user liked from the GitHub-companion research. Together they replace the single idle-timer
