@@ -23,8 +23,9 @@
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body {
-      margin: 0; display: flex; flex-direction: column;
-      background: radial-gradient(1200px 600px at 70% -10%, var(--bg2), var(--bg)) fixed;
+      margin: 0; height: 100vh; height: 100dvh;   /* dvh: avoids the iOS Safari toolbar cutting the bottom off */
+      display: flex; flex-direction: column;
+      background: radial-gradient(1200px 600px at 70% -10%, var(--bg2), var(--bg));  /* not 'fixed' — janky on iOS */
       color: var(--text);
       font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       -webkit-font-smoothing: antialiased;
@@ -100,8 +101,8 @@
     .conv .del:hover { opacity: 1; color: var(--bad); }
 
     /* Chat column */
-    #chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
-    #scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; }
+    #chat { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+    #scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
     #log {
       padding: 22px 18px 8px; display: flex; flex-direction: column; gap: 3px;
       max-width: 780px; width: 100%; margin: 0 auto;
@@ -281,6 +282,16 @@
     /* Responsive: fold panels away on narrow screens */
     @media (max-width: 1080px) { #status { display: none; } }
     @media (max-width: 760px) { #sidebar { display: none; } }
+    /* Phones: trim the header so nothing gets clipped, and tighten chat padding */
+    @media (max-width: 640px) {
+      header { padding: 9px 12px; gap: 9px; }
+      .chip, #connText { display: none; }   /* keep the connection dot, drop its label + the model chip */
+      #toggleStatus { display: none; }        /* the status panel is already hidden on mobile */
+      .hbtn { padding: 5px 10px; }
+      .bubble { max-width: 86%; }
+      #log { padding-left: 12px; padding-right: 12px; }
+      #composer { padding-left: 12px; padding-right: 12px; }
+    }
   </style>
 </head>
 <body>

@@ -244,6 +244,16 @@ async def factory_reset(payload: dict) -> dict:
     return {"ok": True}
 
 
+@app.post("/admin/test_notify")
+async def test_notify() -> dict:
+    """Fire a one-off phone push so the Bark chain can be verified without waiting for a reach-out."""
+    phone = _state.get("phone")
+    if phone is None or not phone.enabled():
+        return {"ok": False, "error": "phone push not configured (set NOTIFY_URL)"}
+    await phone.push("test push from Mari 👋")
+    return {"ok": True}
+
+
 async def _send_conversations(ws: WebSocket) -> None:
     c = _state["companion"]
     await ws.send_json({"type": "conversations",
