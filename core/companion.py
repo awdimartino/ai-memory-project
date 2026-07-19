@@ -416,8 +416,10 @@ class Companion:
             return
         if len(self._unconsolidated) < config.CONSOLIDATE_WINDOW:
             return
-        chunk = self._unconsolidated
-        self._unconsolidated = []
+        # Take at most ONE window; a lone fact drowns in a huge, low-signal chunk (extraction
+        # misses a single fact buried in 20+ noisy messages). The rest stays buffered.
+        chunk = self._unconsolidated[:config.CONSOLIDATE_WINDOW]
+        self._unconsolidated = self._unconsolidated[config.CONSOLIDATE_WINDOW:]
         asyncio.create_task(self._consolidate(chunk))
 
     async def _consolidate(self, chunk: list[dict]) -> None:

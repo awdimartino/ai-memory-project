@@ -66,8 +66,10 @@ RECALL_TOP_K = int(os.environ.get("RECALL_TOP_K", "5"))
 # a too-high cutoff silently drops real matches.
 # Calibrated on nomic-embed-v1.5: real matches ~0.59-0.65, unrelated ~0.50.
 RECALL_MIN_SIMILARITY = float(os.environ.get("RECALL_MIN_SIMILARITY", "0.55"))
-# Consolidate once this many unconsolidated messages accumulate (a context window).
-CONSOLIDATE_WINDOW = int(os.environ.get("CONSOLIDATE_WINDOW", str(HISTORY_TURNS)))
+# Consolidate once this many unconsolidated messages accumulate. Kept small (10) so a single
+# durable fact isn't drowned in a large, low-signal window — extraction misses a lone fact
+# buried in 20+ messages of banter (measured). Each consolidation is still backgrounded.
+CONSOLIDATE_WINDOW = int(os.environ.get("CONSOLIDATE_WINDOW", "10"))
 
 # Lifecycle: when consolidating, compare a new fact against existing memories this
 # similar (higher than recall — only genuinely related facts get an LLM decision).
@@ -131,9 +133,9 @@ NOTIFY_ICON = os.environ.get("NOTIFY_ICON", "")
 # within a short WINDOW after her reply (long idle is reach-out's job) and is capped per turn.
 # Web-only (pushed over the WebSocket, like reach-out).
 FOLLOWUP_ENABLED = os.environ.get("FOLLOWUP_ENABLED", "true").lower() in ("1", "true", "yes")
-FOLLOWUP_CHANCE = float(os.environ.get("FOLLOWUP_CHANCE", "0.5"))        # chance per eligible tick
+FOLLOWUP_CHANCE = float(os.environ.get("FOLLOWUP_CHANCE", "0.2"))        # chance per eligible tick (low: rare)
 FOLLOWUP_MIN_DELAY = float(os.environ.get("FOLLOWUP_MIN_DELAY", "0"))    # min secs after her reply
-FOLLOWUP_WINDOW = float(os.environ.get("FOLLOWUP_WINDOW", "300"))        # after this, the moment passed
+FOLLOWUP_WINDOW = float(os.environ.get("FOLLOWUP_WINDOW", "60"))         # must land soon or the moment's gone
 FOLLOWUP_MAX_PER_TURN = int(os.environ.get("FOLLOWUP_MAX_PER_TURN", "1"))  # follow-ups per user turn
 
 # Self-reflection: while the user is away, Mari writes a short private thought (a journal

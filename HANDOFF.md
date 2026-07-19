@@ -139,6 +139,10 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   message is logged + pushed like reach-out). This replaces the old reverted "two messages split by a line
   break" approach with a **re-prompt** ("got a quick follow-up?"), which reads more natural. Distinct from
   reach-out (long idle → `connection` drive); this is the just-replied window. Web-only.
+  - **↗ TODO (user-requested 2026-07-19):** extend follow-ups beyond the `FOLLOWUP_MAX_PER_TURN=1` cap to
+    allow *several* chained messages with a **decaying probability** per additional message (occasionally 2–3
+    short texts in a row, tapering off), instead of a hard 1-per-turn limit. Pairs with the new brevity rule
+    (replies are now 1–2 sentences, so more of them can chain naturally). Tune alongside `FOLLOWUP_CHANCE`.
 - **Web UI: status panel + conversation tabs:** a live **status panel** (right side)
   polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity, the 6 mood bars, memory
   (core list + retired/superseded facts + counts), self-description, the private thought journal, and
