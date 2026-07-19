@@ -12,11 +12,16 @@ panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **mult
 and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
 batching). All live-verified; offline suite **107 green**.
 
-**⚠️ ACTIVE THREAD — resume here first:** the `enable_thinking=false` template edit that made
-consolidation ~20× faster (§4) also disabled reasoning on the **chat** path, which weakened tool-calling
-(tool eval fell to 19/30, recovered to 25/30 with a stronger tools prompt — §7). We paused mid-decision
-on how to get **both** fast consolidation *and* reliable tools. The plan + ready-to-run test scripts are
-in [§8 → "Immediate"](#8-remaining-roadmap-v22). Everything else is enrichment/reach — see §8.
+**✅ THREAD RESOLVED (2026-07-19) — thinking config locked OFF.** The `enable_thinking=false` template
+edit that made consolidation ~20× faster (§4) also weakened tool-calling (tool eval 19/30 → 25/30 with a
+stronger tools prompt — §7). Tested both escape hatches on the freed GPU and **both are dead ends**:
+**speculative decoding** (same-family Qwen3.5-0.8B Q8 draft) is a net loss — +27% tok/s on deterministic
+text but **−50% on creative/chat** (the dominant path); and LM Studio honors **no** reasoning-cap knob for
+qwen3.5 (`reasoning_effort`, `reasoning_budget`/`max_thinking_tokens`/`thinking_budget=200` all no-ops,
+reasoning stays ~1500 tok), so **bounded thinking is impossible** and thinking can't be toggled per-request
+(template-global). Verdict: **thinking OFF** (~3–9s, reasons well inline) vs thinking-on's unbounded 20–45s.
+**Tool-calling is now a prompt problem, not a thinking one** — future effort is prompt-side (reminisce ~63%).
+See §0 and the §7 tradeoff note. Everything else is enrichment/reach — see §8.
 
 ---
 
@@ -193,8 +198,8 @@ python tests/test_tools.py              # offline tool framework: registry + str
 python scripts/tool_probe.py            # LIVE: native tool-calling reliability (probe, per-case pass rate)
 python scripts/tool_smoke.py            # LIVE: tools end-to-end through the real persona (time + reminisce + no-tool)
 python scripts/tool_eval.py             # LIVE: 30-scenario tool-calling eval (time/reminisce/no-tool/tricky), per-category score
-python scripts/bench_specdec.py         # LIVE: tok/s A/B for speculative decoding (run with draft off, then on) — baseline ~38 tok/s
-python scripts/probe_reasoning_control.py  # LIVE (needs thinking ON): does LM Studio honor reasoning_effort / a thinking budget?
+python scripts/bench_specdec.py         # LIVE: tok/s A/B for spec decoding — DONE: 45 base, +27% predictable / -50% creative → not used (§0)
+python scripts/probe_reasoning_control.py  # LIVE (needs thinking ON): reasoning-cap knobs — DONE: all no-ops for qwen3.5 (§0)
 
 python scripts/reminisce_smoke.py       # LIVE: reminisce recalls a past episode out of the context window
 python scripts/drive_demo.py            # LIVE: drives observation harness — chat + away-gaps trigger reflection/reach-out
@@ -338,18 +343,23 @@ critical path. Grouped by theme; items the user has **already flagged as liked**
 Full context in [`V2_PLAN.md` §2.9](V2_PLAN.md). **Delivery-layer features stay gated behind a solid
 brain, per the guiding principle.**
 
-### 0. IMMEDIATE — resolve the reasoning ↔ tool-calling tradeoff (active thread)
-**The one open item from the last session.** Thinking-off gives fast consolidation but weaker chat tools
-(§4, §7). The goal: get both. Levers to test (paused while the user was gaming — resume when free):
-- **Speculative decoding** (biggest "keep reasoning, go faster" lever). Load a small vocab-compatible qwen
-  draft model in LM Studio; A/B with `scripts/bench_specdec.py`. **Baseline measured: ~38 tok/s** (draft off).
-  Watch draft acceptance % (>60% good). If it works, bounded reasoning could become affordable on chat.
-- **Reasoning budget / `reasoning_effort`** — does LM Studio honor a knob to cap thinking tokens? Run
-  `scripts/probe_reasoning_control.py` **with thinking ON** (flip the §4 template line to `true` first).
-- **Decision to make after testing:** (a) keep thinking-off + the strengthened tools prompt (tools ~25/30,
-  simplest, current); or (b) if spec-decoding + a hard reasoning budget make bounded reasoning fast enough,
-  re-enable thinking on chat for better tools + intelligence. Two full 9B instances is **ruled out** (won't
-  fit 16GB). Re-run `scripts/tool_eval.py` (30 scenarios) after any change to score the result.
+### 0. ✅ RESOLVED (2026-07-19) — reasoning ↔ tool-calling tradeoff: thinking locked OFF
+**Closed the last open thread.** Both "keep reasoning, go faster" levers were tested on the freed GPU and
+**both are dead ends**, so thinking-off stands as the production config:
+- **Speculative decoding — net loss, not used.** Same-family **Qwen3.5-0.8B** draft (Q8_0; none of the
+  existing Qwen3/2.5 smalls are vocab-compatible, so a 3.5-family draft had to be downloaded). Measured vs a
+  **45 tok/s** thinking-off baseline: predictable text **57.6 tok/s (+27%)** but creative/chat **22.8 tok/s
+  (−50%)**. Mari's dominant latency-sensitive path is creative → net loss. A lighter Q6_K draft only trades
+  less upside for less downside. Draft attached via LM Studio → qwen3.5-9b → Speculative Decoding.
+- **Reasoning-cap knobs — all no-ops.** With thinking genuinely ON (reasoning lands on `reasoning_content`,
+  ~3245 chars / ~1565 tok baseline), `reasoning_effort=low/minimal` and `reasoning_budget` /
+  `max_thinking_tokens` / `thinking_budget=200` **every** produced ~2900–3700 chars — the budgets are ignored
+  (bug #1990 extends here). **No bounded-thinking middle ground exists**, and thinking is template-global
+  (per-request toggle is a no-op) so no chat-off/tools-on hybrid.
+- **Verdict:** thinking **OFF** — ~3–9s and qwen3.5-9b reasons well *inline* (nailed a train avg-speed trap
+  with no think block), vs thinking-on's unbounded 20–45s. Two full 9B instances were already **ruled out**
+  (won't fit 16GB). **Tool-calling (25/30, reminisce ~63%) is now a prompt problem** — improve it prompt-side
+  and re-score with `scripts/tool_eval.py`; that's the only remaining lever, and it's optional/enrichment.
 
 ### A. Autonomous inner life ★ (recommended next arc)
 The three the user liked from the GitHub-companion research. Together they replace the single idle-timer
