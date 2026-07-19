@@ -4,9 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mari</title>
-  <link rel="icon" id="favicon" href="data:," />
+  <link rel="icon" id="favicon" href="/static/mari.png" />
+  <link rel="apple-touch-icon" href="/static/mari.png" />
   <style>
     :root {
+      color-scheme: dark; background: var(--bg);
       --bg: #0d0f15; --bg2: #101320; --panel: #151926; --elev: #1b2130;
       --user: #3d6bff; --user2: #5f86ff; --mari: #e0a458;
       --text: #e8eaf2; --muted: #8b90a4; --faint: #5c6274; --line: #242a3a;
@@ -14,6 +16,7 @@
       --r: 14px; --shadow: 0 6px 20px rgba(0,0,0,.28);
     }
     :root[data-theme="light"] {
+      color-scheme: light;
       --bg: #eef0f6; --bg2: #e7eaf2; --panel: #ffffff; --elev: #ffffff;
       --user: #2b5cff; --user2: #4d78ff; --mari: #c07f2e;
       --text: #1b2030; --muted: #646b7e; --faint: #9aa0b2; --line: #e0e4ee;
@@ -180,11 +183,11 @@
     details.details { margin: 4px 0 2px 35px; max-width: 74%; }
     .details summary {
       color: var(--muted); font-size: 11px; cursor: pointer; list-style: none;
-      user-select: none; padding: 3px 0; display: inline-flex; align-items: center; gap: 4px;
+      user-select: none; padding: 3px 0;
     }
     .details summary:hover { color: var(--text); }
     .details summary::-webkit-details-marker { display: none; }
-    .details summary::before { content: "▸"; font-size: 9px; transition: transform .15s; }
+    .details summary::before { content: "▸"; font-size: 9px; display: inline-block; margin-right: 4px; transition: transform .15s; }
     .details[open] summary::before { transform: rotate(90deg); }
     .td-body {
       margin-top: 8px; padding: 12px 14px; background: var(--panel);
@@ -280,17 +283,28 @@
     .st-h .count-chip { margin-left: 0; }
 
     /* Responsive: fold panels away on narrow screens */
-    @media (max-width: 1080px) { #status { display: none; } }
+    /* Below 1080px the status panel becomes a right-side slide-over overlay, opened by the panel
+       button and closed by tapping outside it; hidden by default via body.no-status. */
+    @media (max-width: 1080px) {
+      #status {
+        position: fixed; top: 0; right: 0; bottom: 0; width: min(360px, 86vw);
+        z-index: 40; box-shadow: -10px 0 30px rgba(0,0,0,.45);
+      }
+      body:not(.no-status)::after {
+        content: ""; position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.45);
+      }
+    }
     @media (max-width: 760px) { #sidebar { display: none; } }
     /* Phones: trim the header so nothing gets clipped, and tighten chat padding */
     @media (max-width: 640px) {
       header { padding: 9px 12px; gap: 9px; }
       .chip, #connText { display: none; }   /* keep the connection dot, drop its label + the model chip */
-      #toggleStatus { display: none; }        /* the status panel is already hidden on mobile */
       .hbtn { padding: 5px 10px; }
       .bubble { max-width: 86%; }
       #log { padding-left: 12px; padding-right: 12px; }
       #composer { padding-left: 12px; padding-right: 12px; }
+      /* iOS zooms in when focusing an input smaller than 16px; keep inputs at 16 on phones */
+      #input, .mem-filter input, .mem-row input.mc { font-size: 16px; }
     }
   </style>
 </head>
@@ -709,12 +723,23 @@
       try { const s = await (await fetch("/status")).json(); if (s.ready) renderStatus(s); }
       catch (e) { /* transient; keep last render */ }
     }
-    const statusHidden = localStorage.getItem("mari-panel") === "off";
+    const savedPanel = localStorage.getItem("mari-panel");
+    // Default the panel hidden on phones/tablets (it's an overlay there), shown on desktop.
+    const statusHidden = savedPanel ? savedPanel === "off" : window.matchMedia("(max-width: 1080px)").matches;
     document.body.classList.toggle("no-status", statusHidden);
     document.getElementById("toggleStatus").onclick = () => {
       const off = document.body.classList.toggle("no-status");
       localStorage.setItem("mari-panel", off ? "off" : "on");
     };
+    // On narrow screens, tapping outside the open overlay closes it.
+    document.addEventListener("click", (e) => {
+      if (window.matchMedia("(max-width: 1080px)").matches &&
+          !document.body.classList.contains("no-status") &&
+          !e.target.closest("#status") && e.target.id !== "toggleStatus") {
+        document.body.classList.add("no-status");
+        localStorage.setItem("mari-panel", "off");
+      }
+    });
     setInterval(pollStatus, 3000); pollStatus();
 
     // --- Memory inspector modal ---
