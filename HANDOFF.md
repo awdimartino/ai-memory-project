@@ -12,16 +12,16 @@ panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **mult
 and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
 batching). All live-verified; offline suite **107 green**.
 
-**✅ THREAD RESOLVED (2026-07-19) — thinking config locked OFF.** The `enable_thinking=false` template
-edit that made consolidation ~20× faster (§4) also weakened tool-calling (tool eval 19/30 → 25/30 with a
-stronger tools prompt — §7). Tested both escape hatches on the freed GPU and **both are dead ends**:
-**speculative decoding** (same-family Qwen3.5-0.8B Q8 draft) is a net loss — +27% tok/s on deterministic
-text but **−50% on creative/chat** (the dominant path); and LM Studio honors **no** reasoning-cap knob for
-qwen3.5 (`reasoning_effort`, `reasoning_budget`/`max_thinking_tokens`/`thinking_budget=200` all no-ops,
-reasoning stays ~1500 tok), so **bounded thinking is impossible** and thinking can't be toggled per-request
-(template-global). Verdict: **thinking OFF** (~3–9s, reasons well inline) vs thinking-on's unbounded 20–45s.
-**Tool-calling is now a prompt problem, not a thinking one** — future effort is prompt-side (reminisce ~63%).
-See §0 and the §7 tradeoff note. Everything else is enrichment/reach — see §8.
+**⚠️ ACTIVE THREAD — stepped back 2026-07-19 for a reset; resume via §0.** Production is **thinking-OFF and
+stable**, and the *speed* escape-hatches are proven dead ends (spec decoding is a net loss; LM Studio honors
+no reasoning-cap knob — details in §0). **Two things stay open:** **(1)** the user's steer — thinking-*off*
+may cost intelligence, so **bounded thinking** (a little reasoning, not none) is worth pursuing; **(2)
+tool-calling reliability** — the eval is noisy (22 / 23 / 25 across runs), and the fix splits by cause:
+**TIME inconsistency is TEMPERATURE** (0.8 is too hot for a routing decision — low temp took TIME 5→7/8),
+while **REMINISCE (~3–4/8) is a REASONING problem** (the model *affirms* "yeah, Japan!" instead of
+*retrieving*) — the concrete case bounded thinking would fix. A prompt tweak was tried, didn't beat baseline,
+and sits **uncommitted** in `core/prompts.py` (decide keep/revert — §0). Full picture + the two-prong plan in
+§0. Everything else is enrichment/reach — see §8.
 
 ---
 
@@ -343,23 +343,50 @@ critical path. Grouped by theme; items the user has **already flagged as liked**
 Full context in [`V2_PLAN.md` §2.9](V2_PLAN.md). **Delivery-layer features stay gated behind a solid
 brain, per the guiding principle.**
 
-### 0. ✅ RESOLVED (2026-07-19) — reasoning ↔ tool-calling tradeoff: thinking locked OFF
-**Closed the last open thread.** Both "keep reasoning, go faster" levers were tested on the freed GPU and
-**both are dead ends**, so thinking-off stands as the production config:
-- **Speculative decoding — net loss, not used.** Same-family **Qwen3.5-0.8B** draft (Q8_0; none of the
-  existing Qwen3/2.5 smalls are vocab-compatible, so a 3.5-family draft had to be downloaded). Measured vs a
-  **45 tok/s** thinking-off baseline: predictable text **57.6 tok/s (+27%)** but creative/chat **22.8 tok/s
-  (−50%)**. Mari's dominant latency-sensitive path is creative → net loss. A lighter Q6_K draft only trades
-  less upside for less downside. Draft attached via LM Studio → qwen3.5-9b → Speculative Decoding.
-- **Reasoning-cap knobs — all no-ops.** With thinking genuinely ON (reasoning lands on `reasoning_content`,
-  ~3245 chars / ~1565 tok baseline), `reasoning_effort=low/minimal` and `reasoning_budget` /
-  `max_thinking_tokens` / `thinking_budget=200` **every** produced ~2900–3700 chars — the budgets are ignored
-  (bug #1990 extends here). **No bounded-thinking middle ground exists**, and thinking is template-global
-  (per-request toggle is a no-op) so no chat-off/tools-on hybrid.
-- **Verdict:** thinking **OFF** — ~3–9s and qwen3.5-9b reasons well *inline* (nailed a train avg-speed trap
-  with no think block), vs thinking-on's unbounded 20–45s. Two full 9B instances were already **ruled out**
-  (won't fit 16GB). **Tool-calling (25/30, reminisce ~63%) is now a prompt problem** — improve it prompt-side
-  and re-score with `scripts/tool_eval.py`; that's the only remaining lever, and it's optional/enrichment.
+### 0. ⚠️ ACTIVE — thinking depth + tool-calling reliability (stepped back 2026-07-19 for a reset)
+Production is **thinking-OFF and stable**; what's open is (1) whether to add *bounded* reasoning back to
+recover intelligence, and (2) making tool-calling consistent. **Decide the direction from a fresh context.**
+
+**Settled — don't relitigate the speed levers:**
+- **Speculative decoding — net loss, not used.** Same-family **Qwen3.5-0.8B** draft (no existing Qwen3/2.5
+  small is vocab-compatible, so a 3.5-family draft was downloaded — `qwen3.5-0.8b@q6_k` + `@q8_0` are in LM
+  Studio if ever revisited). Vs a **45 tok/s** thinking-off baseline: predictable **57.6 (+27%)** but
+  creative/chat **22.8 (−50%)** → net loss for the chat-dominant path. A lighter Q6 only reshapes the curve.
+- **Reasoning-cap knobs — all no-ops.** With thinking ON (reasoning on `reasoning_content`, ~3245 chars
+  baseline), `reasoning_effort=low/minimal` + `reasoning_budget`/`max_thinking_tokens`/`thinking_budget=200`
+  every left reasoning ~2900–3700 chars. LM Studio caps nothing (bug #1990); thinking is template-global (no
+  per-request toggle). So within *supported params* thinking is binary: OFF (~3–9s) or ON (unbounded 20–45s).
+
+**Reopened by the user (2026-07-19) — two live questions:**
+1. **Bounded thinking is worth pursuing.** The steer: thinking-*off* may cost intelligence, and a *little*
+   reasoning (not none) may be the sweet spot. Supported knobs can't do it; unsupported routes exist (below).
+2. **Tool-calling reliability** (the real pain). `scripts/tool_eval.py` is **noisy — always run it 2–3×**
+   (22 / 23 / 25 across runs). Failures split by cause:
+   - **TIME inconsistency = TEMPERATURE.** At 0.8 even "what time is it?" randomly no-fires; at 0.2 TIME → 7/8.
+     0.8 is too hot for a routing decision.
+   - **REMINISCE (~3–4/8) = REASONING.** Stuck low regardless of temp/prompt. Failure mode: the model *affirms*
+     ("aw yeah, Japan!") instead of *retrieving*. The concrete case **bounded thinking would help.**
+
+**Two-prong plan (pick from a fresh context):**
+- **A. Per-call temperature (quick; fixes TIME-style noise).** Split the tool loop in `infrastructure/
+  llm_client.py`: run the *tool-decision* pass cool (~0.2–0.3, reliable routing), keep the *final-answer* pass
+  at 0.8 (lively chat). No serving change. Re-score with `tool_eval.py` (×3).
+- **B. Bounded thinking (targets REMINISCE + general intelligence; the user's steer).** Cheapest first:
+  **(i)** `logit_bias` nudge on the `</think>` token in LM Studio — crude budget; find the token id, sweep the
+  bias, measure reasoning length + reminisce; **(ii)** app-layer **two-phase** generation (call 1: reasoning
+  with `max_tokens=N` + `stop=["</think>"]`; call 2: force-close `</think>` and answer via raw
+  `/v1/completions`) — a real `LLMClient` change; **(iii)** move serving to vLLM/transformers to use the TIL's
+  `ThinkingTokenBudgetProcessor` (https://muellerzr.github.io/til/end_thinking.html) — abandons LM Studio.
+
+**Staged & undecided — `core/prompts.py` has an UNCOMMITTED change (left in the tree on purpose):**
+`build_tools_note` was strengthened — the reminisce rule now says shared history lives in earlier
+conversations *not in front of you*, so **retrieve, don't affirm/guess**, plus a few-shot calibration block
+(positive time/reminisce + negative idiom/opinion examples). It scored **22–23 vs the 25 baseline** (no clear
+help; TRICKY stayed 6/6). **Decide: revert (`git restore core/prompts.py`) or rework** — don't build on it
+unexamined.
+
+**Production config right now:** thinking OFF (template `{% set enable_thinking = false %}`), `NO_THINK=true`,
+spec decoding OFF, `TEMPERATURE=0.8`.
 
 ### A. Autonomous inner life ★ (recommended next arc)
 The three the user liked from the GitHub-companion research. Together they replace the single idle-timer
