@@ -170,18 +170,19 @@ def build_reachout_system(memories: list[str], mood: str | None = None,
 
 # --- Follow-up (a spontaneous second message right after her own reply) ---
 
-_FOLLOWUP_ADDENDUM = """You just sent them a message a moment ago, and they haven't said anything back yet.
+_FOLLOWUP_ADDENDUM = """You just sent them a message a moment ago, and they haven't replied yet.
 
-Sometimes, right after texting someone, you fire off a quick second message: an afterthought, a
-small thing you forgot to add, or a spontaneous extra reaction to what you were just saying. If one
-of those genuinely comes to you right now, send just that, the way you'd naturally double-text.
+People double-text all the time: a reaction that lands a beat late, a small thing to tack on, a
+"wait, also...", a softer or sillier afterthought, a little follow-up question that just popped
+into your head. That spontaneous second text is exactly the kind of thing that makes you feel real,
+so lean toward sending one when you've got it.
 
-Keep it short, and do NOT repeat, restate, or re-explain what you already said. Most messages stand
-fine on their own, so only add something if it's real. If you've got nothing worth adding, reply with
-exactly: PASS (that one word, nothing else)."""
+Send just that one short bit now, in your own voice. The only rules: keep it short, and do NOT
+repeat, restate, or re-explain what you already said (say something NEW, or build on it). If you
+genuinely have nothing to add, reply with exactly: PASS (that one word, nothing else)."""
 
-FOLLOWUP_CUE = ("(You just messaged them and they haven't replied yet. If a quick follow-up thought "
-                "genuinely comes to you, add it now. If not, just: PASS.)")
+FOLLOWUP_CUE = ("(You just messaged them and they haven't replied yet. Got a quick second thought to "
+                "fire off, like a natural double-text? Send it. Only PASS if you truly have nothing to add.)")
 
 
 def build_followup_system(memories: list[str], mood: str | None = None,
@@ -362,6 +363,65 @@ MEMORY_DECISION_SCHEMA = {
 def build_decision_user(candidate: str, related_contents: list[str]) -> str:
     lines = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(related_contents))
     return f'New candidate fact:\n"{candidate}"\n\nExisting related memories:\n{lines}'
+
+
+# --- Batched lifecycle decision (all candidates in ONE call, for speed) ---
+
+MEMORY_BATCH_DECISION_SYSTEM = f"""You maintain {BOT_NAME}'s long-term memory. Several new candidate facts were just extracted
+from a conversation. Each is shown with ITS OWN numbered list of existing related memories. Decide
+each candidate INDEPENDENTLY, choosing one action for it:
+
+- "duplicate": one of that candidate's related memories already says the same thing; it adds nothing.
+- "update": the SAME fact has CHANGED, so one of that candidate's related memories is now FALSE and
+  must be replaced (they moved, changed jobs, renamed something, reversed a preference). Set "target"
+  to the number of the memory (within THAT candidate's related list) it replaces.
+- "new": genuinely new information, OR an ADDITIONAL separate item of the same kind that should
+  coexist. A second pet, another friend, a new hobby, a different favorite are all "new" - the
+  existing memory stays true.
+
+Key test: choose "update" ONLY if an existing related memory becomes FALSE. If both can be true at
+once, choose "new". Never replace a memory just because it's on the same topic.
+
+Return one decision per candidate, echoing its number:
+{{"decisions": [{{"candidate": <n>, "action": "duplicate|update|new", "target": <number or 0>}}, ...]}}
+"target" is the number within that candidate's own related list for "update", otherwise 0."""
+
+MEMORY_BATCH_DECISION_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "memory_decisions",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "decisions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "candidate": {"type": "integer"},
+                            "action": {"type": "string", "enum": ["duplicate", "update", "new"]},
+                            "target": {"type": "integer"},
+                        },
+                        "required": ["candidate", "action", "target"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["decisions"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def build_batch_decision_user(items: list[tuple[str, list[str]]]) -> str:
+    """`items` is [(candidate_content, [related_contents]), ...]; number each candidate 1..n
+    and its related memories 1..m within that candidate."""
+    blocks = []
+    for i, (candidate, related) in enumerate(items, start=1):
+        rel = "\n".join(f"  {j + 1}. {c}" for j, c in enumerate(related))
+        blocks.append(f'Candidate {i}: "{candidate}"\n Related existing memories:\n{rel}')
+    return "\n\n".join(blocks) + "\n\nDecide every candidate by its number."
 
 
 # --- Core-memory re-rank (enforce the cap; Tier-2 structured output) ---
