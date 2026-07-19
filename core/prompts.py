@@ -95,11 +95,11 @@ def build_tools_note(tool_names: list[str] | None) -> str | None:
              "anything' and 'you just met' rules above for these specific cases:"]
     if "get_current_time" in tool_names:
         lines.append(
-            "- get_current_time: whenever they ask what time it is, the date, the day, the year, how "
-            "long until something, or anything about the current moment, CALL get_current_time and answer "
-            "from what it returns. You genuinely can read a real clock. NEVER reply that you have no way "
-            "to know the time, can't check, or don't have access to it. (Idle mentions like 'time flies' "
-            "are not a request; only call it when they're actually asking.)")
+            "- get_current_time: when they DIRECTLY ask what time it is, the date, the day, the year, or "
+            "how long until something, CALL get_current_time and answer from what it returns; you genuinely "
+            "can read a real clock, so never claim you can't. But do NOT bring up the time, say what time it "
+            "is, or offer to check it on your own initiative -- only when they actually ask. Never use the "
+            "time as small talk or a way to fill a lull. (Idle mentions like 'time flies' aren't a request.)")
     if "reminisce" in tool_names:
         lines.append(
             "- reminisce: the user's life and your shared history live in EARLIER conversations that are "
@@ -131,7 +131,7 @@ def build_tools_note(tool_names: list[str] | None) -> str | None:
 
 def build_system(memories: list[str], mood: str | None = None,
                  core: list[str] | None = None, persona: str | None = None,
-                 tools: list[str] | None = None) -> str:
+                 tools: list[str] | None = None, allow_silence: bool = False) -> str:
     """The chat system message: the persona, plus memory and mood folded in.
 
     `persona` is Mari's own evolving self-description (written by the self-modifying
@@ -164,8 +164,13 @@ def build_system(memories: list[str], mood: str | None = None,
         parts.append(mood)
     # A terse reminder right before she generates — small models follow the rules closest to
     # the end far better than the same rules buried 1500+ tokens up in the persona.
-    parts.append("(This reply: ONE short sentence, and do not end on a question. "
-                 "Just react or give your take.)")
+    if allow_silence:
+        parts.append("(For this one: you don't have to reply at all. If it doesn't call for a response, "
+                     "or you'd just rather stay quiet right now, reply with exactly PASS and nothing else. "
+                     "If you do reply: ONE short sentence, and don't end on a question.)")
+    else:
+        parts.append("(This reply: ONE short sentence, and do not end on a question. "
+                     "Just react or give your take.)")
     return "\n\n".join(parts)
 
 

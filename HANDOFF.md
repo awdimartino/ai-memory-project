@@ -10,7 +10,14 @@ panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **mult
 (arc A1 — internal drives now gate reach-out/reflection, §8-A), **spontaneous follow-up messages**
 ("double-text"), an **editable memory inspector + admin** (browse/edit/delete, clear, factory reset),
 and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
-batching). All live-verified; offline suite **107 green**.
+batching). All live-verified; offline suite **107 green**. **Added 2026-07-19:** phone push, a web-UI +
+**iOS/Safari mobile** overhaul, arc-A2 **energy cycles**; a **memory-extraction fix** (a name buried in a 20-msg
+consolidation window was silently dropped → `CONSOLIDATE_WINDOW` 10 + a stronger extraction prompt + bounded
+chunks); a **personality overhaul** (hard *one-sentence* / *no-trailing-question* rules reinforced by an
+end-of-prompt reminder → measured **100% one-sentence, 7% q-end**) + a **follow-up rewrite** (rarer, no invented
+experiences); a new **silent-turn** capability (she can `PASS` to not reply → a faint "stayed quiet" marker); and
+a **thinking-depth investigation + 3-model bake-off** that kept qwen and **parked bounded thinking** on LM Studio
+(§0). §8 roadmap gained the **Generative-Agents "planning" arc**.
 
 **⚠️ ACTIVE THREAD — PARKED 2026-07-19, waiting on LM Studio; full detail in §0.** Production stays **thinking-OFF
 and stable on qwen3.5-9b.** This session confirmed **bounded thinking is impossible in LM Studio today** — llama.cpp
@@ -134,15 +141,25 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
 - **Follow-up messages ("double-text", 2026-07-18):** `FollowUpJob` — after Mari replies, she may fire a
   spontaneous *second* message a tick or a few later (an afterthought / addition), if she genuinely has one.
   Each user turn arms a per-turn budget (`FOLLOWUP_MAX_PER_TURN`, default 1); the job fires within a short
-  `FOLLOWUP_WINDOW` (default 5 min) after her reply, gated by a per-tick `FOLLOWUP_CHANCE` (default 0.5) so
-  it's off-clockwork, and `Companion.follow_up()` generates it (can reply **PASS** → closes the window; a real
-  message is logged + pushed like reach-out). This replaces the old reverted "two messages split by a line
+  `FOLLOWUP_WINDOW` (**60s** since 2026-07-19; was 5 min) after her reply, gated by a per-tick `FOLLOWUP_CHANCE`
+  (**0.2** since 2026-07-19; was 0.5) so it's rare and off-clockwork, and `Companion.follow_up()` generates it (can
+  reply **PASS** → closes the window; a real message is logged + pushed like reach-out). **Prompt rewritten
+  2026-07-19** to bias hard toward PASS and forbid inventing an experience or firing off just another question (it
+  had hallucinated "I found a good spot to sit"). This replaces the old reverted "two messages split by a line
   break" approach with a **re-prompt** ("got a quick follow-up?"), which reads more natural. Distinct from
   reach-out (long idle → `connection` drive); this is the just-replied window. Web-only.
   - **↗ TODO (user-requested 2026-07-19):** extend follow-ups beyond the `FOLLOWUP_MAX_PER_TURN=1` cap to
     allow *several* chained messages with a **decaying probability** per additional message (occasionally 2–3
     short texts in a row, tapering off), instead of a hard 1-per-turn limit. Pairs with the new brevity rule
-    (replies are now 1–2 sentences, so more of them can chain naturally). Tune alongside `FOLLOWUP_CHANCE`.
+    (replies are now one sentence, so more of them can chain naturally). Tune alongside `FOLLOWUP_CHANCE`.
+- **Silent turns — she can choose not to reply (2026-07-19):** the user asked for the ability *not* to respond,
+  as an extension of the same `PASS` convention reach-out/follow-up use. `build_system(..., allow_silence=True)` on
+  the chat path offers the option; if `Companion.send()` gets back **PASS**, it logs the user's message but **no
+  reply of her own** — mood/drives still update, the message still counts for memory, and no follow-up is armed. A
+  small gate in `send()` **holds the token stream** until it's clear the reply isn't "PASS", so the word never
+  flashes on screen. The web UI drops the typing bubble and shows a faint **"· Mari stayed quiet"** marker.
+  **Ungated for now** (she can pass on anything); add mood/low-effort gating if she goes quiet too often. Gate
+  logic offline-tested; suite green. *(Uncommitted as of 2026-07-19 — user testing live.)*
 - **Web UI: status panel + conversation tabs:** a live **status panel** (right side)
   polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity, the 6 mood bars, memory
   (core list + retired/superseded facts + counts), self-description, the private thought journal, and
@@ -268,9 +285,13 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 - **Committed (main, in order):** `5669f0f` initial v2.0 foundation → `73d517d` qwen3.5 + no-think
   → `9b4500d` crash-durable consolidation → `9f70040` emotion (pillar 2) + inspector → `15db7c5`
   conversation-quality fixes → then core memory, tick loop, reflection, reach-out, self-modifying
-  persona, sleep, status panel + tabs → **`706b809` tool framework (pillar 4)**. Each pillar its own commit.
+  persona, sleep, status panel + tabs → **`706b809` tool framework (pillar 4)** → the v2.2 arc (multi-drive,
+  energy, follow-up, inspector, phone push) → **`55bcd77`** model-bake-off tooling + §0 → **`afe3552`** iOS/Safari
+  UI fixes → **`cc410e8`** memory-extraction + personality fixes. Each feature its own commit.
 - The **user has authorized autonomous commits** — commit worthwhile work on `main` without asking
-  (see the `commit-without-asking` memory). Working tree is clean as of this handoff.
+  (see the `commit-without-asking` memory). **⚠️ Uncommitted as of 2026-07-19:** the **silent-turn feature** + the
+  **time-tool over-use fix** + these HANDOFF/roadmap updates (`core/prompts.py`, `core/companion.py`, `web/app.py`,
+  `web/static/index.html`, `HANDOFF.md`) — the user is testing silent-turns live before committing.
 - **Security note:** `archive/v1/infrastructure/config.py` holds a **real hardcoded
   HuggingFace token** and is git-ignored on purpose (specific rule in `.gitignore`).
   It should be **rotated/revoked** on HuggingFace regardless. Do not commit it.
@@ -301,6 +322,13 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 ---
 
 ## 7. Known limitations / open issues (honest)
+
+**Resolved 2026-07-19 (was here):** thinking-off **personality** issues (long replies, reflexive "what's on your
+mind?" questions) are **fixed** via hard one-sentence / no-question rules + an end-of-prompt reminder (100%
+one-sentence, 7% q-end); the follow-up **hallucination** ("found a spot to sit") is fixed by the follow-up rewrite;
+the **memory-extraction miss** (a stated name dropped in a big consolidation window) is fixed (window 10 + stronger
+prompt). The tool-calling / bounded-thinking tradeoff below is now **parked in §0** (waiting on LM Studio). The rest
+still stand:
 
 - **Thinking-off vs tool-calling (tradeoff from the §4 consolidation fix):** the `enable_thinking=false`
   template edit that makes consolidation ~20× faster disables reasoning on the **chat** path too, which
@@ -432,14 +460,34 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
   **time-of-day / do-not-disturb gating** so she doesn't wake at 3am. Build that first, then a `WakeJob`
   (web-registered like reach-out) that checks energy + connection + a cooldown. `wake()` is already a public seam.
 
+**★ Completing the Generative Agents cognitive loop (idea pass 2026-07-19).** Arc A gave Mari drives + energy; the
+triad from Park et al.'s "Smallville" agents is **memory (§B) + reflection (her journal) + planning — the one she's
+missing.** Adding planning makes the inner life *goal-directed*:
+- **★ Intentions / a private agenda — NEW, highest-leverage.** A small persisted `IntentionStore` of things she
+  means to bring up or find out ("ask how Alex's jacket turned out", "learn what he does for work"), minted/updated
+  by `ReflectionJob` and drawn on by `ReachOutJob`/`FollowUpJob` — so proactive messages become *purposeful* ("been
+  wondering how the jacket came out") instead of generic. Turns reactive proactivity into goal-directed; a small
+  extension of the reflection loop, and the single biggest jump in perceived autonomy.
+- **Learned operating-notes (reflection that changes behavior) — NEW.** Reflection currently feeds the *persona*
+  (who she is); nothing adjusts *how she acts* turn-to-turn. Add short "notes to self" distilled from experience
+  ("Alex bristles at lots of questions — ease off"), injected live into `build_system` — the self-improving closed
+  loop (experience → principle → future behavior). She'd learn on her own the lessons we've been hand-tuning. Sits
+  next to the self-modifying persona.
+- **Relational continuity — NEW (small).** Let persisted mood/drives shape her *engagement level* (reply length,
+  silent turns, warmth) across sessions, not just word choice within one: a little cool after a rough exchange,
+  warming back over the next chats. Uses the silent-turn seam built 2026-07-19.
+
 ### B. Memory depth
 - **Memory salience / forgetting curve** — importance+recency weighting; trivial facts fade, often-recalled
-  ones strengthen. Keeps the store lean, makes recall feel human.
+  ones strengthen. Keeps the store lean, makes recall feel human. *This is exactly the Generative Agents
+  memory-stream ranking — recency × **importance** × relevance; score importance at consolidation, weight recall by it.*
 - **Memory confidence + confirmation** — track uncertainty and occasionally double-check a shaky fact
   ("was it Kate or Katelyn?"), self-correcting the lifecycle.
 - **Fact-validity windows (temporal memory)** — track *when* each fact was true; the principled version of
   the recency/conflict tie-breaker we punted on (Zep/Graphiti style).
-- **"On this day" recall** — time-anchored callbacks via reminisce; pairs with proactivity.
+- **"On this day" recall** — time-anchored callbacks via reminisce; pairs with proactivity. Extend to
+  **spontaneous recall**: she surfaces a salient memory *unprompted* ("this reminds me of when you said…"), not
+  only time-anchored callbacks (needs the importance score above).
 - **Hybrid BM25 + vector recall** — keyword + semantic; directly targets the recall phrasing-sensitivity
   limit in §7.
 - ~~**Memory inspector UI** — browse / edit memories + view superseded history.~~ **DONE (2026-07-18):** the
@@ -452,6 +500,9 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
 - **Time-of-day awareness** — greet differently morning vs. late night, notice patterns ("up late again").
   The `get_current_time` tool partially enables this now.
 - **Do-not-disturb / time-of-day gating** for proactivity — keeps reach-out and self-wake from firing at 3am.
+- **Surface her inner life** — expose a light "current preoccupation" in the status panel from her latest
+  thought/intention ("mulling over your jacket project", "curious about shooters"), so she reads as continuously
+  present, not idle-until-pinged. (Open-LLM-VTuber surfaces the AI's unspoken thoughts.)
 
 ### D. Reach beyond the tab
 - ~~**Push notifications** (e.g. Bark)~~ **DONE + LIVE-VERIFIED (2026-07-19):** a **reach-out** now pushes to the
@@ -475,6 +526,11 @@ The pillar-4 framework is built and hot-swappable — each of these is "register
 - **Web search**, **mood-based Navidrome/Subsonic playlist creator**, **reminder tool**, **curiosity-driven
   search** (self-initiated search + reflection during a tick), and exposing **`rewrite_self`** as a real tool
   (unifies the persona rewrite with the tool framework).
+- **Autonomy framing (2026-07-19):** the **curiosity search** is where **autotelic** behavior lands — *she* picks
+  what to chase from her own interests/intentions (§A), looks it up via web search between chats, and brings it
+  back ("got curious about Deadlock — Valve's hero shooter, right?"). The **playlist** becomes a real autonomy
+  signal when a tick job decides to build one *unprompted* ("made you something from the stuff you've been into"),
+  not only on request — Mari's version of AIRI's autonomous *acts*.
 
 ### F. Whimsical / far-future
 - **Dreams** — during sleep, generate one memory-recombining "dream" she might mention on waking. One per wake.
@@ -482,14 +538,15 @@ The pillar-4 framework is built and hot-swappable — each of these is "register
   something, not just the words).
 - **Embodiment** — Live2D / VRM avatar, wearable sensors.
 
-**Recommended order from here:**
-1. **§0 Immediate** — close out the reasoning ↔ tool-calling tradeoff (spec-decoding + reasoning-budget test,
-   then decide the final thinking config). This is the only loose thread; do it first.
-2. **Finish arc A** — **A1 multi-drive is DONE**; next is **★ A2 energy/body cycles** (add `energy` as a third
-   drive in the `DriveManager` we just built; `SleepJob` fires on low energy instead of the 30-min timer — this
-   also unlocks principled self-wake), then **★ A3 nightly consolidation**. This is the user-picked arc and the
-   highest-leverage feature work.
-3. **Slot in the C near-freebies** (presence signal, time-of-day awareness) alongside A — cheap and they make
-   proactivity smarter.
-Practical tuning the user will do in real use: drive thresholds/rates, follow-up `FOLLOWUP_CHANCE`, and the
-reasoning/tool config from §0.
+**Recommended order from here (updated 2026-07-19):**
+1. **§0 is PARKED** — bounded thinking waits on LM Studio (#1838/#1974); personality (1-sentence/no-question),
+   memory-extraction fix, and silent-turns all landed this session. No action there until LM Studio ships it.
+2. **Complete the Generative Agents loop in arc A** — **★ intentions/planning**, then **learned operating-notes**
+   (both small extensions of `ReflectionJob` + `build_system`). This is now the highest-leverage autonomy work,
+   and **A3 nightly consolidation** feeds it (day-summaries = intention + reminisce fuel).
+3. **§B memory upgrade** — importance-weighted recall (the GA ranking) + spontaneous recall. The deepest item.
+4. **World-reaching tools (§E)** — web search unlocks the **autotelic curiosity loop**; the Navidrome playlist
+   becomes an autonomous act. Both need the tool built first.
+5. **Slot in the C near-freebies** (presence signal, time-of-day awareness, surfaced inner life) alongside — cheap.
+Practical tuning in real use: drive thresholds/rates, `FOLLOWUP_CHANCE`, and **silent-turn frequency** (add the
+mood/low-effort gating if she goes quiet too often).

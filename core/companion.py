@@ -87,6 +87,7 @@ class TurnResult:
     emotion: dict | None = None
     core: list[str] | None = None   # always-injected core memories about the user
     tools: list[dict] | None = None  # tools invoked this turn: [{name, args, result}]
+    silent: bool = False             # she chose to stay quiet (no reply shown or logged)
 
 
 class Companion:
@@ -178,27 +179,46 @@ class Companion:
             # Core facts are always injected; drop any recalled duplicates of them.
             extra = [content for content, _ in recalled if content not in core]
             tool_names = self.tools.names() if self.tools else None
-            system = build_system(extra, mood_prompt, core=core, persona=persona, tools=tool_names)
+            system = build_system(extra, mood_prompt, core=core, persona=persona,
+                                  tools=tool_names, allow_silence=True)
 
             messages = [{"role": "system", "content": system}]
             messages.extend(self.history[-config.HISTORY_TURNS:])
             messages.append({"role": "user", "content": user_text})
 
+            # She may choose to stay silent by replying "PASS". Gate the token stream so the
+            # word PASS never reaches the UI: hold any prefix that could still become "PASS",
+            # and only start emitting once the reply clearly isn't it.
+            gate = {"buf": "", "open": False}
+
+            async def guarded(tok: str) -> None:
+                if gate["open"]:
+                    await on_token(tok)
+                    return
+                gate["buf"] += tok
+                probe = gate["buf"].strip().rstrip(".!").upper()
+                if not probe or "PASS".startswith(probe):
+                    return  # whitespace-only, or still a possible "PASS" — keep holding
+                gate["open"] = True
+                await on_token(gate["buf"])
+
             # With tools registered, stream through the tool loop (Mari may call one
             # mid-turn); otherwise a plain streaming turn with zero tool overhead.
             if self.tools:
                 text, stats = await self.llm.stream_with_tools(
-                    messages, on_token, self.tools, self.tool_max_iters)
+                    messages, guarded, self.tools, self.tool_max_iters)
             else:
-                text, stats = await self.llm.stream(messages, on_token)
+                text, stats = await self.llm.stream(messages, guarded)
+
+            silent = text.strip().rstrip(".!").upper() == "PASS"
 
             uid = await asyncio.to_thread(self.store.add_message, self.session_id, "user", user_text)
-            aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
-
             self.history.append({"role": "user", "content": user_text})
-            self.history.append({"role": "assistant", "content": text})
             self._unconsolidated.append({"id": uid, "role": "user", "content": user_text})
-            self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+            if not silent:  # a silent turn logs the user's message but no reply of her own
+                aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
+                self.history.append({"role": "assistant", "content": text})
+                self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
 
             if not self._session_title:  # name a fresh conversation by its first message
                 title = " ".join(user_text.split())[:40] or "New chat"
@@ -208,13 +228,17 @@ class Companion:
             if self.drives is not None:
                 await self.drives.on_user_message()  # contact relieves connection/restlessness
 
-            # Arm a possible spontaneous follow-up to this reply (the web follow-up job
-            # decides, a tick or a few later, and may PASS).
-            self._followups_left = config.FOLLOWUP_MAX_PER_TURN
-            self._last_reply_at = time.monotonic()
+            # Arm a spontaneous follow-up only if she actually spoke; a chosen silence
+            # shouldn't be immediately undone by a double-text.
+            if silent:
+                self._followups_left = 0
+            else:
+                self._followups_left = config.FOLLOWUP_MAX_PER_TURN
+                self._last_reply_at = time.monotonic()
 
             self._maybe_consolidate()
-            return TurnResult(text, stats, recalled, emotion_info, core, stats.get("tools"))
+            return TurnResult("" if silent else text, stats, recalled, emotion_info,
+                              core, stats.get("tools"), silent=silent)
         finally:
             self._busy = False
             self._last_activity = time.monotonic()

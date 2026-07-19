@@ -150,6 +150,7 @@
     @keyframes blink { 0%,60%,100% { opacity: .25; } 30% { opacity: 1; } }
     .stats { color: var(--faint); font-size: 11px; margin: 4px 4px 0 35px; font-variant-numeric: tabular-nums; }
     .sys { color: var(--muted); font-size: 12px; text-align: center; margin: 10px 0; font-style: italic; }
+    .sys.quiet { color: var(--faint); font-size: 11px; font-style: normal; margin: 6px 0; }
 
     /* Composer */
     #composer {
@@ -452,6 +453,7 @@
     }
 
     function addSys(text) { log.appendChild(el("div", "sys", text)); scrollDown(); }
+    function addSilent() { log.appendChild(el("div", "sys quiet", "· Mari stayed quiet")); scrollDown(); }
 
     function addStats(s) {
       const approx = s.estimated ? "~" : "";
@@ -586,8 +588,14 @@
         if (current.classList.contains("typing")) { current.classList.remove("typing"); current.textContent = ""; }
         current.textContent += msg.text; scrollDown();
       } else if (msg.type === "done") {
-        current = null; addStats(msg.stats);
-        addDetails(msg.recalled, msg.emotion, msg.core, msg.tools); setSending(false);
+        if (msg.silent) {
+          if (current) { const r = current.closest(".row"); if (r) r.remove(); }
+          addSilent();
+        } else {
+          addStats(msg.stats);
+          addDetails(msg.recalled, msg.emotion, msg.core, msg.tools);
+        }
+        current = null; setSending(false);
       } else if (msg.type === "error") {
         if (current) { current.classList.remove("typing"); current.textContent += `\n[error: ${msg.message}]`; }
         current = null; setSending(false);

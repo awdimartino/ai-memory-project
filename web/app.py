@@ -302,7 +302,7 @@ async def ws(websocket: WebSocket) -> None:
                     try:
                         result = await companion.send(text, on_token)
                         await websocket.send_json({
-                            "type": "done", "stats": result.stats,
+                            "type": "done", "stats": result.stats, "silent": result.silent,
                             "recalled": [{"content": c2, "similarity": s} for c2, s in result.recalled],
                             "emotion": result.emotion, "core": result.core or [],
                             "tools": result.tools or [],
