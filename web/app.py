@@ -13,6 +13,7 @@ import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 import config
 from bootstrap import build, configure_logging
@@ -56,7 +57,8 @@ async def _startup() -> None:
     _state["companion"] = companion
     _state["model"] = model
     # Optional phone push (self-hosted Bark): fires on reach-out only, no-op when NOTIFY_URL unset.
-    _state["phone"] = PhonePush(config.NOTIFY_URL, config.NOTIFY_TITLE, config.NOTIFY_UI_URL)
+    _state["phone"] = PhonePush(config.NOTIFY_URL, config.NOTIFY_TITLE,
+                                config.NOTIFY_UI_URL, config.NOTIFY_ICON)
     if companion.tick is not None:
         # Reach-out is a web-surface job (it needs the WebSocket broadcaster), so it's
         # registered here rather than in the shared bootstrap.
@@ -87,6 +89,10 @@ async def _shutdown() -> None:
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+# Serve web/static/* (e.g. a notification icon reachable from the phone over Tailscale).
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/thoughts")

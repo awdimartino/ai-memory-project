@@ -77,6 +77,17 @@ async def omits_url_when_ui_unset():
     await p.push("hi")
     body = json.loads(captured[0].content)
     assert "url" not in body, "no tap-to-open link when NOTIFY_UI_URL is unset"
+    assert "icon" not in body, "no icon when NOTIFY_ICON is unset"
+
+
+@case
+async def includes_icon_when_set():
+    transport, captured = _capturing()
+    p = PhonePush("http://alex-pi:8090/devkey", "Mari",
+                  icon="https://pc.tail.ts.net/static/mari.png", transport=transport)
+    await p.push("hi")
+    body = json.loads(captured[0].content)
+    assert body["icon"] == "https://pc.tail.ts.net/static/mari.png"
 
 
 @case

@@ -120,6 +120,10 @@ REACHOUT_COOLDOWN = float(os.environ.get("REACHOUT_COOLDOWN", "7200"))   # >=2h 
 NOTIFY_URL = os.environ.get("NOTIFY_URL", "")
 NOTIFY_UI_URL = os.environ.get("NOTIFY_UI_URL", "")
 NOTIFY_TITLE = os.environ.get("NOTIFY_TITLE", BOT_NAME)
+# Optional custom notification image (Bark `icon`): a URL the *phone* fetches when the push arrives,
+# so it must be reachable from your iPhone. Easiest: drop an image in web/static/ and point here at
+# the Tailscale web-UI, e.g. https://<pc>.<tailnet>.ts.net/static/mari.png. iOS caches it by URL.
+NOTIFY_ICON = os.environ.get("NOTIFY_ICON", "")
 
 # Follow-up messages: after Mari replies, she may fire off a spontaneous second message a tick
 # or a few later (an afterthought / "double-text"), if she genuinely has something to add — she
