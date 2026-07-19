@@ -327,54 +327,7 @@ MEMORY_SCHEMA = {
 }
 
 
-# --- Memory lifecycle decision (Tier-2 structured output) ---
-
-MEMORY_DECISION_SYSTEM = f"""You maintain {BOT_NAME}'s long-term memory. A new candidate fact was just
-extracted from a conversation. Compare it to the existing related memories and choose one action:
-
-- "duplicate": an existing memory already says the same thing. The candidate adds nothing new.
-- "update": the SAME fact has CHANGED, so an existing memory is now FALSE and must be replaced
-  (the user moved, changed jobs, renamed something, or reversed a preference). Set "target" to
-  the number of the memory it replaces.
-- "new": genuinely new information, OR an ADDITIONAL separate item of the same kind that should
-  coexist. A second pet, another friend, a new hobby, a different favorite are all "new" - the
-  existing memory is still true.
-
-Key test: choose "update" ONLY if the existing memory becomes FALSE. If both facts can be true at
-the same time, choose "new". Never replace a memory just because it is about the same topic.
-
-Examples:
-- existing "The user lives in New York" + candidate "The user lives in Boston" -> update (they moved)
-- existing "The user has a dog named Rufus" + candidate "The user has a dog named Lucy" -> new (two dogs)
-- existing "The user loves cilantro" + candidate "The user dislikes cilantro" -> update (reversed)
-- existing "The user is a nurse" + candidate "The user is a nurse" -> duplicate
-
-Set "target" to the number of the memory being replaced for "update", otherwise 0.
-Return only JSON: {{"action": "duplicate|update|new", "target": <number>}}."""
-
-MEMORY_DECISION_SCHEMA = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "memory_decision",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "enum": ["duplicate", "update", "new"]},
-                "target": {"type": "integer"},
-            },
-            "required": ["action", "target"],
-            "additionalProperties": False,
-        },
-    },
-}
-
-
-def build_decision_user(candidate: str, related_contents: list[str]) -> str:
-    lines = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(related_contents))
-    return f'New candidate fact:\n"{candidate}"\n\nExisting related memories:\n{lines}'
-
-
-# --- Batched lifecycle decision (all candidates in ONE call, for speed) ---
+# --- Lifecycle decision (batched: all candidates in ONE call, for speed) ---
 
 MEMORY_BATCH_DECISION_SYSTEM = f"""You maintain {BOT_NAME}'s long-term memory. Several new candidate facts were just extracted
 from a conversation. Each is shown with ITS OWN numbered list of existing related memories. Decide

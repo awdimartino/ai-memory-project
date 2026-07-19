@@ -5,8 +5,11 @@ Requires LM Studio running with a model loaded (or MODEL set in .env).
 Conversation is logged to the SQLite DB and carried across restarts.
 
 Commands:
-  /exit            quit
+  /exit            quit (flushes pending consolidation)
   /reset           clear in-memory context (the log on disk is kept)
+  /thoughts        show Mari's recent private journal entries
+  /core            show the always-injected core memories
+  /persona         show familiarity + her evolving self-description
   /model [name]    show or switch the model
   /temp [value]    show or set the sampling temperature
 """

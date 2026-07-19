@@ -239,18 +239,22 @@ async def busy_guard_makes_idle_zero():
 
 
 class ReachCompanion:
-    def __init__(self, idle, reach_result, asleep=False):
+    def __init__(self, idle, reach_result, asleep=False, busy=False):
         self._idle = idle
         self.meta = InMemoryMeta()
         self._reach_result = reach_result
         self.reach_calls = 0
         self._asleep = asleep
+        self._busy = busy
 
     def idle_seconds(self):
         return self._idle
 
     def is_asleep(self):
         return self._asleep
+
+    def is_busy(self):
+        return self._busy
 
     async def reach_out(self):
         self.reach_calls += 1
@@ -366,6 +370,16 @@ async def reach_out_drive_still_respects_cooldown():
     assert comp.reach_calls == 0 and drv.discharged == [], "cooldown is a hard floor over the drive"
 
 
+@case
+async def reach_out_skips_when_busy():
+    # drive is high but a turn is in flight -> must not fire mid-reply (drives relieve at turn end)
+    comp = ReachCompanion(idle=1000.0, reach_result="hey", busy=True)
+    drv = FakeDriveState(connection=0.9)
+    pushes = []
+    await _reach_drive_job(comp, drv, pushes).run()
+    assert comp.reach_calls == 0 and pushes == [], "must not reach out mid-turn"
+
+
 class FollowCompanion:
     """Fake for the follow-up job: exposes the small surface the job reads + follow_up()."""
 
@@ -458,17 +472,21 @@ async def follow_up_skips_when_asleep_or_busy():
 
 
 class ReflectCompanion:
-    def __init__(self, idle, asleep=False):
+    def __init__(self, idle, asleep=False, busy=False):
         self._idle = idle
         self.meta = InMemoryMeta()
         self.reflect_calls = 0
         self._asleep = asleep
+        self._busy = busy
 
     def idle_seconds(self):
         return self._idle
 
     def is_asleep(self):
         return self._asleep
+
+    def is_busy(self):
+        return self._busy
 
     async def reflect(self):
         self.reflect_calls += 1
@@ -521,6 +539,16 @@ async def reflection_fires_on_high_restlessness_and_discharges():
     assert comp.reflect_calls == 1
     assert drv.discharged == ["restlessness"]
     assert comp.meta.get_json("last_reflect_at") == 1_000_000.0
+
+
+@case
+async def reflection_skips_when_busy():
+    comp = ReflectCompanion(idle=1000.0, busy=True)
+    drv = FakeDriveState(restlessness=0.9)
+    job = ReflectionJob(comp, interval=0.0, min_idle=120.0, cooldown=600.0,
+                        drives=drv, threshold=0.4, clock=WallClock())
+    await job.run()
+    assert comp.reflect_calls == 0, "must not reflect mid-turn"
 
 
 class _Store:

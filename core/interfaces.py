@@ -10,8 +10,8 @@ from typing import Protocol
 class ConversationStore(Protocol):
     """Persistence for the episodic tier: full, verbatim conversation logs."""
 
-    def create_session(self) -> int:
-        """Start a new conversation session; return its id."""
+    def create_session(self, title: str | None = None) -> int:
+        """Start a new conversation session (optionally titled); return its id."""
         ...
 
     def add_message(self, session_id: int, role: str, content: str) -> int:
@@ -27,6 +27,39 @@ class ConversationStore(Protocol):
 
         Used on startup to recover the unconsolidated tail after a hard kill.
         """
+        ...
+
+    def message_count(self) -> int:
+        """Total messages across all conversations (drives familiarity + persona gates)."""
+        ...
+
+    # --- conversation tabs (one shared brain, per-tab threads) ---
+    def session_messages(self, session_id: int, limit: int) -> list[dict]:
+        """Up to `limit` most recent messages of ONE conversation (oldest first)."""
+        ...
+
+    def latest_session(self) -> int | None:
+        """Most recently active conversation id (resume-on-boot), or None if there are none."""
+        ...
+
+    def list_conversations(self) -> list[dict]:
+        """All conversations, most-recent-first, as {id, title, count, last_at}."""
+        ...
+
+    def session_title(self, session_id: int) -> str | None:
+        """A conversation's title, or None if untitled/missing."""
+        ...
+
+    def set_title(self, session_id: int, title: str) -> None:
+        """Set a conversation's title."""
+        ...
+
+    def delete_session(self, session_id: int) -> None:
+        """Delete a conversation and its messages."""
+        ...
+
+    def search_messages(self, query: str, limit: int) -> list[dict]:
+        """Keyword search over all messages (the reminisce tool's episodic read)."""
         ...
 
     def clear(self) -> None:
@@ -113,6 +146,14 @@ class ModelManager(Protocol):
 
 class MetaStore(Protocol):
     """Persistence for durable scalar state (a small key/value table)."""
+
+    def get(self, key: str) -> str | None:
+        """Read a raw string value, or None if unset (used for the persona-self slot)."""
+        ...
+
+    def set(self, key: str, value: str) -> None:
+        """Write a raw string value."""
+        ...
 
     def get_int(self, key: str, default: int = 0) -> int:
         """Read an integer value, or `default` if unset/unparseable."""

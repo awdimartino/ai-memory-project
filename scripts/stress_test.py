@@ -24,6 +24,8 @@ for _e in ("", "-wal", "-shm"):
         pass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if hasattr(sys.stdout, "reconfigure"):  # emit UTF-8 so the unicode edge input can't crash a print (Windows)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import config
 config.DB_PATH = _TMP
@@ -94,7 +96,8 @@ async def run_conversation(comp):
         pushes.append(m)
 
     comp.tick.register(ReachOutJob(comp, _notify, config.TICK_INTERVAL,
-                                   config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN))
+                                   config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN,
+                                   drives=comp.drives, threshold=config.DRIVE_CONNECTION_THRESHOLD))
     comp.tick.start()
 
     for kind, val in SCRIPT:
@@ -149,6 +152,11 @@ def check_invariants(conn, comp) -> list:
         vals = comp.emotion.state
         chk("mood_channels_in_range", all(0.0 <= vals[c] <= 1.0 for c in CHANNELS),
             {c: round(vals[c], 2) for c in CHANNELS})
+
+    if comp.drives is not None:
+        d = comp.drives.snapshot()
+        chk("drives_energy_in_range", all(0.0 <= v <= 1.0 for v in d.values()),
+            {k: round(v, 2) for k, v in d.items()})
 
     thoughts = conn.execute("SELECT COUNT(*) FROM thoughts").fetchone()[0]
     chk("thoughts_generated", thoughts > 0, f"{thoughts} thoughts")

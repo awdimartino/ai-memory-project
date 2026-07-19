@@ -176,14 +176,23 @@ async def memory_edit(payload: dict) -> dict:
     return {"ok": True}
 
 
+def _as_int(value):
+    """Parse a request id defensively; None on missing/garbage (avoids a 500 on bad input)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @app.post("/memory/delete")
 async def memory_delete(payload: dict) -> dict:
     """Hard-delete a single memory (active or retired)."""
     c = _state.get("companion")
-    if not c:
-        return {"ok": False}
+    mid = _as_int(payload.get("id"))
+    if not c or mid is None:
+        return {"ok": False, "error": "not ready or bad id"}
     async with _state["lock"]:
-        c.memory.store.delete(int(payload["id"]))
+        c.memory.store.delete(mid)
     return {"ok": True}
 
 
@@ -191,9 +200,11 @@ async def memory_delete(payload: dict) -> dict:
 async def memory_core(payload: dict) -> dict:
     """Toggle a memory's core flag (always-injected vs. recall-only)."""
     c = _state.get("companion")
-    if not c:
-        return {"ok": False}
-    c.memory.store.set_core(int(payload["id"]), bool(payload.get("core")))
+    mid = _as_int(payload.get("id"))
+    if not c or mid is None:
+        return {"ok": False, "error": "not ready or bad id"}
+    async with _state["lock"]:  # match the other mutating endpoints
+        c.memory.store.set_core(mid, bool(payload.get("core")))
     return {"ok": True}
 
 
@@ -274,8 +285,11 @@ async def ws(websocket: WebSocket) -> None:
                 await _send_conversations(websocket)  # title/order may have changed
 
             elif t == "switch":
+                sid = _as_int(data.get("id"))
+                if sid is None:
+                    continue
                 async with _state["lock"]:
-                    companion.switch_conversation(int(data["id"]))
+                    companion.switch_conversation(sid)
                 await _replay_history(websocket)
                 await _send_conversations(websocket)
 
@@ -286,14 +300,19 @@ async def ws(websocket: WebSocket) -> None:
                 await _send_conversations(websocket)
 
             elif t == "rename":
+                rid = _as_int(data.get("id"))
+                if rid is None:
+                    continue
                 title = (data.get("title") or "").strip()[:60] or "Untitled"
-                companion.store.set_title(int(data["id"]), title)
-                if int(data["id"]) == companion.session_id:
+                companion.store.set_title(rid, title)
+                if rid == companion.session_id:
                     companion._session_title = title
                 await _send_conversations(websocket)
 
             elif t == "delete":
-                did = int(data["id"])
+                did = _as_int(data.get("id"))
+                if did is None:
+                    continue
                 async with _state["lock"]:
                     was_active = did == companion.session_id
                     companion.store.delete_session(did)

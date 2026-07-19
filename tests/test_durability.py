@@ -167,6 +167,31 @@ async def failed_consolidation_requeues_and_holds_watermark():
 
 
 @case
+async def watermark_never_jumps_past_pending():
+    # A newer chunk (ids 5,6) consolidates while an OLDER chunk (ids 3,4) is still pending
+    # (e.g. a failed background pass re-queued it). The watermark must clamp below the pending
+    # ids, or a crash would leave 3,4 below the watermark and unrecoverable.
+    path = os.path.join(tempfile.mkdtemp(), "d.db")
+    comp, conn, conv, meta = _build(path, FakeMemory())
+    comp._unconsolidated = [{"id": 3, "role": "user", "content": "x"},
+                            {"id": 4, "role": "assistant", "content": "y"}]
+    await comp._advance_watermark([{"id": 5, "role": "user", "content": "a"},
+                                   {"id": 6, "role": "assistant", "content": "b"}])
+    assert meta.get_int(KEY, 0) == 2, f"must clamp below pending id 3, got {meta.get_int(KEY, 0)}"
+    conn.close(); os.remove(path)
+
+
+@case
+async def watermark_never_regresses():
+    path = os.path.join(tempfile.mkdtemp(), "d.db")
+    comp, conn, conv, meta = _build(path, FakeMemory())
+    meta.set_int(KEY, 10)
+    await comp._advance_watermark([{"id": 5, "role": "user", "content": "a"}])  # lower than 10
+    assert meta.get_int(KEY, 0) == 10, "watermark must not regress below its current value"
+    conn.close(); os.remove(path)
+
+
+@case
 async def upgrade_seeds_watermark_to_max_message_id():
     # An existing DB (pre-v4) with logged messages must not re-consolidate its
     # whole backlog: the v4 migration seeds the watermark to the current max id.

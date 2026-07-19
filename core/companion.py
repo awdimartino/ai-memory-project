@@ -434,14 +434,26 @@ class Companion:
             await self._advance_watermark(chunk)
 
     async def _advance_watermark(self, chunk: list[dict]) -> None:
-        """Checkpoint the highest consolidated message id (best-effort, never fatal)."""
+        """Checkpoint the consolidated *prefix* (best-effort, never fatal).
+
+        The watermark means "every message up to here is consolidated", so it must never
+        regress and must never jump past a message still awaiting consolidation. That second
+        rule matters because chunks aren't guaranteed id-ordered: a background pass that *fails*
+        re-queues its (lower-id) chunk while a concurrent flush of a newer chunk succeeds — if
+        we advanced to the newer chunk's max id, the re-queued lower ids would sit below the
+        watermark and be skipped by the crash-recovery in bootstrap (lost facts). So clamp to
+        just below the lowest still-pending id, and take the max with the current value.
+        """
         ids = [m["id"] for m in chunk if m.get("id") is not None]
         if not ids:
             return
+        new_wm = max(ids)
+        pending = [m["id"] for m in self._unconsolidated if m.get("id") is not None]
+        if pending:
+            new_wm = min(new_wm, min(pending) - 1)
         try:
-            await asyncio.to_thread(
-                self.meta.set_int, CONSOLIDATED_WATERMARK_KEY, max(ids)
-            )
+            new_wm = max(self.meta.get_int(CONSOLIDATED_WATERMARK_KEY, 0), new_wm)
+            await asyncio.to_thread(self.meta.set_int, CONSOLIDATED_WATERMARK_KEY, new_wm)
         except Exception:  # noqa: BLE001 - a missed checkpoint only means a re-consolidation
             logger.exception("failed to persist consolidation watermark")
 

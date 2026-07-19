@@ -26,6 +26,8 @@ for ext in ("", "-wal", "-shm"):
         pass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if hasattr(sys.stdout, "reconfigure"):  # emit UTF-8 so flag glyphs don't crash a cp1252 console (Windows)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import config
 config.DB_PATH = _TMP

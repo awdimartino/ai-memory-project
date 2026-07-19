@@ -8,9 +8,9 @@ than a stopwatch. This is the generalization of the existing tick gates flagged 
 V2_PLAN §2.9.
 
 A Tier-1 autonomic substrate, sibling to EmotionManager:
-  - updated every tick from **elapsed wall-time** (dt via an injected clock), so the
-    dynamics are independent of TICK_INTERVAL (unlike mood's per-tick decay) and fully
-    deterministic under a fake clock in tests
+  - the away-rise and the energy cycle integrate by **elapsed wall-time** (dt via an injected
+    clock), so those dynamics are independent of TICK_INTERVAL (unlike mood's per-tick decay);
+    the brief present-relax is a light per-tick settle. Deterministic under a fake clock in tests.
   - **persisted** to the MetaStore so a drive survives restarts
 
 The two away-drives now gate real behavior (reach-out / reflection); arc A2 adds a
@@ -67,8 +67,8 @@ CONNECTION_MOOD_WEIGHTS = {"warmth": 0.8, "melancholy": 0.6, "irritation": -0.7}
 # Boredom nudge for restlessness: low interest speeds it up (multiplier 1 + w*(1-interest)).
 RESTLESS_BOREDOM_WEIGHT = 0.5
 
-# Discharge subtracted when a drive's behavior fires (floored at baseline). Reserved for
-# the rewire slice; exposed now via discharge() so a job can call it in one line.
+# Discharge subtracted when a drive's behavior fires (floored at baseline): a reach-out
+# fully satisfies connection, a single reflection takes the edge off restlessness.
 DISCHARGE = {
     "connection": 1.0,     # a reach-out fully satisfies the urge
     "restlessness": 0.6,   # a single reflection takes the edge off
@@ -87,16 +87,6 @@ CONTACT_RELIEF = {
 ENERGY_START = 1.0                 # a fresh companion starts rested
 ENERGY_DEPLETE_PER_HOUR = 0.07     # awake
 ENERGY_RESTORE_PER_HOUR = 0.15     # asleep
-
-
-def value_to_word(v: float) -> str:
-    """Human phrasing of a drive level (for legibility, mirrors emotion's value_to_word)."""
-    if v < 0.15: return "quiet"
-    if v < 0.35: return "stirring"
-    if v < 0.55: return "noticeable"
-    if v < 0.75: return "strong"
-    if v < 0.90: return "pressing"
-    return "urgent"
 
 
 class DriveManager:
@@ -162,11 +152,8 @@ class DriveManager:
         return 1.0 + RESTLESS_BOREDOM_WEIGHT * (1.0 - mood.get("interest", 0.0))
 
     async def discharge(self, drive: str) -> None:
-        """A drive's behavior fired: subtract its discharge, floor at baseline, persist.
-
-        Not called yet in this "observe first" slice — the behaviors stay on their idle
-        gates — but exposed so the rewire is a one-liner in each job.
-        """
+        """A drive's behavior fired (reach-out / reflection): subtract its discharge, floor at
+        baseline, persist. Called by the tick jobs when they act on a crossed drive."""
         self.state[drive] = max(BASELINE[drive], self.state[drive] - DISCHARGE[drive])
         self._clamp()
         await self._persist()

@@ -85,14 +85,13 @@ class TickLoop:
 
 
 class DriveDriftJob(Job):
-    """Integrate Mari's internal drives each tick (multi-drive proactivity, arc A1).
+    """Integrate Mari's internal drives + energy each tick (multi-drive proactivity).
 
-    Drives rise while the user is away (connection scaled by mood, restlessness by
-    boredom) and relax while present. This "observe first" slice only *updates and
-    surfaces* the drives — the behaviors still fire on their own idle gates — so a bad
-    drive can't yet cause or suppress an action. Runs even while asleep: drives are
-    cheap state with no model call (like mood drift), and letting connection keep
-    building while she sleeps is exactly the future basis for a principled self-wake.
+    Away-drives rise while the user is away (connection scaled by mood, restlessness by boredom)
+    and relax while present; energy depletes while awake and restores while asleep. Reach-out and
+    reflection gate on these drives (this job just keeps them current). Runs even while asleep:
+    it's cheap state with no model call, and energy recharging + connection building during sleep
+    is the basis for a future principled self-wake.
     """
     name = "drive_drift"
 
@@ -170,7 +169,9 @@ class ReachOutJob(Job):
         return self.companion.idle_seconds() >= self.min_idle
 
     async def run(self) -> None:
-        if self.companion.is_asleep() or not self._wants_to():
+        # is_busy(): drive-gated jobs no longer inherit the idle busy-guard (drives are only
+        # relieved at the END of send()), so guard explicitly against firing mid-turn.
+        if self.companion.is_asleep() or self.companion.is_busy() or not self._wants_to():
             return
         now = self.clock()
         last = self.companion.meta.get_json(LAST_REACHOUT_KEY, 0) or 0
@@ -256,7 +257,9 @@ class ReflectionJob(Job):
         return self.companion.idle_seconds() >= self.min_idle
 
     async def run(self) -> None:
-        if self.companion.is_asleep() or not self._wants_to():
+        # is_busy() guard: drive-gated, so it no longer inherits the idle busy-guard (drives
+        # are only relieved at the end of send()) — don't reflect mid-turn.
+        if self.companion.is_asleep() or self.companion.is_busy() or not self._wants_to():
             return
         now = self.clock()
         last = self.companion.meta.get_json(LAST_REFLECT_KEY, 0) or 0
