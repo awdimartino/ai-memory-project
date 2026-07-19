@@ -63,6 +63,14 @@ async def posts_bark_payload_with_url():
 
 
 @case
+async def strips_trailing_slash():
+    transport, captured = _capturing()
+    p = PhonePush("http://alex-pi:8090/devkey/", "Mari", transport=transport)
+    await p.push("hi")
+    assert str(captured[0].url) == "http://alex-pi:8090/devkey", "trailing slash must be trimmed"
+
+
+@case
 async def omits_url_when_ui_unset():
     transport, captured = _capturing()
     p = PhonePush("http://alex-pi:8090/devkey", "Mari", transport=transport)

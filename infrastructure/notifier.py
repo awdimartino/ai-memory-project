@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 class PhonePush:
     def __init__(self, url: str, title: str, ui_url: str = "",
                  timeout: float = 5.0, transport=None):
-        self.url = (url or "").strip()          # e.g. http://alex-pi:8090/<device_key>
+        # strip a trailing slash: Bark routes POST /<key>/ differently from /<key>
+        self.url = (url or "").strip().rstrip("/")   # e.g. http://alex-pi:8090/<device_key>
         self.title = title
         self.ui_url = (ui_url or "").strip()     # optional tap-to-open (Tailscale web UI)
         self.timeout = timeout
