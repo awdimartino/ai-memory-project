@@ -43,9 +43,16 @@ class FakeEmbedder:
     async def embed_document(self, text: str):
         return self._vec(text)
 
+    async def embed_documents(self, texts):
+        return [self._vec(t) for t in texts]
+
 
 class FakeLLM:
-    """Scripted extraction (fact lists) and lifecycle decisions."""
+    """Scripted extraction (fact lists) and BATCHED lifecycle decisions.
+
+    `decisions` is one batched dict ({"decisions": [{"candidate", "action", "target"}, ...]})
+    per consolidate call that has at least one fact needing a decision.
+    """
 
     def __init__(self, fact_lists, decisions):
         self.fact_lists = list(fact_lists)
@@ -55,7 +62,7 @@ class FakeLLM:
         return self.fact_lists.pop(0) if self.fact_lists else []
 
     async def structured_json(self, messages, schema, model=None):
-        return self.decisions.pop(0) if self.decisions else {"action": "new", "target": 0}
+        return self.decisions.pop(0) if self.decisions else {"decisions": []}
 
 
 def _fact(content, category="user"):
@@ -73,10 +80,11 @@ async def run() -> None:
         [_fact("The user lives in Boston")],      # 3: duplicate -> skip
         [_fact("The user owns a dog named Rufus")],  # 4: new (different topic)
     ]
-    # decisions are only requested when related memories exist (calls 2 and 3)
+    # one BATCHED decision per consolidate that has a fact needing a decision (calls 2 and 3;
+    # call 1 is an empty store and call 4 is a different topic, so both insert directly)
     decisions = [
-        {"action": "update", "target": 1},
-        {"action": "duplicate", "target": 0},
+        {"decisions": [{"candidate": 1, "action": "update", "target": 1}]},
+        {"decisions": [{"candidate": 1, "action": "duplicate", "target": 0}]},
     ]
 
     mm = MemoryManager(

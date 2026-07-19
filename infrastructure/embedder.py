@@ -29,3 +29,7 @@ class Embedder:
 
     async def embed_document(self, text: str) -> list[float]:
         return (await self._embed([text], _DOC_PREFIX))[0]
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed several documents in ONE request (used to batch consolidation)."""
+        return await self._embed(texts, _DOC_PREFIX) if texts else []

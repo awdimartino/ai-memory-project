@@ -42,6 +42,9 @@ class FakeEmbedder:
     async def embed_document(self, text):
         return self._vec(text)
 
+    async def embed_documents(self, texts):
+        return [self._vec(t) for t in texts]
+
 
 class FakeLLM:
     def __init__(self, fact_lists, decisions):
@@ -52,7 +55,9 @@ class FakeLLM:
         return self.fact_lists.pop(0) if self.fact_lists else []
 
     async def structured_json(self, messages, schema, model=None):
-        return self.decisions.pop(0) if self.decisions else {"action": "new", "target": 0}
+        # core tests only exercise the core-rerank structured_json ({"keep": [...]});
+        # decisions default is harmless (no lifecycle decision fires with an empty store).
+        return self.decisions.pop(0) if self.decisions else {"decisions": []}
 
 
 def _fact(content, core=False, category="user"):

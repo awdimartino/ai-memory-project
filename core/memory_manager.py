@@ -15,12 +15,12 @@ import numpy as np
 from core.prompts import (
     CORE_RERANK_SCHEMA,
     CORE_RERANK_SYSTEM,
-    MEMORY_DECISION_SCHEMA,
-    MEMORY_DECISION_SYSTEM,
+    MEMORY_BATCH_DECISION_SCHEMA,
+    MEMORY_BATCH_DECISION_SYSTEM,
     MEMORY_EXTRACTION_SYSTEM,
     MEMORY_SCHEMA,
+    build_batch_decision_user,
     build_core_rerank_user,
-    build_decision_user,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,11 +30,15 @@ def _to_vec(b: bytes) -> np.ndarray:
     return np.frombuffer(b, dtype=np.float32)
 
 
+def _cosine(a: np.ndarray, b: np.ndarray) -> float:
+    return float((a / (np.linalg.norm(a) + 1e-9)) @ (b / (np.linalg.norm(b) + 1e-9)))
+
+
 class MemoryManager:
     def __init__(self, embedder, store, llm, brain_model: str,
                  top_k: int, min_sim: float,
                  relate_top_k: int, relate_sim: float,
-                 core_max: int = 12):
+                 core_max: int = 12, dup_sim: float = 0.97):
         self.embedder = embedder
         self.store = store
         self.llm = llm
@@ -44,6 +48,7 @@ class MemoryManager:
         self.relate_top_k = relate_top_k
         self.relate_sim = relate_sim
         self.core_max = core_max
+        self.dup_sim = dup_sim  # within-window near-verbatim collapse threshold
 
     def core_memories(self) -> list[str]:
         """Active core facts, always injected into the prompt (identity-defining)."""
@@ -79,7 +84,14 @@ class MemoryManager:
         return [(m["content"], s) for m, s in hits]
 
     async def consolidate(self, messages: list[dict], session_id: int | None) -> int:
-        """Extract durable facts from a window and apply lifecycle. Returns facts written."""
+        """Extract durable facts from a window and apply lifecycle. Returns facts written.
+
+        Batched for speed: ONE extraction call, ONE embeddings call for all facts, and ONE
+        lifecycle-decision call covering every fact that resembles an existing memory (instead
+        of one call per fact). Near-verbatim duplicates within the same window are collapsed
+        without a model call. The lifecycle semantics are unchanged — supersede-links, coexist,
+        and bad/garbage-decision fallbacks all still hold.
+        """
         transcript = "\n".join(
             f"{'User' if m['role'] == 'user' else 'Mari'}: {m['content']}" for m in messages
         )
@@ -92,53 +104,94 @@ class MemoryManager:
             self.brain_model,
         )
 
-        new = updated = duplicate = 0
+        cands = []
         for f in facts:
             content = (f.get("content") or "").strip()
-            if not content:
-                continue
-            core = bool(f.get("core"))
-            vec = np.asarray(await self.embedder.embed_document(content), dtype=np.float32)
-            blob = vec.tobytes()
-            category = f.get("category")
+            if content:
+                cands.append({"content": content, "category": f.get("category"),
+                              "core": bool(f.get("core"))})
+        if not cands:
+            logger.info("consolidated %d msg(s): nothing durable", len(messages))
+            return 0
 
-            related = self._search(vec, self.relate_top_k, self.relate_sim)
-            if not related:
-                self.store.add(content, category, blob, session_id, core=core)
-                new += 1
-                continue
+        # One embeddings call for every candidate.
+        vecs = await self.embedder.embed_documents([c["content"] for c in cands])
+        for c, v in zip(cands, vecs):
+            c["vec"] = np.asarray(v, dtype=np.float32)
 
-            decision = await self.llm.structured_json(
-                [
-                    {"role": "system", "content": MEMORY_DECISION_SYSTEM},
-                    {"role": "user", "content": build_decision_user(
-                        content, [m["content"] for m, _ in related])},
-                ],
-                MEMORY_DECISION_SCHEMA,
-                self.brain_model,
-            )
-            action = decision.get("action", "new")
-            target = decision.get("target", 0)
+        # Collapse near-verbatim duplicates within THIS window (no model call). Only near-
+        # identical text merges, so a genuine second item of the same kind still coexists.
+        kept: list[dict] = []
+        for c in cands:
+            twin = next((k for k in kept if _cosine(c["vec"], k["vec"]) >= self.dup_sim), None)
+            if twin is not None:
+                twin["core"] = twin["core"] or c["core"]
+            else:
+                kept.append(c)
 
+        # Relate each survivor to EXISTING memories (pre-batch state). Those with a related
+        # memory need a lifecycle decision; the rest are straight inserts.
+        for c in kept:
+            c["related"] = self._search(c["vec"], self.relate_top_k, self.relate_sim)
+        need = [c for c in kept if c["related"]]
+        direct = [c for c in kept if not c["related"]]
+
+        decisions = await self._batch_decisions(need)
+
+        new = updated = duplicate = 0
+        superseded: set[int] = set()
+        for i, c in enumerate(need, start=1):  # candidate numbers are 1-based
+            d = decisions.get(i, {})
+            action = d.get("action", "new")
+            target = d.get("target", 0)
+            blob = c["vec"].tobytes()
             if action == "duplicate":
                 duplicate += 1
                 continue
-            if action == "update" and isinstance(target, int) and 1 <= target <= len(related):
-                new_id = self.store.add(content, category, blob, session_id, core=core)
-                self.store.deactivate(related[target - 1][0]["id"], superseded_by=new_id)
-                updated += 1
-                continue
-            # "new" (or an out-of-range target we don't trust)
-            self.store.add(content, category, blob, session_id, core=core)
+            if (action == "update" and isinstance(target, int)
+                    and 1 <= target <= len(c["related"])):
+                old_id = c["related"][target - 1][0]["id"]
+                if old_id not in superseded:  # don't double-retire within one batch
+                    new_id = self.store.add(c["content"], c["category"], blob, session_id, core=c["core"])
+                    self.store.deactivate(old_id, superseded_by=new_id)
+                    superseded.add(old_id)
+                    updated += 1
+                    continue
+            # "new", an out-of-range/garbage target, or an already-retired target: insert
+            self.store.add(c["content"], c["category"], blob, session_id, core=c["core"])
+            new += 1
+
+        for c in direct:
+            self.store.add(c["content"], c["category"], c["vec"].tobytes(), session_id, core=c["core"])
             new += 1
 
         logger.info(
-            "consolidated %d msg(s): %d new, %d updated, %d duplicate",
-            len(messages), new, updated, duplicate,
+            "consolidated %d msg(s): %d new, %d updated, %d duplicate (%d decided in 1 call)",
+            len(messages), new, updated, duplicate, len(need),
         )
         if new or updated:
             await self._enforce_core_cap()
         return new + updated
+
+    async def _batch_decisions(self, need: list[dict]) -> dict[int, dict]:
+        """One model call deciding every candidate that has related memories. Returns a
+        {candidate_number: decision} map (empty when nothing needs deciding)."""
+        if not need:
+            return {}
+        raw = await self.llm.structured_json(
+            [
+                {"role": "system", "content": MEMORY_BATCH_DECISION_SYSTEM},
+                {"role": "user", "content": build_batch_decision_user(
+                    [(c["content"], [m["content"] for m, _ in c["related"]]) for c in need])},
+            ],
+            MEMORY_BATCH_DECISION_SCHEMA,
+            self.brain_model,
+        )
+        out: dict[int, dict] = {}
+        for d in (raw.get("decisions") or []):
+            if isinstance(d, dict) and isinstance(d.get("candidate"), int):
+                out[d["candidate"]] = d
+        return out
 
     async def _enforce_core_cap(self) -> None:
         """If the core set exceeds the cap, ask the brain to keep the most essential ones

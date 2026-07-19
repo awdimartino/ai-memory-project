@@ -45,8 +45,11 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   asymmetric `search_query:`/`search_document:` prefixes — fixes the v1 first-person vs
   third-person mismatch), brute-force cosine KNN, inject hits into the system prompt.
 - **Consolidation (end of a context window, backgrounded):** extract durable facts,
-  then a **lifecycle** decision per fact — duplicate (skip) / update (soft-delete old,
-  keep history via `superseded_by`) / new. Never blocks chat.
+  then a **lifecycle** decision — duplicate (skip) / update (soft-delete old, keep history via
+  `superseded_by`) / new. **Batched for speed (2026-07-18):** one extraction call, one embeddings
+  call for all facts, and **one decision call covering every fact that resembles an existing memory**
+  (was one call per fact); near-verbatim duplicates within a window collapse without a model call
+  (`MEMORY_DUP_SIMILARITY`). Never blocks chat.
 - **Core memory:** the extractor marks identity-defining facts (name, key people,
   job, where they live) as `core`; `build_system` **always injects** the core set (deduped against
   recall) so Mari never depends on a similarity search to know your name. Bounded by `CORE_MEMORY_MAX`

@@ -40,8 +40,13 @@ class FakeEmbedder:
     async def embed_document(self, text):
         return self._vec(text)
 
+    async def embed_documents(self, texts):
+        return [self._vec(t) for t in texts]
+
 
 class FakeLLM:
+    """Scripted extraction + BATCHED decisions (one dict per consolidate that needs a decision)."""
+
     def __init__(self, fact_lists, decisions):
         self.fact_lists = list(fact_lists)
         self.decisions = list(decisions)
@@ -50,7 +55,7 @@ class FakeLLM:
         return self.fact_lists.pop(0) if self.fact_lists else []
 
     async def structured_json(self, messages, schema, model=None):
-        return self.decisions.pop(0) if self.decisions else {"action": "new", "target": 0}
+        return self.decisions.pop(0) if self.decisions else {"decisions": []}
 
 
 def _fact(content, category="user"):
@@ -84,7 +89,7 @@ def case(fn):
 async def recall_excludes_superseded(mm=None):
     mm, store, conn, path = _mm(
         [[_fact("The user lives in New York")], [_fact("The user lives in Boston")]],
-        [{"action": "update", "target": 1}],
+        [{"decisions": [{"candidate": 1, "action": "update", "target": 1}]}],
     )
     await _consume(mm, 2)
     hits = await mm.recall("where does the user live")
@@ -109,10 +114,10 @@ async def recall_threshold_and_ordering(mm=None):
 
 @case
 async def within_batch_duplicate(mm=None):
-    # two identical facts in ONE consolidation: 2nd should see the 1st and dedupe
+    # two identical facts in ONE consolidation: collapsed as near-verbatim (no model call)
     mm, store, conn, path = _mm(
         [[_fact("The user owns a dog"), _fact("The user owns a dog")]],
-        [{"action": "duplicate", "target": 0}],
+        [],  # no decision needed — the collapse happens before any decision
     )
     await _consume(mm, 1)
     assert store.count() == 1, f"within-batch dup not deduped: count={store.count()}"
@@ -124,7 +129,7 @@ async def coexist_when_decision_new(mm=None):
     # related fact but decision says "new" -> BOTH kept (must not wrongly supersede)
     mm, store, conn, path = _mm(
         [[_fact("The user owns a dog named Rufus")], [_fact("The user owns a dog named Lucy")]],
-        [{"action": "new", "target": 0}],
+        [{"decisions": [{"candidate": 1, "action": "new", "target": 0}]}],
     )
     await _consume(mm, 2)
     assert store.count() == 2, f"coexist failed, count={store.count()}"
@@ -136,7 +141,7 @@ async def bad_target_falls_back_to_new(mm=None):
     # "update" with an out-of-range target must not crash or corrupt; insert as new
     mm, store, conn, path = _mm(
         [[_fact("The user lives in New York")], [_fact("The user lives in Boston")]],
-        [{"action": "update", "target": 99}],
+        [{"decisions": [{"candidate": 1, "action": "update", "target": 99}]}],
     )
     await _consume(mm, 2)
     assert store.count() == 2, f"bad target mishandled: count={store.count()}"

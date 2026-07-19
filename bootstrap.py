@@ -67,7 +67,7 @@ async def build() -> tuple[Companion, str]:
         embedder, mem_store, llm, brain_model,
         config.RECALL_TOP_K, config.RECALL_MIN_SIMILARITY,
         config.MEMORY_RELATE_TOP_K, config.MEMORY_RELATE_SIMILARITY,
-        core_max=config.CORE_MEMORY_MAX,
+        core_max=config.CORE_MEMORY_MAX, dup_sim=config.MEMORY_DUP_SIMILARITY,
     )
 
     emotion = await _build_emotion(meta_store)

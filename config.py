@@ -73,6 +73,10 @@ CONSOLIDATE_WINDOW = int(os.environ.get("CONSOLIDATE_WINDOW", str(HISTORY_TURNS)
 # similar (higher than recall — only genuinely related facts get an LLM decision).
 MEMORY_RELATE_SIMILARITY = float(os.environ.get("MEMORY_RELATE_SIMILARITY", "0.6"))
 MEMORY_RELATE_TOP_K = int(os.environ.get("MEMORY_RELATE_TOP_K", "5"))
+# Consolidation batches all lifecycle decisions into ONE model call (speed). Two facts in the
+# SAME window this cosine-similar are treated as the same fact and collapsed without a model
+# call (near-verbatim only, so genuine "two dogs" still coexist). Keep high.
+MEMORY_DUP_SIMILARITY = float(os.environ.get("MEMORY_DUP_SIMILARITY", "0.97"))
 
 # Core memory: a small set of identity-defining facts (name, key people, job, where they
 # live, defining traits) that are ALWAYS injected into the prompt, not just when recall
