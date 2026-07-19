@@ -1,15 +1,22 @@
-# v2.1 Handoff — resume here
+# v2.2 Handoff — resume here
 
 Short brief for picking up the AI-memory-companion build in a fresh session.
 **The authoritative design + full build log is [`V2_PLAN.md`](V2_PLAN.md) — read it first.**
 This file is the quick "where are we / how to run / what's next" summary.
 
-**Milestone: v2.1 is complete.** v2.0 delivered the trustworthy *brain* (memory + emotion +
-conversation quality). v2.1 adds everything that makes Mari feel like a persistent companion:
-**core memory, a self-modifying persona + familiarity meter, sleep/standby, a status panel +
-conversation tabs, and a robust tool framework** (pillar 4). All four pillars plus the delivery
-layer's first rung (tools) are built and live-verified. What remains is enrichment + reach —
-see [§8 Remaining roadmap](#8-remaining-roadmap-v22).
+**Milestone: v2.1 complete; v2.2 in progress.** v2.0 built the trustworthy *brain*; v2.1 added the
+persistent-companion layer (core memory, self-modifying persona + familiarity, sleep/standby, status
+panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **multi-drive proactivity**
+(arc A1 — internal drives now gate reach-out/reflection, §8-A), **spontaneous follow-up messages**
+("double-text"), an **editable memory inspector + admin** (browse/edit/delete, clear, factory reset),
+and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
+batching). All live-verified; offline suite **107 green**.
+
+**⚠️ ACTIVE THREAD — resume here first:** the `enable_thinking=false` template edit that made
+consolidation ~20× faster (§4) also disabled reasoning on the **chat** path, which weakened tool-calling
+(tool eval fell to 19/30, recovered to 25/30 with a stronger tools prompt — §7). We paused mid-decision
+on how to get **both** fast consolidation *and* reliable tools. The plan + ready-to-run test scripts are
+in [§8 → "Immediate"](#8-remaining-roadmap-v22). Everything else is enrichment/reach — see §8.
 
 ---
 
@@ -30,7 +37,7 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
 
 ---
 
-## 2. Current status — v2.1, built and live-verified
+## 2. Current status (v2.2 in progress) — built and live-verified
 
 - **Single async runtime.** FastAPI + WebSocket **web UI** and a terminal **REPL**,
   both wired through one composition root (`bootstrap.py`) and a `Companion` facade.
@@ -182,6 +189,8 @@ python tests/test_tools.py              # offline tool framework: registry + str
 python scripts/tool_probe.py            # LIVE: native tool-calling reliability (probe, per-case pass rate)
 python scripts/tool_smoke.py            # LIVE: tools end-to-end through the real persona (time + reminisce + no-tool)
 python scripts/tool_eval.py             # LIVE: 30-scenario tool-calling eval (time/reminisce/no-tool/tricky), per-category score
+python scripts/bench_specdec.py         # LIVE: tok/s A/B for speculative decoding (run with draft off, then on) — baseline ~38 tok/s
+python scripts/probe_reasoning_control.py  # LIVE (needs thinking ON): does LM Studio honor reasoning_effort / a thinking budget?
 
 python scripts/reminisce_smoke.py       # LIVE: reminisce recalls a past episode out of the context window
 python scripts/drive_demo.py            # LIVE: drives observation harness — chat + away-gaps trigger reflection/reach-out
@@ -325,6 +334,19 @@ critical path. Grouped by theme; items the user has **already flagged as liked**
 Full context in [`V2_PLAN.md` §2.9](V2_PLAN.md). **Delivery-layer features stay gated behind a solid
 brain, per the guiding principle.**
 
+### 0. IMMEDIATE — resolve the reasoning ↔ tool-calling tradeoff (active thread)
+**The one open item from the last session.** Thinking-off gives fast consolidation but weaker chat tools
+(§4, §7). The goal: get both. Levers to test (paused while the user was gaming — resume when free):
+- **Speculative decoding** (biggest "keep reasoning, go faster" lever). Load a small vocab-compatible qwen
+  draft model in LM Studio; A/B with `scripts/bench_specdec.py`. **Baseline measured: ~38 tok/s** (draft off).
+  Watch draft acceptance % (>60% good). If it works, bounded reasoning could become affordable on chat.
+- **Reasoning budget / `reasoning_effort`** — does LM Studio honor a knob to cap thinking tokens? Run
+  `scripts/probe_reasoning_control.py` **with thinking ON** (flip the §4 template line to `true` first).
+- **Decision to make after testing:** (a) keep thinking-off + the strengthened tools prompt (tools ~25/30,
+  simplest, current); or (b) if spec-decoding + a hard reasoning budget make bounded reasoning fast enough,
+  re-enable thinking on chat for better tools + intelligence. Two full 9B instances is **ruled out** (won't
+  fit 16GB). Re-run `scripts/tool_eval.py` (30 scenarios) after any change to score the result.
+
 ### A. Autonomous inner life ★ (recommended next arc)
 The three the user liked from the GitHub-companion research. Together they replace the single idle-timer
 with something that feels alive, and they make self-wake + autonomous sleep coherent.
@@ -386,7 +408,14 @@ The pillar-4 framework is built and hot-swappable — each of these is "register
   something, not just the words).
 - **Embodiment** — Live2D / VRM avatar, wearable sensors.
 
-**Recommendation:** the **A arc (multi-drive → energy → nightly consolidation)** is the highest-leverage next
-move — user-picked, it makes the whole system feel alive rather than timer-driven, and it retroactively makes
-self-wake and autonomous sleep coherent. Start with multi-drive proactivity (the tick already has the gate
-structure to generalize). The near-freebies in C (presence signal, time-of-day awareness) can slot in alongside.
+**Recommended order from here:**
+1. **§0 Immediate** — close out the reasoning ↔ tool-calling tradeoff (spec-decoding + reasoning-budget test,
+   then decide the final thinking config). This is the only loose thread; do it first.
+2. **Finish arc A** — **A1 multi-drive is DONE**; next is **★ A2 energy/body cycles** (add `energy` as a third
+   drive in the `DriveManager` we just built; `SleepJob` fires on low energy instead of the 30-min timer — this
+   also unlocks principled self-wake), then **★ A3 nightly consolidation**. This is the user-picked arc and the
+   highest-leverage feature work.
+3. **Slot in the C near-freebies** (presence signal, time-of-day awareness) alongside A — cheap and they make
+   proactivity smarter.
+Practical tuning the user will do in real use: drive thresholds/rates, follow-up `FOLLOWUP_CHANCE`, and the
+reasoning/tool config from §0.
