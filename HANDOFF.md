@@ -96,9 +96,12 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   `DRIVE_CONNECTION_THRESHOLD`** (0.6) and `ReflectionJob` when **restlessness ≥
   `DRIVE_RESTLESSNESS_THRESHOLD`** (0.4), each discharging its drive on fire; the persisted cooldowns stay a
   hard floor, and both jobs **fall back to the old idle gate** when drives are disabled. So *how she feels*
-  now sets *when* she reaches out — a warm/sad chat pulls reach-out earlier than a throwaway one. Sleep still
-  runs on its idle timer (energy/body-cycles is the next slice, §8-A). Tunable via the two threshold env vars
-  + the rise rates in `core/drives.py`; watch `scripts/drive_demo.py` or the panel to calibrate.
+  now sets *when* she reaches out — a warm/sad chat pulls reach-out earlier than a throwaway one. Tunable via
+  the two threshold env vars + the rise rates in `core/drives.py`; watch `scripts/drive_demo.py` or the panel.
+- **Energy / body cycle (arc A2, 2026-07-18):** the `DriveManager` also holds an **energy** reserve [0,1] that
+  **depletes while awake, restores while asleep** (a body cycle, not an away-drive), shown as a status bar.
+  `SleepJob` now sleeps on **low energy + a brief idle** (she's tired) as well as the long-idle VRAM trigger, so
+  sleep is internally motivated, not just a 30-min timer. Self-wake stays deferred until time-of-day gating (§8-A).
 - **Sleep / standby (§2.8):** after a long idle (`SLEEP_AFTER_IDLE`, default 30 min)
   `SleepJob` calls `Companion.sleep()` — flush pending, then **unload the LLM from VRAM** via the `lms`
   CLI (`infrastructure/model_manager.py`) to free the machine. The heartbeat keeps ticking (mood still
@@ -363,12 +366,20 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
   restlessness rise cut 15→5/hr so it grades instead of pegging at 1.0 in 4 min. `scripts/drive_demo.py` is a
   live observation harness. **Remaining in this item:** the extra drives (mood/anxiety/busyness) are optional;
   practical tuning of the thresholds/rates is a user-testing task.
-- **★ Energy / body cycles** — a fatigue/energy stat that biases toward rest, giving *autonomous* sleep an
-  internal logic instead of a fixed 30-min timer.
+- **★ Energy / body cycles — BUILT (2026-07-18).** `DriveManager` gained an `energy` reserve [0,1] that
+  **depletes while awake and restores while asleep** (rates in `core/drives.py`, per elapsed wall-time so
+  they're `TICK_INTERVAL`-independent; persisted + shown as a bar in the status panel). `SleepJob` now fires on
+  **low energy + a brief idle gap** (she's tired — `ENERGY_SLEEP_THRESHOLD` / `ENERGY_SLEEP_MIN_IDLE`) *in
+  addition* to the long-idle VRAM-freeing trigger, so sleep has an internal logic rather than only a 30-min
+  timer. The `min_idle` gap means she never nods off mid-conversation (the busy guard zeroes idle during a turn).
+  Offline-tested (deplete/restore/clamp/persist + the sleep triggers); default rates model a rough day/night and
+  are tunable. **Still deferred: self-wake** (see below).
 - **★ Nightly / scheduled deep consolidation** — an "end of day" job that summarizes the day into an episodic
   day-summary (great reminisce fuel), distinct from the per-window consolidation.
-- **Unlocks self-waking** (waking to reach out) — currently deferred precisely because it needs a real
-  trigger (energy, or a due reminder) to be principled rather than twitchy. `wake()` is already a public seam.
+- **Self-waking (deferred, next after A3)** — waking to reach out when rested (energy high) + missing the user
+  (connection high). Energy (the gate that stops her waking exhausted) now exists; what's still missing is
+  **time-of-day / do-not-disturb gating** so she doesn't wake at 3am. Build that first, then a `WakeJob`
+  (web-registered like reach-out) that checks energy + connection + a cooldown. `wake()` is already a public seam.
 
 ### B. Memory depth
 - **Memory salience / forgetting curve** — importance+recency weighting; trivial facts fade, often-recalled

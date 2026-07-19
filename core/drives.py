@@ -13,19 +13,23 @@ A Tier-1 autonomic substrate, sibling to EmotionManager:
     deterministic under a fake clock in tests
   - **persisted** to the MetaStore so a drive survives restarts
 
-This first slice ships two drives and only *observes* them (the panel shows them
-move); the behaviors stay on their existing idle gates until the drives are shown to
-move sensibly against real use. Wiring a job onto a drive is then a one-line gate
-change (`if drives.get("connection") < threshold: return`).
+The two away-drives now gate real behavior (reach-out / reflection); arc A2 adds a
+third stat, **energy**, that runs on a different clock (a body cycle, not an away-drive).
 
-Drives:
+Drives (away-drives — rise while away, discharged by their behavior):
   - connection   — the urge to reach out. Rises while away; warmth and melancholy in
                    the current mood make her miss the user faster, irritation slows it.
-                   Reset by contact (a user message); a reach-out would discharge it.
+                   Reset by contact (a user message); a reach-out discharges it.
   - restlessness — mental idleness that motivates an inner-life beat (reflection). Rises
                    faster than connection and is largely mood-independent, nudged up
                    when interest is low (boredom). Partly relieved by contact; a
-                   reflection would discharge it.
+                   reflection discharges it.
+
+Body cycle (arc A2):
+  - energy       — a fatigue reserve in [0,1]. Unlike the away-drives it doesn't depend on
+                   idle: it **depletes slowly while she's awake and restores while she sleeps**,
+                   so autonomous sleep gets an internal logic ("she's tired") instead of only a
+                   fixed idle timer. Kept in the same persisted state + snapshot for the panel.
 """
 import asyncio
 import logging
@@ -76,6 +80,14 @@ CONTACT_RELIEF = {
     "restlessness": 0.5,   # interaction is stimulating, but she can still be restless
 }
 
+# Energy / body cycle (arc A2). A fatigue reserve in [0,1], NOT an away-drive: it depletes
+# while awake and restores while asleep. Rates are per hour of elapsed wall-time, so — like
+# the drives — they're independent of TICK_INTERVAL. Defaults model a rough day/night: awake
+# ~14h to run down toward the sleep floor, a few hours of sleep to recover. Tune to taste.
+ENERGY_START = 1.0                 # a fresh companion starts rested
+ENERGY_DEPLETE_PER_HOUR = 0.07     # awake
+ENERGY_RESTORE_PER_HOUR = 0.15     # asleep
+
 
 def value_to_word(v: float) -> str:
     """Human phrasing of a drive level (for legibility, mirrors emotion's value_to_word)."""
@@ -100,14 +112,17 @@ class DriveManager:
         self.clock = clock
         saved = (meta.get_json(DRIVE_STATE_KEY) if meta else None) or {}
         self.state = {d: float(saved.get(d, BASELINE[d])) for d in DRIVES}
+        self.state["energy"] = float(saved.get("energy", ENERGY_START))
         self._last = self.clock()
 
-    async def update(self, idle_seconds: float, mood: dict | None = None) -> dict:
-        """Integrate the drives over elapsed wall-time and persist. Called each tick.
+    async def update(self, idle_seconds: float, mood: dict | None = None,
+                     asleep: bool = False) -> dict:
+        """Integrate the drives + energy over elapsed wall-time and persist. Called each tick.
 
-        While the user is away (idle >= away_after) each drive rises at its rate —
-        connection scaled by mood, restlessness by boredom; while present, drives relax
-        toward baseline. Returns the new state.
+        Away-drives: while the user is away (idle >= away_after) each rises at its rate —
+        connection scaled by mood, restlessness by boredom; while present, they relax toward
+        baseline. Energy: depletes while awake, restores while asleep (independent of idle).
+        Returns the new state.
         """
         now = self.clock()
         dt = now - self._last
@@ -124,6 +139,12 @@ class DriveManager:
         else:  # user present — settle back toward baseline
             for d in DRIVES:
                 self.state[d] += PRESENT_RELAX * (BASELINE[d] - self.state[d])
+
+        # Body cycle: run the reserve down while she's up, recharge it while she sleeps.
+        if asleep:
+            self.state["energy"] += ENERGY_RESTORE_PER_HOUR * hours
+        else:
+            self.state["energy"] -= ENERGY_DEPLETE_PER_HOUR * hours
 
         self._clamp()
         await self._persist()
@@ -158,20 +179,25 @@ class DriveManager:
         await self._persist()
 
     async def reset(self) -> None:
-        """Reset all drives to baseline and persist (admin full-reset)."""
+        """Reset drives to baseline + energy to rested, and persist (admin full-reset)."""
         self.state = {d: BASELINE[d] for d in DRIVES}
+        self.state["energy"] = ENERGY_START
         self._last = self.clock()
         await self._persist()
 
     def get(self, drive: str) -> float:
         return self.state[drive]
 
+    def energy(self) -> float:
+        """Current fatigue reserve in [0,1] (1 = rested); gates energy-based sleep."""
+        return self.state["energy"]
+
     def snapshot(self) -> dict:
         return dict(self.state)
 
     def _clamp(self) -> None:
-        for d in DRIVES:
-            self.state[d] = min(max(self.state[d], 0.0), 1.0)
+        for k in self.state:  # away-drives + energy all live in [0,1]
+            self.state[k] = min(max(self.state[k], 0.0), 1.0)
 
     async def _persist(self) -> None:
         if self.meta is not None:

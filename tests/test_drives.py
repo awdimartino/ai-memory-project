@@ -18,7 +18,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.drives import DRIVES, DriveManager
+from core.drives import DRIVES, ENERGY_START, DriveManager
 from infrastructure.db import connect
 from infrastructure.meta_store import SqliteMetaStore
 
@@ -188,6 +188,50 @@ async def drives_persist_across_instances():
     mgr2 = DriveManager(meta, away_after=90.0, clock=Clock())
     for d in DRIVES:
         assert abs(mgr2.state[d] - saved[d]) < 1e-9, (d, mgr2.state[d], saved[d])
+    conn.close(); os.remove(path)
+
+
+@case
+async def energy_depletes_while_awake():
+    clk = Clock()
+    mgr, meta, conn, path = _mgr(clk)
+    assert mgr.energy() == ENERGY_START
+    clk.t += 3600  # one hour awake
+    state = await mgr.update(idle_seconds=10, asleep=False)
+    assert 0.90 < state["energy"] < 0.95, state["energy"]  # ~0.07 depleted/hr
+    conn.close(); os.remove(path)
+
+
+@case
+async def energy_restores_while_asleep():
+    clk = Clock()
+    mgr, meta, conn, path = _mgr(clk)
+    mgr.state["energy"] = 0.2
+    clk.t += 3600  # one hour asleep
+    state = await mgr.update(idle_seconds=99999, asleep=True)
+    assert 0.33 < state["energy"] < 0.37, state["energy"]  # ~+0.15/hr
+    conn.close(); os.remove(path)
+
+
+@case
+async def energy_clamps_and_persists():
+    clk = Clock()
+    mgr, meta, conn, path = _mgr(clk)
+    clk.t += 100 * 3600  # absurdly long awake -> floors at 0
+    s = await mgr.update(idle_seconds=10, asleep=False)
+    assert s["energy"] == 0.0, s["energy"]
+    mgr2 = DriveManager(meta, away_after=90.0, clock=Clock())  # persisted across instances
+    assert mgr2.energy() == 0.0, mgr2.energy()
+    conn.close(); os.remove(path)
+
+
+@case
+async def reset_restores_energy():
+    clk = Clock()
+    mgr, meta, conn, path = _mgr(clk)
+    mgr.state["energy"] = 0.3
+    await mgr.reset()
+    assert mgr.energy() == ENERGY_START, mgr.energy()
     conn.close(); os.remove(path)
 
 

@@ -105,9 +105,11 @@ class DriveDriftJob(Job):
         if self.drives is None:
             return
         mood = self.companion.emotion.state if self.companion.emotion is not None else None
-        state = await self.drives.update(self.companion.idle_seconds(), mood)
-        top = max(state, key=state.get)
-        logger.info("drive drift: %s %.2f", top, state[top])
+        # Pass asleep so energy restores during sleep and depletes while awake.
+        state = await self.drives.update(
+            self.companion.idle_seconds(), mood, self.companion.is_asleep())
+        logger.info("drive drift: connection %.2f restlessness %.2f energy %.2f",
+                    state.get("connection", 0), state.get("restlessness", 0), state.get("energy", 1))
 
 
 class MoodDriftJob(Job):
@@ -301,19 +303,30 @@ class PersonaEditJob(Job):
 
 
 class SleepJob(Job):
-    """After a long idle, put Mari into standby: unload the LLM from VRAM to free the
-    machine. The heartbeat keeps ticking (mood still drifts); the next message wakes her."""
+    """Put Mari into standby: unload the LLM from VRAM to free the machine. Two triggers:
+    a **long idle** (the practical VRAM-freeing one) OR **low energy** while briefly idle
+    (the body-cycle one — she's tired, arc A2). The energy path still needs a small idle gap
+    (`energy_min_idle`) so she never nods off mid-conversation; the busy guard already zeroes
+    idle during a turn. The heartbeat keeps ticking (mood/energy still move); a message wakes her."""
     name = "sleep"
 
-    def __init__(self, companion, interval: float, sleep_after: float):
+    def __init__(self, companion, interval: float, sleep_after: float,
+                 drives=None, energy_threshold: float = 0.15, energy_min_idle: float = 120.0):
         self.companion = companion
         self.interval = interval
         self.sleep_after = sleep_after
+        self.drives = drives
+        self.energy_threshold = energy_threshold
+        self.energy_min_idle = energy_min_idle
 
     async def run(self) -> None:
         if self.companion.is_asleep():
             return
-        if self.companion.idle_seconds() < self.sleep_after:
+        idle = self.companion.idle_seconds()
+        tired = (self.drives is not None
+                 and self.drives.energy() <= self.energy_threshold
+                 and idle >= self.energy_min_idle)
+        if idle < self.sleep_after and not tired:
             return
         await self.companion.sleep()
 

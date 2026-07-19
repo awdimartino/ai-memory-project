@@ -163,6 +163,11 @@ DRIVE_AWAY_AFTER = float(os.environ.get("DRIVE_AWAY_AFTER", "90"))  # idle (s) b
 # 0.6 connection ≈ 15 min neutral / sooner after a warm or sad chat; 0.4 restlessness ≈ 5 min.
 DRIVE_CONNECTION_THRESHOLD = float(os.environ.get("DRIVE_CONNECTION_THRESHOLD", "0.6"))
 DRIVE_RESTLESSNESS_THRESHOLD = float(os.environ.get("DRIVE_RESTLESSNESS_THRESHOLD", "0.4"))
+# Energy / body cycle (arc A2): sleep ALSO fires when the fatigue reserve drops to this level
+# and she's been briefly idle (ENERGY_SLEEP_MIN_IDLE — so she doesn't nod off mid-chat), on top
+# of the long-idle SLEEP_AFTER_IDLE trigger. Deplete/restore rates live in core/drives.py.
+ENERGY_SLEEP_THRESHOLD = float(os.environ.get("ENERGY_SLEEP_THRESHOLD", "0.15"))
+ENERGY_SLEEP_MIN_IDLE = float(os.environ.get("ENERGY_SLEEP_MIN_IDLE", "120"))
 
 # Tools (pillar 4): native function-calling. When enabled, the chat turn streams
 # through a tool loop so Mari can call registered tools (clock, reminisce, more

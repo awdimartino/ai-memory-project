@@ -159,43 +159,47 @@ async def mood_drift_noop_without_emotion():
 
 
 class FakeDrives:
-    """Records update() calls so the job's plumbing (idle + mood pass-through) is testable."""
+    """Records update() calls so the job's plumbing (idle + mood + asleep pass-through) is testable."""
 
     def __init__(self):
         self.updates = []
 
-    async def update(self, idle_seconds, mood=None):
-        self.updates.append((idle_seconds, mood))
-        return {"connection": 0.1, "restlessness": 0.2}
+    async def update(self, idle_seconds, mood=None, asleep=False):
+        self.updates.append((idle_seconds, mood, asleep))
+        return {"connection": 0.1, "restlessness": 0.2, "energy": 0.9}
 
 
 class DriveCompanion:
-    def __init__(self, idle, emotion=None):
+    def __init__(self, idle, emotion=None, asleep=False):
         self._idle = idle
         self.emotion = emotion
+        self._asleep = asleep
 
     def idle_seconds(self):
         return self._idle
+
+    def is_asleep(self):
+        return self._asleep
 
 
 @case
 async def drive_drift_updates_with_idle_and_no_mood():
     drives = FakeDrives()
-    comp = DriveCompanion(idle=500.0)               # emotion disabled -> mood None
+    comp = DriveCompanion(idle=500.0)               # emotion disabled -> mood None, awake
     await DriveDriftJob(comp, drives, interval=0.0).run()
-    assert drives.updates == [(500.0, None)], drives.updates
+    assert drives.updates == [(500.0, None, False)], drives.updates
 
 
 @case
-async def drive_drift_passes_mood_when_emotion_on():
+async def drive_drift_passes_mood_and_asleep():
     drives = FakeDrives()
 
     class Emo:
         state = {"warmth": 0.5}
 
-    comp = DriveCompanion(idle=500.0, emotion=Emo())
+    comp = DriveCompanion(idle=500.0, emotion=Emo(), asleep=True)
     await DriveDriftJob(comp, drives, interval=0.0).run()
-    assert drives.updates == [(500.0, {"warmth": 0.5})], drives.updates
+    assert drives.updates == [(500.0, {"warmth": 0.5}, True)], drives.updates
 
 
 @case
@@ -632,6 +636,42 @@ async def sleep_fires_after_long_idle():
     comp = SleepCompanion(idle=99999.0)
     await SleepJob(comp, interval=0.0, sleep_after=1800.0).run()
     assert comp.sleep_calls == 1 and comp.is_asleep()
+
+
+class FakeEnergy:
+    def __init__(self, e):
+        self._e = e
+
+    def energy(self):
+        return self._e
+
+
+@case
+async def sleep_fires_when_tired_and_briefly_idle():
+    # energy below threshold + past the small idle gap, but WELL short of sleep_after
+    comp = SleepCompanion(idle=200.0)
+    job = SleepJob(comp, 0.0, 1800.0, drives=FakeEnergy(0.1),
+                   energy_threshold=0.15, energy_min_idle=120.0)
+    await job.run()
+    assert comp.sleep_calls == 1 and comp.is_asleep(), "tired + idle gap should sleep early"
+
+
+@case
+async def sleep_not_when_tired_but_mid_activity():
+    comp = SleepCompanion(idle=30.0)  # < energy_min_idle -> she's basically still here
+    job = SleepJob(comp, 0.0, 1800.0, drives=FakeEnergy(0.05),
+                   energy_threshold=0.15, energy_min_idle=120.0)
+    await job.run()
+    assert comp.sleep_calls == 0, "must not nod off mid-conversation even if exhausted"
+
+
+@case
+async def sleep_not_when_energized_and_briefly_idle():
+    comp = SleepCompanion(idle=200.0)  # < sleep_after and not tired
+    job = SleepJob(comp, 0.0, 1800.0, drives=FakeEnergy(0.9),
+                   energy_threshold=0.15, energy_min_idle=120.0)
+    await job.run()
+    assert comp.sleep_calls == 0
 
 
 @case

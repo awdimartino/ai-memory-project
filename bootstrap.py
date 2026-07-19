@@ -130,7 +130,9 @@ async def build() -> tuple[Companion, str]:
                                        config.PERSONA_EDIT_MIN_IDLE, config.PERSONA_EDIT_COOLDOWN,
                                        config.PERSONA_MIN_MESSAGES))
         if model_manager is not None:
-            jobs.append(SleepJob(companion, config.TICK_INTERVAL, config.SLEEP_AFTER_IDLE))
+            jobs.append(SleepJob(companion, config.TICK_INTERVAL, config.SLEEP_AFTER_IDLE,
+                                 drives=drives, energy_threshold=config.ENERGY_SLEEP_THRESHOLD,
+                                 energy_min_idle=config.ENERGY_SLEEP_MIN_IDLE))
         companion.tick = TickLoop(jobs, interval=config.TICK_INTERVAL)
 
     logging.getLogger("bootstrap").info(
