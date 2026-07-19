@@ -181,6 +181,8 @@ python tests/test_drives.py             # offline drive dynamics: rise/relax/moo
 python tests/test_tools.py              # offline tool framework: registry + stream loop + reminisce (20 cases)
 python scripts/tool_probe.py            # LIVE: native tool-calling reliability (probe, per-case pass rate)
 python scripts/tool_smoke.py            # LIVE: tools end-to-end through the real persona (time + reminisce + no-tool)
+python scripts/tool_eval.py             # LIVE: 30-scenario tool-calling eval (time/reminisce/no-tool/tricky), per-category score
+
 python scripts/reminisce_smoke.py       # LIVE: reminisce recalls a past episode out of the context window
 python scripts/drive_demo.py            # LIVE: drives observation harness — chat + away-gaps trigger reflection/reach-out
 python scripts/stress_test.py           # LIVE whole-system stress + invariant checks
@@ -281,12 +283,15 @@ harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
 
 - **Thinking-off vs tool-calling (tradeoff from the §4 consolidation fix):** the `enable_thinking=false`
   template edit that makes consolidation ~20× faster disables reasoning on the **chat** path too, which
-  modestly lowered tool-call reliability. In a 4-run smoke, `get_current_time` fired 3× but once she
-  *disclaimed* ("I don't have a way to check the time") instead of calling it (~75%); reminisce sometimes
-  answers from context rather than firing. Tools still work, just less reliably (the framework probed 100%
-  *with* thinking on). Small sample — watch it in real use. **If it bugs you:** strengthen the tools note in
-  `build_system`, or run a separate **thinking-on chat + thinking-off brain** instance (best of both, ~2× VRAM).
-  Backgrounded-consolidation speed was judged the priority.
+  hurt tool-call reliability — without reasoning she defaults to the persona's "can't sense / just met"
+  rules and *under-calls* tools. Measured with `scripts/tool_eval.py` (30 scenarios): the original soft
+  tools note scored **19/30** (TIME 2/8, REMINISCE 4/8). **A more imperative tools note** (`build_tools_note`,
+  which now explicitly overrides those persona rules for the tool cases) recovered it to **25/30 (TIME 7/8,
+  REMINISCE 5/8), with over-triggering still clean (TRICKY 6/6)** — a free fix, no VRAM cost. Remaining weak
+  spot: **reminisce (~63%)**, which is inherently harder to trigger and noisier at the chat temp (0.8).
+  **Two full 9B instances (thinking-on chat + thinking-off brain) is NOT an option on 16GB** — ~13GB weights
+  + KV caches won't fit. Further reminisce gains would come from more prompt tuning or a lower tool-decision
+  temperature (trades against personality). Backgrounded-consolidation speed was the priority and is kept.
 - **Decisions are probabilistic** (temp 0.2, not deterministic) — occasional
   misclassification possible even with the tuned prompts.
 - **Conversation nits (low-severity, left for later):** a rare self-deprecation slip that *denies feelings*

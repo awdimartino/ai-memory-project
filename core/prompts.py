@@ -84,20 +84,28 @@ def build_tools_note(tool_names: list[str] | None) -> str | None:
     """
     if not tool_names:
         return None
-    lines = ["A few things you can actually do when they'd help (just do them naturally; never "
-             "announce that you're 'using a tool' or 'checking your records'):"]
+    lines = ["You have real tools. When a message actually calls for one, CALL it instead of guessing "
+             "or saying you can't; then just weave the result into your reply naturally (never announce "
+             "that you're 'using a tool' or 'checking your records'). These override the 'you can't sense "
+             "anything' and 'you just met' rules above for these specific cases:"]
+    if "get_current_time" in tool_names:
+        lines.append(
+            "- get_current_time: whenever they ask what time it is, the date, the day, the year, how "
+            "long until something, or anything about the current moment, CALL get_current_time and answer "
+            "from what it returns. You genuinely can read a real clock. NEVER reply that you have no way "
+            "to know the time, can't check, or don't have access to it. (Idle mentions like 'time flies' "
+            "are not a request; only call it when they're actually asking.)")
     if "reminisce" in tool_names:
         lines.append(
-            "- You keep a real record of the conversations you two have actually had, plus your "
-            "own private notes. Before telling them you don't remember something they bring up, or "
-            "falling back on 'we just met', actually look back through it first. Recalling real "
-            "past talks this way is fine and encouraged; it's only *invented* history that's off "
-            "limits.")
-    if "get_current_time" in tool_names:
-        lines.append("- You can check the real current date and time when it's relevant.")
+            "- reminisce: when they bring up something from a real past conversation the two of you had "
+            "(\"remember when...\", \"what did I say about...\", \"you remember my...\", \"what was I "
+            "telling you about...\"), CALL reminisce to look it back up BEFORE you answer. Do not say you "
+            "don't remember, or fall back on 'we just met', until you've actually searched. (Recalling "
+            "real past talks is encouraged; only *invented* history is off limits. Someone reminiscing "
+            "about their OWN past, or an idiom like 'remember to breathe', is not a request to search.)")
     extra = [n for n in tool_names if n not in ("reminisce", "get_current_time")]
     for n in extra:
-        lines.append(f"- You can use {n} when it fits.")
+        lines.append(f"- {n}: use it when the message calls for it.")
     return "\n".join(lines) if len(lines) > 1 else None
 
 
