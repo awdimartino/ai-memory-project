@@ -464,7 +464,41 @@ critical path. Grouped by theme; items the user has **already flagged as liked**
 Full context in [`V2_PLAN.md` §2.9](V2_PLAN.md). **Delivery-layer features stay gated behind a solid
 brain, per the guiding principle.**
 
-### 0. thinking depth — ⚠️ **UNPARK: a workaround exists, VERIFIED ON THIS MACHINE 2026-07-20**
+### 0. thinking depth — ✅ **SOLVED 2026-07-20. Bounded thinking WORKS. It costs chat latency.**
+
+`scripts/probe_thinking_budget.py`, `LLAMA_ARG_THINK_BUDGET=256` + Engine Protocol + thinking ON:
+
+| | thinking OFF (old production) | **budget 256** | unbounded |
+|---|---|---|---|
+| `bat_ball` | **WRONG** (gemma-12B also WRONG) | **6/6 CORRECT** | — |
+| reasoning chars | 0 | **833 avg** | ~3500 |
+| extraction / consolidation | ~3.5s | **5.0s** ✅ | ~50s |
+| **chat latency** | **2.7s** | **6.5s** ⚠️ | 20-45s |
+
+- **The reasoning gap is closed on the model already in production** — no migration, no download,
+  and critically **no identity discontinuity** (§H's one-way door stays shut).
+- **Consolidation survives**, which was the make-or-break bar: 1.4x slower on a *backgrounded* task,
+  versus the ~14x that forced thinking off originally.
+- ⚠️ **The cost is user-facing: chat 2.7s -> 6.5s.** That is the whole decision. It lands in the same
+  range as gemma-12B (6.0s) — but this keeps qwen's personality *and* gains reasoning, where the
+  Gemma route traded one for the other.
+- ⚠️ **Per-request budgets still do NOT work.** `thinking_budget_tokens` at 64 and 512 both returned
+  ~800 chars, matching the global. One value for chat and brain alike; no tight-brain/loose-chat.
+
+**NEXT: sweep the budget.** 256 was a guess, not a measurement. Lower budget = faster chat; the
+question is where `bat_ball` breaks. Suggested: 96 / 128 / 192, re-running
+`probe_thinking_budget.py` + the 6x `bat_ball` check at each. **Each step needs an LM Studio
+restart** (env vars are read at launch). Find the smallest budget holding 6/6.
+
+⚠️ **Adopting this invalidates the v2.7 gold baseline** — different serving config, different
+sampling. Budget the re-run into the decision.
+
+**To revert to old production exactly:** put `{% set enable_thinking = false %}` back in the qwen
+template. (Env vars can stay; they bound nothing when thinking is off.)
+
+<details><summary>How it was found (kept — the reasoning is reusable)</summary>
+
+### ⚠️ UNPARK: a workaround exists, VERIFIED ON THIS MACHINE 2026-07-20
 
 **The capability has been on disk the whole time.** A GitHub workaround (found by the user) says to
 enable **"[BETA] Enable LM Studio Engine Protocol"** and set `LLAMA_ARG_THINK_BUDGET` before
@@ -511,9 +545,12 @@ been working around.
 ⚠️ **LM Studio bug #2147**: a 2.24.0/2.25.0-beta regression leaks thinking and wastes tokens, and
 this machine is on **2.25.2**. If thinking text bleeds into replies, that is the known bug.
 
-**If this works, the llama-server migration below is unnecessary** — keep it as the fallback.
+**It worked — see the result table at the top of §0.** The llama-server migration below is
+therefore unnecessary; it stays only as a fallback.
 
-### 0b. the migration fallback (was §0) — PARKED 2026-07-19, superseded by the workaround above
+</details>
+
+### 0b. the migration fallback (was §0) — NOT NEEDED, superseded by the working budget above
 Production is **thinking-OFF and stable on qwen3.5-9b.** After a full investigation this session the decision is to
 **stay on qwen thinking-off and WAIT for LM Studio to expose a reasoning budget** rather than migrate serving or swap
 the model. Resume when LM Studio ships budget control (watch bug-tracker **#1838 / #1974**); or, independently, do
