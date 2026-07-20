@@ -155,6 +155,82 @@ async def record_is_returned_so_the_reply_can_be_attached():
 
 
 @case
+async def every_generation_path_records_a_prompt():
+    """All four user-facing generations must reach `_aside`/`_record_prompt` correctly.
+
+    This is the regression test for a real shipped bug: `reflect()` still called
+    `_aside(system, cue)` after the signature became `(blocks, cue, kind)`, so every
+    reflection raised TypeError. It survived because `test_tick.py` exercises
+    `ReflectJob` against a FAKE companion — the job was covered, the method wasn't.
+    Reach-out and follow-up were covered end-to-end elsewhere, which is exactly why
+    those two were caught and this one wasn't.
+
+    The tick loop swallows job exceptions ("one bad job must not stop the
+    heartbeat"), so the only symptom was that she quietly stopped journaling — the
+    invisible failure mode this test exists to prevent.
+    """
+    import asyncio
+
+    from helpers import FakeConv, FakeMemory, InMemoryMeta
+
+    from core.companion import Companion
+
+    REPLY = "wednesdays have a strange shape to them"
+
+    class FakeLLM:
+        model = "fake"
+
+        async def stream(self, messages, on_token):
+            # Deliberately unlike the seeded recent thought below: reflect() drops a
+            # reply that restates one (the programmatic repeat guard).
+            await on_token(REPLY)
+            return REPLY, {"tokens": 1}
+
+    class FakeThoughts:
+        def __init__(self):
+            self.added = []
+
+        def recent(self, _n):
+            return [{"content": "an earlier thought"}]
+
+        def add(self, text, dom=None):
+            self.added.append(text)
+
+    async def noop(_t):
+        pass
+
+    def build():
+        return Companion(FakeLLM(), FakeConv(), FakeMemory(), InMemoryMeta(), 1,
+                         history=[{"role": "user", "content": "hey"}],
+                         thoughts=FakeThoughts())
+
+    c = build()
+    await c.send("hey", noop)
+    assert c.prompt_log()[0]["kind"] == "chat", "send() did not record a chat prompt"
+
+    c = build()
+    await c.reach_out()
+    assert c.prompt_log()[0]["kind"] == "reach-out", "reach_out() did not record"
+
+    c = Companion(FakeLLM(), FakeConv(), FakeMemory(), InMemoryMeta(), 1,
+                  history=[{"role": "assistant", "content": "hi"}], thoughts=FakeThoughts())
+    await c.follow_up()
+    assert c.prompt_log()[0]["kind"] == "follow-up", "follow_up() did not record"
+
+    c = build()
+    out = await c.reflect()          # the path that was broken
+    assert out == REPLY, f"reflect() failed: {out!r}"
+    rec = c.prompt_log()[0]
+    assert rec["kind"] == "reflection", f"reflect() recorded {rec['kind']!r}"
+    labels = [b["label"] for b in rec["blocks"]]
+    assert "reflection framing" in labels, f"reflection blocks missing framing: {labels}"
+    assert "recent thoughts" in labels, f"recent thoughts not carried: {labels}"
+    # And the blocks must still rejoin to what was actually sent.
+    assert join_blocks([(b["label"], b["text"]) for b in rec["blocks"]]) == \
+        rec["messages"][0]["content"], "reflection blocks don't match the sent system message"
+
+
+@case
 async def messages_are_snapshotted_not_aliased():
     """The log must show what was SENT, not whatever the list became afterwards."""
     c = _companion()

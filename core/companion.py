@@ -38,12 +38,12 @@ from core.prompts import (
     build_persona_edit_system,
     build_persona_edit_user,
     build_reachout_cue,
-    build_reflect_system,
     build_self_notes_system,
     build_self_notes_user,
     followup_blocks,
     join_blocks,
     reachout_blocks,
+    reflect_blocks,
     system_blocks,
 )
 
@@ -465,10 +465,10 @@ class Companion:
             return None
         extra, core, mood_prompt = await self._recall_context()
         recent = [t["content"] for t in self.thoughts.recent(5)]
-        system = build_reflect_system(extra, mood_prompt, recent, core=core,
-                                      persona=self.meta.get(PERSONA_SELF_KEY))
+        blocks = reflect_blocks(extra, mood_prompt, recent, core=core,
+                                persona=self.meta.get(PERSONA_SELF_KEY))
 
-        text = await self._aside(system, REFLECT_CUE)
+        text = await self._aside(blocks, REFLECT_CUE, "reflection")
         if text is None:
             return None
         # Programmatic repeat guard. The prompt above already shows her `recent` and

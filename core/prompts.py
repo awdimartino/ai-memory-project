@@ -402,12 +402,20 @@ def build_reflect_system(memories: list[str], mood: str | None,
                          recent_thoughts: list[str], core: list[str] | None = None,
                          persona: str | None = None) -> str:
     """System prompt for a private reflection: persona + memories + mood + recent thoughts."""
-    base = build_system(memories, mood, core=core, persona=persona)
-    parts = [base, _REFLECT_ADDENDUM]
+    return join_blocks(reflect_blocks(memories, mood, recent_thoughts, core=core, persona=persona))
+
+
+def reflect_blocks(memories: list[str], mood: str | None,
+                   recent_thoughts: list[str], core: list[str] | None = None,
+                   persona: str | None = None) -> list[tuple[str, str]]:
+    """`build_reflect_system` as labelled blocks — see `system_blocks`."""
+    blocks = system_blocks(memories, mood, core=core, persona=persona)
+    blocks.append(("reflection framing", _REFLECT_ADDENDUM))
     if recent_thoughts:
         joined = "\n".join(f"- {t}" for t in recent_thoughts)
-        parts.append(f"Some thoughts you've had recently (don't just repeat these):\n{joined}")
-    return "\n\n".join(parts)
+        blocks.append(("recent thoughts",
+                       f"Some thoughts you've had recently (don't just repeat these):\n{joined}"))
+    return blocks
 
 
 # --- Self-modifying persona (Mari rewrites her own self-description during idle ticks) ---
