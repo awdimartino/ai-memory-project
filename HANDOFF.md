@@ -13,7 +13,7 @@ panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **mult
 (arc A1 — internal drives now gate reach-out/reflection, §8-A), **spontaneous follow-up messages**
 ("double-text"), an **editable memory inspector + admin** (browse/edit/delete, clear, factory reset),
 and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
-batching). All live-verified; offline suite **218 green** (14 files, `python tests/run_all.py`). **Added 2026-07-19:** phone push, a web-UI +
+batching). All live-verified; offline suite **241 green** (16 files, `python tests/run_all.py`). **Added 2026-07-19:** phone push, a web-UI +
 **iOS/Safari mobile** overhaul, arc-A2 **energy cycles**; a **memory-extraction fix** (a name buried in a 20-msg
 consolidation window was silently dropped → `CONSOLIDATE_WINDOW` 10 + a stronger extraction prompt + bounded
 chunks); a **personality overhaul** (hard *one-sentence* / *no-trailing-question* rules reinforced by an
@@ -254,7 +254,7 @@ python -m web.app       # web UI at http://127.0.0.1:8000
 python main.py          # same brain, terminal REPL
 
 # OFFLINE SUITE — one command, exits non-zero on any failure. No LM Studio needed.
-python tests/run_all.py                 # all 14 files / 218 checks (~19s)
+python tests/run_all.py                 # all 16 files / 241 checks (~19s)
 python tests/run_all.py -q              # only show failures
 python tests/run_all.py drives tick     # only files matching these substrings
 python tests/test_drives.py             # any single file still runs standalone
@@ -659,7 +659,7 @@ on HuggingFace**. `.env` and `companion.db` are git-ignored too.
 ### 9b. Code-quality review — Phase 1 & 2 DONE; Phase 3 remains (2026-07-19)
 
 A four-slice quality review (core/, infrastructure/, tests/, scripts/+web/) ran on the offline codebase.
-**Phases 1 and 2 are committed.** Suite: **14 files / 218 checks green** (`python tests/run_all.py`).
+**Phases 1, 2 and the follow-up sweep are committed.** Suite: **16 files / 241 checks green**.
 
 **Phase 2 — done.** `llm_client.stream()` is now `stream_with_tools`' no-tools round and `_stream_once` is
 gone (405→328 lines, one `<think>` parser instead of two); `MemoryManager` splits `_corpus()` from
@@ -704,9 +704,26 @@ panel populates (it now goes through `Companion.memory_snapshot()`), and run one
   'user' — pure dead output tokens"), but consolidation still threads `"category": f.get("category")`
   (now always `None`) through three `store.add` calls, the Protocol, the DB column, and the inspector UI.
 
-**Deferred from Phase 2, deliberately:** the remaining scripts (`stress_test`, `eval_conversation`,
-`bakeoff_personality`, `model_tryout`, `emotion_eval`) still carry their own preamble. They're live
-scripts that can't be executed without LM Studio, and rewriting code you can't run is how silent
-breakage gets in — route them through `scripts/_harness.py` opportunistically, when you're about to
-run one anyway. The MERGE candidates from the scripts triage (tool_smoke→tool_eval `--quick`,
+**Follow-up sweep (2026-07-19, after Phase 2).** Cleared the rest of the review backlog:
+`@app.on_event` -> `lifespan` (FastAPI had deprecated it); `_state: dict` -> a typed `AppState`
+dataclass and the eight-times-repeated companion-fetch preamble -> a `Live` FastAPI dependency;
+`config.py`'s boolean idiom (12 copies) and its float/int parsing (45 more) -> `_flag`/`_f`/`_i`,
+which now raise `ConfigError` naming the offending key instead of a bare `ValueError`; the memory
+status card takes ONE `counts()` scan instead of three `COUNT(*)`s; `PhonePush` reuses one httpx
+client; the `%-d` platform probe resolves at import instead of per tool call; `intention_store`
+binds LIMIT like its siblings; and the last orphaned imports are gone. **A third real bug turned
+up:** `tests/run_all.py` itself crashed with `UnicodeEncodeError` when printing a failing test's
+output on a cp1252 console — so a genuine failure was reported as a runner crash. Found by
+mutation-testing the new prompt tests; fixed, and the mutation now reports cleanly.
+
+New coverage: `tests/test_prompts.py` (15 cases) for the 8 builders that had none — the numbering
+contracts in `build_batch_decision_user` / `build_core_rerank_user` (an off-by-one there retires
+the wrong memory), the tools note's persona-override wording, and the reach-out cue's elapsed
+time. Verified by injecting mutations and confirming they fail. `tests/test_config.py` grew to 8.
+
+**Deferred, deliberately:** five scripts (`stress_test`, `eval_conversation`, `bakeoff_personality`,
+`model_tryout`, `emotion_eval`) still carry their own preamble rather than using
+`scripts/_harness.py`. They're live scripts that can't be executed without LM Studio, and
+rewriting code you can't run is how silent breakage gets in — route them through the harness
+opportunistically, when you're about to run one anyway. The MERGE candidates from the scripts triage (tool_smoke→tool_eval `--quick`,
 bench_speed/model_tryout/bakeoff_personality→bakeoff modes) are untouched for the same reason.

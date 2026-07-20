@@ -85,12 +85,17 @@ class MemoryManager:
         return n
 
     def snapshot(self, recent_superseded: int = 8) -> dict:
-        """Core facts + counts + recently-retired facts, for the status panel."""
+        """Core facts + counts + recently-retired facts, for the status panel.
+
+        One `counts()` scan rather than three separate COUNT(*)s — the panel polls
+        this every 3 seconds.
+        """
+        counts = self.store.counts()
         return {
             "core": self.core_memories(),
-            "active_count": self.store.count(),
-            "core_count": self.store.count_core(),
-            "superseded_count": self.store.count_superseded(),
+            "active_count": counts["active"],
+            "core_count": counts["core"],
+            "superseded_count": counts["superseded"],
             "superseded": self.store.superseded(recent_superseded),
         }
 

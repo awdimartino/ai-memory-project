@@ -8,9 +8,8 @@ typed helpers layered on top. A lock serializes writes since the connection is
 shared across asyncio's threadpool.
 """
 import json
-import sqlite3
 
-from infrastructure.db import SqliteStore, utcnow
+from infrastructure.db import SqliteStore
 
 
 class SqliteMetaStore(SqliteStore):

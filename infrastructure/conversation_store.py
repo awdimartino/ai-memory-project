@@ -5,10 +5,8 @@ Pure persistence: SQL in, plain dicts out. Timestamps are always UTC ISO-8601
 asyncio's threadpool.
 """
 import re
-import sqlite3
 
 from infrastructure.db import SqliteStore, utcnow
-from datetime import datetime, timezone
 
 
 class SqliteConversationStore(SqliteStore):

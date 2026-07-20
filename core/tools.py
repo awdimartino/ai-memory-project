@@ -21,7 +21,7 @@ answer without the tool. The turn always completes.
 import inspect
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 

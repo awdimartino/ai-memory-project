@@ -7,10 +7,8 @@ fulfilled once she acts on one. Kept separate from memories (facts about the use
 thoughts (private reflections). Pure persistence; a lock serializes writes on the
 shared connection.
 """
-import sqlite3
 
 from infrastructure.db import SqliteStore, utcnow
-from datetime import datetime, timezone
 
 
 class SqliteIntentionStore(SqliteStore):
@@ -27,9 +25,11 @@ class SqliteIntentionStore(SqliteStore):
         """Open intentions, oldest first (FIFO — act on the longest-waiting), as
         {id, content, created_at}."""
         sql = "SELECT id, content, created_at FROM intentions WHERE active = 1 ORDER BY id"
+        params: tuple = ()
         if limit is not None:
-            sql += f" LIMIT {int(limit)}"
-        rows = self.conn.execute(sql).fetchall()
+            sql += " LIMIT ?"          # bound, like every sibling store
+            params = (int(limit),)
+        rows = self.conn.execute(sql, params).fetchall()
         return [{"id": r["id"], "content": r["content"], "created_at": r["created_at"]}
                 for r in rows]
 

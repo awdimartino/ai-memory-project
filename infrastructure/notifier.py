@@ -28,9 +28,16 @@ class PhonePush:
         self.icon = (icon or "").strip()         # optional image URL the phone fetches (Bark `icon`)
         self.timeout = timeout
         self._transport = transport              # injectable httpx transport (tests)
+        self._cached: httpx.AsyncClient | None = None
 
     def enabled(self) -> bool:
         return bool(self.url)
+
+    def _client(self) -> httpx.AsyncClient:
+        """One lazily-built client, reused across pushes (was rebuilt per call)."""
+        if self._cached is None:
+            self._cached = httpx.AsyncClient(timeout=self.timeout, transport=self._transport)
+        return self._cached
 
     async def push(self, body: str) -> None:
         """Fire one push (Bark). No-op when disabled; never raises."""
@@ -42,7 +49,6 @@ class PhonePush:
         if self.icon:
             payload["icon"] = self.icon          # custom notification image (fetched by the phone)
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, transport=self._transport) as client:
-                await client.post(self.url, json=payload)
+            await self._client().post(self.url, json=payload)
         except Exception:  # noqa: BLE001 - a failed push must never break a reach-out
             logger.warning("phone push failed (%s)", self.url, exc_info=True)

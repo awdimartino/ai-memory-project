@@ -21,6 +21,13 @@ import sys
 import time
 from pathlib import Path
 
+# Emit UTF-8. Child output is decoded with errors="replace", which yields U+FFFD,
+# and the prompts/personas carry em-dashes and emoji — printing either to a cp1252
+# console (Windows default) raised UnicodeEncodeError *inside the runner*, so a
+# genuine test failure was reported as a runner crash instead of the failure.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 TESTS_DIR = Path(__file__).resolve().parent
 
 # Files report their tally in one of two shapes, and several log expected errors

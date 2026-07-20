@@ -126,6 +126,10 @@ class MemoryStore(Protocol):
         """Up to `limit` most recently retired memories, for the inspector's history view."""
         ...
 
+    def counts(self) -> dict:
+        """{active, core, superseded} in one scan — the status panel polls this often."""
+        ...
+
 
 class ThoughtStore(Protocol):
     """Persistence for Mari's private thought journal (self-reflections)."""

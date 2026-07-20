@@ -69,6 +69,46 @@ async def missing_file_is_a_noop():
 
 
 @case
+async def flag_accepts_the_usual_truthy_spellings():
+    for raw, want in [("1", True), ("true", True), ("TRUE", True), ("Yes", True),
+                      ("on", True), (" true ", True),
+                      ("0", False), ("false", False), ("no", False), ("", False),
+                      ("maybe", False)]:
+        os.environ["T_FLAG"] = raw
+        assert config._flag("T_FLAG", False) is want, f"{raw!r} -> expected {want}"
+    _clean("T_FLAG")
+    assert config._flag("T_FLAG", True) is True, "unset falls back to the default"
+    assert config._flag("T_FLAG", False) is False
+
+
+@case
+async def numeric_knobs_parse_and_fall_back():
+    _clean("T_NUM")
+    assert config._f("T_NUM", 0.8) == 0.8, "unset -> default"
+    assert config._i("T_NUM", 3) == 3
+    os.environ["T_NUM"] = " 0.25 "
+    assert config._f("T_NUM", 0.8) == 0.25, "whitespace tolerated"
+    os.environ["T_NUM"] = "7"
+    assert config._i("T_NUM", 3) == 7
+    _clean("T_NUM")
+
+
+@case
+async def a_malformed_number_names_the_offending_key():
+    # It used to surface as a bare "could not convert string to float: 'abc'" at
+    # import, with no clue which of ~40 knobs was wrong.
+    os.environ["TEMPERATURE_TEST"] = "abc"
+    try:
+        config._f("TEMPERATURE_TEST", 0.8)
+        raise AssertionError("expected a ConfigError")
+    except config.ConfigError as e:
+        assert "TEMPERATURE_TEST" in str(e), f"error must name the key: {e}"
+        assert "abc" in str(e), f"error must show the bad value: {e}"
+    finally:
+        _clean("TEMPERATURE_TEST")
+
+
+@case
 async def default_path_is_anchored_to_the_repo_not_the_cwd():
     """The actual regression: a bare ".env" default made this CWD-dependent."""
     import inspect

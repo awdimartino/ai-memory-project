@@ -8,57 +8,91 @@ One shared Companion for the single user. A lock serializes generations so
 overlapping sends don't interleave (the seed of the priority-queue arbiter).
 """
 import asyncio
+import contextlib
 import logging
 import os
+from dataclasses import dataclass, field
+from typing import Annotated
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
 from bootstrap import build, configure_logging
+from core.companion import Companion
 from core.tick import FollowUpJob, ReachOutJob
 from infrastructure.notifier import PhonePush
 
 logger = logging.getLogger("web")
 
-app = FastAPI()
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
-# `connections` holds the live WebSockets so the tick loop can push proactive
-# messages to whoever's looking.
-_state: dict = {"companion": None, "model": None, "lock": asyncio.Lock(), "connections": set()}
+# Returned (rather than raised) while the companion is still booting, so the UI's
+# `fetch(...).then(r => r.json())` reads a normal envelope instead of an HTTP error.
+NOT_READY = {"ok": False, "error": "not ready"}
+
+
+@dataclass
+class AppState:
+    """Process-wide state for the single user's session.
+
+    `lock` serializes generations so overlapping sends don't interleave (the seed of
+    the §1.2 priority-queue arbiter). `connections` holds the live WebSockets so the
+    tick loop can push proactive messages to whoever's looking.
+    """
+    companion: Companion | None = None
+    model: str | None = None
+    phone: PhonePush | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    connections: set = field(default_factory=set)
+
+
+state = AppState()
+
+
+def get_companion() -> Companion | None:
+    """Route dependency: the live Companion, or None while still booting."""
+    return state.companion
+
+
+# Routes take `c: Live` and check it for None — one line instead of the
+# fetch-then-guard pair that was repeated at eight call sites.
+Live = Annotated[Companion | None, Depends(get_companion)]
 
 
 async def _broadcast(message: dict) -> None:
     """Push a message (e.g. a proactive reach-out) to every open WebSocket."""
     dead = []
-    for ws in list(_state["connections"]):
+    for ws in list(state.connections):
         try:
             await ws.send_json(message)
         except Exception:  # noqa: BLE001 - a dead socket just gets dropped
             dead.append(ws)
     for ws in dead:
-        _state["connections"].discard(ws)
+        state.connections.discard(ws)
 
 
 async def _notify_reachout(message: dict) -> None:
     """Reach-out notifier: push to open browser tabs AND (if configured) the user's phone."""
     await _broadcast(message)
-    phone = _state.get("phone")
-    if phone is not None:
-        await phone.push(message.get("content", ""))
+    if state.phone is not None:
+        await state.phone.push(message.get("content", ""))
 
 
-@app.on_event("startup")
-async def _startup() -> None:
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Build the companion on boot, flush and stop the heartbeat on shutdown.
+
+    (Replaces @app.on_event("startup"/"shutdown"), which FastAPI deprecated.)
+    """
     configure_logging()
     companion, model = await build()
-    _state["companion"] = companion
-    _state["model"] = model
+    state.companion = companion
+    state.model = model
     # Optional phone push (self-hosted Bark): fires on reach-out only, no-op when NOTIFY_URL unset.
-    _state["phone"] = PhonePush(config.NOTIFY_URL, config.NOTIFY_TITLE,
-                                config.NOTIFY_UI_URL, config.NOTIFY_ICON)
+    state.phone = PhonePush(config.NOTIFY_URL, config.NOTIFY_TITLE,
+                            config.NOTIFY_UI_URL, config.NOTIFY_ICON)
     if companion.tick is not None:
         # Reach-out is a web-surface job (it needs the WebSocket broadcaster), so it's
         # registered here rather than in the shared bootstrap.
@@ -74,16 +108,16 @@ async def _startup() -> None:
                 config.FOLLOWUP_MIN_DELAY, config.FOLLOWUP_WINDOW))
         companion.tick.start()  # proactivity heartbeat
     logger.info("web ready at http://%s:%d (model=%s, phone push=%s)", config.WEB_HOST,
-                config.WEB_PORT, model, "on" if _state["phone"].enabled() else "off")
+                config.WEB_PORT, model, "on" if state.phone.enabled() else "off")
+
+    yield
+
+    if companion.tick is not None:
+        await companion.tick.stop()
+    await companion.flush()  # consolidate whatever didn't fill a window
 
 
-@app.on_event("shutdown")
-async def _shutdown() -> None:
-    companion = _state.get("companion")
-    if companion is not None:
-        if companion.tick is not None:
-            await companion.tick.stop()
-        await companion.flush()  # consolidate whatever didn't fill a window
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/")
@@ -102,7 +136,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/status")
-async def status() -> dict:
+async def status(c: Live) -> dict:
     """One aggregate view of Mari's whole state — for the web status panel."""
     import time as _time
     from core.companion import PERSONA_SELF_KEY, SELF_NOTES_KEY, familiarity_label
@@ -110,7 +144,6 @@ async def status() -> dict:
     from core.tick import (
         LAST_PERSONA_EDIT_KEY, LAST_REACHOUT_KEY, LAST_REFLECT_KEY, LAST_SELFNOTES_KEY)
 
-    c = _state.get("companion")
     if not c:
         return {"ready": False}
     mood = c.emotion.state if c.emotion is not None else None
@@ -123,7 +156,7 @@ async def status() -> dict:
 
     return {
         "ready": True,
-        "model": _state.get("model"),
+        "model": state.model,
         "asleep": c.is_asleep(),
         "familiarity": {"value": round(fam, 3), "label": familiarity_label(fam)},
         "mood": ({ch: round(mood[ch], 3) for ch in CHANNELS} if mood else None),
@@ -144,22 +177,20 @@ async def status() -> dict:
 
 
 @app.get("/memories")
-async def memories() -> dict:
+async def memories(c: Live) -> dict:
     """Every memory (active + retired) with ids/flags — for the inspector modal."""
-    c = _state.get("companion")
     return {"memories": c.all_memories() if c else []}
 
 
 @app.post("/memory/edit")
-async def memory_edit(payload: dict) -> dict:
+async def memory_edit(payload: dict, c: Live) -> dict:
     """Rewrite a memory's text and re-embed it so recall still matches (hits LM Studio)."""
-    c = _state.get("companion")
     if not c:
-        return {"ok": False, "error": "not ready"}
+        return NOT_READY
     content = (payload.get("content") or "").strip()
     if not content:
         return {"ok": False, "error": "empty content"}
-    async with _state["lock"]:  # don't race a generation/consolidation
+    async with state.lock:  # don't race a generation/consolidation
         try:
             await c.memory.edit_memory(int(payload["id"]), content)
         except Exception as e:  # noqa: BLE001 - re-embed can fail if LM Studio is down
@@ -177,49 +208,45 @@ def _as_int(value):
 
 
 @app.post("/memory/delete")
-async def memory_delete(payload: dict) -> dict:
+async def memory_delete(payload: dict, c: Live) -> dict:
     """Hard-delete a single memory (active or retired)."""
-    c = _state.get("companion")
     mid = _as_int(payload.get("id"))
     if not c or mid is None:
         return {"ok": False, "error": "not ready or bad id"}
-    async with _state["lock"]:
+    async with state.lock:
         c.delete_memory(mid)
     return {"ok": True}
 
 
 @app.post("/memory/core")
-async def memory_core(payload: dict) -> dict:
+async def memory_core(payload: dict, c: Live) -> dict:
     """Toggle a memory's core flag (always-injected vs. recall-only)."""
-    c = _state.get("companion")
     mid = _as_int(payload.get("id"))
     if not c or mid is None:
         return {"ok": False, "error": "not ready or bad id"}
-    async with _state["lock"]:  # match the other mutating endpoints
+    async with state.lock:  # match the other mutating endpoints
         c.set_memory_core(mid, bool(payload.get("core")))
     return {"ok": True}
 
 
 @app.post("/memory/clear")
-async def memory_clear() -> dict:
+async def memory_clear(c: Live) -> dict:
     """Wipe the semantic memory store (keeps conversations, mood, persona, thoughts)."""
-    c = _state.get("companion")
     if not c:
         return {"ok": False}
-    async with _state["lock"]:
+    async with state.lock:
         n = c.clear_memories()
     return {"ok": True, "cleared": n}
 
 
 @app.post("/admin/factory_reset")
-async def factory_reset(payload: dict) -> dict:
+async def factory_reset(payload: dict, c: Live) -> dict:
     """Wipe everything to a factory-fresh companion. Requires an explicit confirm flag."""
     if not payload.get("confirm"):
         return {"ok": False, "error": "confirmation required"}
-    c = _state.get("companion")
     if not c:
         return {"ok": False}
-    async with _state["lock"]:
+    async with state.lock:
         await c.factory_reset()
     return {"ok": True}
 
@@ -227,7 +254,7 @@ async def factory_reset(payload: dict) -> dict:
 @app.post("/admin/test_notify")
 async def test_notify() -> dict:
     """Fire a one-off phone push so the Bark chain can be verified without waiting for a reach-out."""
-    phone = _state.get("phone")
+    phone = state.phone
     if phone is None or not phone.enabled():
         return {"ok": False, "error": "phone push not configured (set NOTIFY_URL)"}
     await phone.push("test push from Mari 👋")
@@ -235,13 +262,13 @@ async def test_notify() -> dict:
 
 
 async def _send_conversations(ws: WebSocket) -> None:
-    c = _state["companion"]
+    c = state.companion
     await ws.send_json({"type": "conversations",
                         "list": c.list_conversations(), "active": c.session_id})
 
 
 async def _replay_history(ws: WebSocket) -> None:
-    c = _state["companion"]
+    c = state.companion
     await ws.send_json({"type": "history_start"})  # UI clears the log
     for m in c.history:
         await ws.send_json({"type": "history", "role": m["role"], "content": m["content"]})
@@ -250,9 +277,9 @@ async def _replay_history(ws: WebSocket) -> None:
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()
-    companion = _state["companion"]
-    _state["connections"].add(websocket)
-    await websocket.send_json({"type": "ready", "model": _state["model"], "bot": config.BOT_NAME})
+    companion = state.companion
+    state.connections.add(websocket)
+    await websocket.send_json({"type": "ready", "model": state.model, "bot": config.BOT_NAME})
     await _send_conversations(websocket)
     await _replay_history(websocket)  # proactive messages replay here too (logged as assistant turns)
 
@@ -265,7 +292,7 @@ async def ws(websocket: WebSocket) -> None:
                 text = (data.get("text") or "").strip()
                 if not text:
                     continue
-                async with _state["lock"]:
+                async with state.lock:
                     if companion.is_asleep():
                         await websocket.send_json({"type": "waking"})  # cold reload coming
                     await websocket.send_json({"type": "start"})
@@ -290,13 +317,13 @@ async def ws(websocket: WebSocket) -> None:
                 sid = _as_int(data.get("id"))
                 if sid is None:
                     continue
-                async with _state["lock"]:
+                async with state.lock:
                     companion.switch_conversation(sid)
                 await _replay_history(websocket)
                 await _send_conversations(websocket)
 
             elif t == "new":
-                async with _state["lock"]:
+                async with state.lock:
                     companion.new_conversation()
                 await _replay_history(websocket)
                 await _send_conversations(websocket)
@@ -313,7 +340,7 @@ async def ws(websocket: WebSocket) -> None:
                 did = _as_int(data.get("id"))
                 if did is None:
                     continue
-                async with _state["lock"]:
+                async with state.lock:
                     was_active = did == companion.session_id
                     companion.delete_conversation(did)
                     if was_active:
@@ -328,7 +355,7 @@ async def ws(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        _state["connections"].discard(websocket)
+        state.connections.discard(websocket)
 
 
 if __name__ == "__main__":

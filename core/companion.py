@@ -86,7 +86,8 @@ def _humanize_away(seconds: float) -> str:
 class TurnResult:
     """Everything a caller might want to show for one turn.
 
-    `stats` are perf numbers; `recalled` are the memories injected this turn as
+    `stats` is the raw LLM-call record — perf numbers plus the `tools` list the
+    turn invoked; `recalled` are the memories injected this turn as
     (content, similarity); `emotion` is the classifier read + resulting mood
     ({"detected": [...], "mood": {...}}), or None when emotion is disabled.
     """

@@ -4,10 +4,8 @@ Embeddings are stored as raw float32 bytes. Vector search itself lives in the
 MemoryManager (brute-force numpy KNN, which the v1 retrospective confirmed is
 plenty fast at personal scale). This store is pure persistence.
 """
-import sqlite3
 
 from infrastructure.db import SqliteStore, utcnow
-from datetime import datetime, timezone
 
 
 class SqliteMemoryStore(SqliteStore):
@@ -106,6 +104,20 @@ class SqliteMemoryStore(SqliteStore):
         return self.conn.execute(
             "SELECT COUNT(*) FROM memories WHERE active = 0"
         ).fetchone()[0]
+
+    def counts(self) -> dict:
+        """All three counts in ONE scan, for the status panel (polled every 3s).
+
+        The individual `count*` methods stay — tests and other callers use them —
+        but the panel wanted all three at once and was paying three full scans.
+        """
+        row = self.conn.execute(
+            "SELECT COUNT(*) FILTER (WHERE active = 1)                AS active, "
+            "       COUNT(*) FILTER (WHERE active = 1 AND core = 1)   AS core, "
+            "       COUNT(*) FILTER (WHERE active = 0)                AS superseded "
+            "FROM memories"
+        ).fetchone()
+        return {"active": row["active"], "core": row["core"], "superseded": row["superseded"]}
 
     def superseded(self, limit: int) -> list[dict]:
         """Recent retired memories with the id that replaced them (for the inspector)."""

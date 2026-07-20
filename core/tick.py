@@ -30,11 +30,12 @@ logger = logging.getLogger(__name__)
 class Job:
     """A unit of autonomous work. Subclasses set `name` and implement `run`.
 
-    `interval` is the minimum seconds between runs (0 = every tick). Any further
-    gating (e.g. "only when the user is idle") lives inside `run`.
+    `interval` is the minimum seconds between runs (0 = every tick), set per
+    instance in `__init__`. Any further gating (e.g. "only when the user is idle")
+    lives inside `run`.
     """
     name: str = "job"
-    interval: float = 0.0
+    interval: float
 
     async def run(self) -> None:  # pragma: no cover - overridden
         raise NotImplementedError

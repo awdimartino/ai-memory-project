@@ -41,6 +41,12 @@ def _supports_dash() -> bool:
         return False
 
 
+# Resolved once at import: it's a property of the interpreter, not of the call.
+# The probe (build a datetime, catch a ValueError) used to run on every tool call.
+_TIME_FORMAT = ("It is %A, %B %-d %Y, %-I:%M %p" if _supports_dash()
+                else "It is %A, %B %d %Y, %I:%M %p")
+
+
 def make_reminisce_tool(thoughts, store) -> Tool:
     """Look back over past conversations + Mari's private journal to recall something.
 

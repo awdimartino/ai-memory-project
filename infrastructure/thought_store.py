@@ -5,10 +5,8 @@ from the conversation log (the `messages` table) so they never leak into chat or
 recall. Pure persistence. A lock serializes writes since the connection is shared
 across asyncio's threadpool.
 """
-import sqlite3
 
 from infrastructure.db import SqliteStore, utcnow
-from datetime import datetime, timezone
 
 
 class SqliteThoughtStore(SqliteStore):
