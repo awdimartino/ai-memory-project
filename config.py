@@ -6,11 +6,21 @@ Keep this the single place that reads configuration.
 import os
 
 
-def _load_dotenv(path: str = ".env") -> None:
+# The repo root, resolved from this file rather than the working directory.
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_dotenv(path: str = os.path.join(_ROOT, ".env")) -> None:
     """Minimal .env loader so we don't take a dependency just for config.
 
     Existing environment variables win over .env (setdefault), matching how
     real dotenv libraries behave.
+
+    The path is anchored to this file, NOT the working directory. It used to be a
+    bare ".env", so launching from anywhere but the repo root silently skipped the
+    file and fell back to defaults — which are not merely incomplete but *wrong*:
+    MODEL="" auto-detects whatever model happens to be loaded, and NO_THINK=False
+    turns reasoning back ON, the opposite of the production config.
     """
     if not os.path.exists(path):
         return

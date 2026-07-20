@@ -15,18 +15,11 @@ Run:  python scripts/tool_smoke.py
 """
 import asyncio
 import os
-import sys
-import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if hasattr(sys.stdout, "reconfigure"):  # emit UTF-8 so emoji don't crash a cp1252 console (Windows)
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+from _harness import scratch_env  # repo-root path setup + UTF-8 stdout
 
 # Configure BEFORE importing config/bootstrap (config reads env at import time).
-os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "smoke.db")
-os.environ["EMOTION_ENABLED"] = "false"   # skip the torch load; persona still drives the turn
-os.environ["TICK_ENABLED"] = "false"      # no background jobs during the smoke
-os.environ["SLEEP_ENABLED"] = "false"     # no lms CLI interaction
+scratch_env("smoke.db")   # emotion off (skips the torch load), no tick/sleep during a smoke
 os.environ.setdefault("TOOLS_ENABLED", "true")
 
 import bootstrap  # noqa: E402

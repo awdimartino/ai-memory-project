@@ -5,12 +5,16 @@ block to shorten and every row reads 0.
 Sends the same reasoning problem several ways and reports how many reasoning tokens
 each produced + time. Whichever variant shrinks reasoning is one LM Studio honors.
 """
-import sys, os, time  # noqa: E401
-sys.path.insert(0, os.path.abspath("."))
-import config  # noqa: E402
-from openai import OpenAI  # noqa: E402
+import time
 
-client = OpenAI(base_url=config.BASE_URL, api_key=config.API_KEY)
+from _harness import raw_client  # repo-root path setup + UTF-8 stdout
+
+import config  # noqa: E402
+
+# Was `sys.path.insert(0, os.path.abspath("."))` — CWD-relative, so this only
+# imported when launched from the repo root, despite the docs saying
+# `python scripts/probe_reasoning_control.py`.
+client = raw_client()
 PROMPT = ("A train goes 60 mph for 2.5 hours, then 40 mph for 1.5 hours. "
           "What is its average speed over the whole trip? Show your work.")
 

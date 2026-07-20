@@ -16,15 +16,10 @@ overall reliability. Needs LM Studio up. Run with UTF-8:
 """
 import asyncio
 import os
-import sys
-import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import scratch_env  # repo-root path setup + UTF-8 stdout
 
-os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "tool_eval.db")
-os.environ["EMOTION_ENABLED"] = "false"   # speed; irrelevant to tool routing
-os.environ["TICK_ENABLED"] = "false"
-os.environ["SLEEP_ENABLED"] = "false"
+scratch_env("tool_eval.db")   # emotion/tick/sleep off: irrelevant to tool routing
 os.environ.setdefault("TOOLS_ENABLED", "true")
 
 import bootstrap  # noqa: E402

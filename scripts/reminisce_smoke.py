@@ -10,21 +10,13 @@ is called, retrieves the log, and the answer uses it.
 Run:  python scripts/reminisce_smoke.py
 """
 import asyncio
-import os
-import sys
-import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if hasattr(sys.stdout, "reconfigure"):  # emit UTF-8 so emoji don't crash a cp1252 console (Windows)
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+from _harness import scratch_env  # repo-root path setup + UTF-8 stdout
 
-os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "rem.db")
-os.environ["EMOTION_ENABLED"] = "false"
-os.environ["TICK_ENABLED"] = "false"
-os.environ["SLEEP_ENABLED"] = "false"
-os.environ["HISTORY_TURNS"] = "2"          # tiny window: the seed scrolls out of context fast
-os.environ["CONSOLIDATE_WINDOW"] = "999"   # don't let consolidation absorb it into semantic recall
-os.environ["RECALL_MIN_SIMILARITY"] = "0.99"  # and neutralize autonomic recall, so reminisce is the ONLY path
+scratch_env("rem.db",
+            HISTORY_TURNS="2",            # tiny window: the seed scrolls out of context fast
+            CONSOLIDATE_WINDOW="999",     # don't let consolidation absorb it into semantic recall
+            RECALL_MIN_SIMILARITY="0.99")  # neutralize autonomic recall, so reminisce is the ONLY path
 
 import bootstrap  # noqa: E402
 

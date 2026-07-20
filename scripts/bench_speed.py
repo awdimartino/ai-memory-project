@@ -7,48 +7,19 @@ Usage:
   python scripts/bench_speed.py                # curated default set (small -> large)
   python scripts/bench_speed.py qwen3-8b ...   # explicit model ids
 """
-import os
-import shutil
-import subprocess
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import DEFAULT_MODELS, lms_path, raw_client, unload_all  # path + UTF-8 setup
 
-from openai import OpenAI
-
-import config
-
-# The LM Studio CLI, used to evict models so only one is resident at a time.
-LMS = shutil.which("lms") or os.path.expanduser("~/.lmstudio/bin/lms.exe")
-
-
-def unload_all() -> None:
-    """Unload every resident model (frees VRAM before loading the next one)."""
-    try:
-        subprocess.run([LMS, "unload", "--all"], capture_output=True, timeout=60)
-    except Exception as e:
-        print(f"  (warning: could not run 'lms unload --all': {e})", flush=True)
-
-# Ordered small -> large so JIT eviction is natural on a 16GB card.
-DEFAULT_MODELS = [
-    "llama-3.2-1b-instruct",
-    "qwen2.5-0.5b-instruct",
-    "llama-3.2-3b-instruct",
-    "gemma-3-4b-it",
-    "qwen3-4b-rpg-roleplay-v2",
-    "qwen3-8b",
-    "qwen3.5-9b",
-    "neona-12b-i1",
-    "qwen/qwen3-14b",
-]
+import config  # noqa: E402
 
 PROMPT = [
     {"role": "system", "content": "You are a friendly conversational companion. Keep it natural."},
     {"role": "user", "content": "Tell me a little about what makes a good friend."},
 ]
 
-client = OpenAI(base_url=config.BASE_URL, api_key=config.API_KEY)
+client = raw_client()
 
 
 def run(model: str, max_tokens: int) -> dict:
@@ -88,7 +59,7 @@ def run(model: str, max_tokens: int) -> dict:
 def main() -> int:
     models = sys.argv[1:] or DEFAULT_MODELS
     print(f"Endpoint: {config.BASE_URL}")
-    print(f"lms: {LMS}\n")
+    print(f"lms: {lms_path()}\n")
     rows = []
     for m in models:
         print(f"[{m}] evicting others + loading + warmup...", flush=True)

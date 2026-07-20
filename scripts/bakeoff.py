@@ -13,36 +13,18 @@ Usage:
 """
 import os
 import re
-import shutil
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from openai import OpenAI
+from _harness import DEFAULT_MODELS, raw_client, unload_all  # path + UTF-8 setup
 
 import config
 from core.prompts import SYSTEM_PROMPT
-
-LMS = shutil.which("lms") or os.path.expanduser("~/.lmstudio/bin/lms.exe")
 MAX_TOKENS = 500
 RESULTS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bakeoff", "results.md")
 
 _THINK_BLOCK = re.compile(r"(?s)^\s*<think>.*?</think>\s*")
-
-DEFAULT_MODELS = [
-    "llama-3.2-1b-instruct",
-    "qwen2.5-0.5b-instruct",
-    "llama-3.2-3b-instruct",
-    "gemma-3-4b-it",
-    "qwen3-4b-rpg-roleplay-v2",
-    "qwen3-8b",
-    "qwen3.5-9b",
-    "neona-12b-i1",
-    "qwen/qwen3-14b",
-]
 
 # (id, category, prompt). Kept independent one-shots so responses don't contaminate.
 TESTS = [
@@ -65,14 +47,7 @@ ASSISTANT_ISMS = [
     "i don't have personal", "i do not have personal", "language model",
 ]
 
-client = OpenAI(base_url=config.BASE_URL, api_key=config.API_KEY, timeout=180)
-
-
-def unload_all() -> None:
-    try:
-        subprocess.run([LMS, "unload", "--all"], capture_output=True, timeout=60)
-    except Exception as e:
-        print(f"  (warning: could not run 'lms unload --all': {e})", flush=True)
+client = raw_client(timeout=180)
 
 
 def ask(model: str, question: str) -> dict:

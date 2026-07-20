@@ -13,15 +13,12 @@ temporal/self/disclaim. Non-deterministic (temp 0.2) so re-run a couple times.
 Run:  python scripts/eval_extraction.py
 """
 import asyncio
-import os
 import re
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import llm_client  # repo-root path setup + UTF-8 stdout
 
 import config
 from core.prompts import MEMORY_EXTRACTION_SYSTEM, MEMORY_SCHEMA
-from infrastructure.llm_client import LLMClient
 
 # --- fixtures: (name, transcript[list of (who, text)], expected_durable_substrings) ---
 # expected is what SHOULD be captured (case-insensitive substring match on some fact).
@@ -161,14 +158,10 @@ def classify(fact: str, category: str) -> str:
 
 
 async def main() -> int:
-    # Must mirror bootstrap.build() exactly — this eval's whole job is to score the
-    # client production actually uses. It previously omitted the penalties and the
-    # retry count, so a green run said nothing about the real extraction path.
-    llm = LLMClient(config.BASE_URL, config.API_KEY, config.MODEL, config.TEMPERATURE,
-                    no_think=config.NO_THINK,
-                    frequency_penalty=config.FREQUENCY_PENALTY,
-                    presence_penalty=config.PRESENCE_PENALTY,
-                    max_retries=config.LLM_MAX_RETRIES)
+    # llm_client() mirrors bootstrap.build() exactly — this eval's whole job is to score
+    # the client production actually uses. Hand-rolled here once, it had drifted: no
+    # penalties, no retries, so a green run said nothing about the real extraction path.
+    llm = llm_client()
     model = await llm.resolve_model()
     brain = config.BRAIN_MODEL or model
     print(f"extraction eval on {brain}\n" + "=" * 70)

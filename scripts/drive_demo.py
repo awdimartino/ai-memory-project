@@ -17,19 +17,15 @@ Run:  python scripts/drive_demo.py
 """
 import asyncio
 import os
-import sys
-import tempfile
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if hasattr(sys.stdout, "reconfigure"):  # emit UTF-8 so emoji/≥ don't crash a cp1252 console (Windows)
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+from _harness import scratch_env  # repo-root path setup + UTF-8 stdout
 
 # Configure BEFORE importing config/bootstrap (config reads env at import time).
-os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "drive_demo.db")
-os.environ["EMOTION_ENABLED"] = "true"    # need mood so drive modulation is visible
-os.environ["TICK_ENABLED"] = "false"      # we replay the tick manually + deterministically
-os.environ["SLEEP_ENABLED"] = "false"     # no lms CLI interaction
+scratch_env("drive_demo.db",
+            EMOTION_ENABLED="true",   # need mood so drive modulation is visible
+            TICK_ENABLED="false",     # we replay the tick manually + deterministically
+            SLEEP_ENABLED="false")    # no lms CLI interaction
 os.environ.setdefault("TOOLS_ENABLED", "true")
 
 import config  # noqa: E402
