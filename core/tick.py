@@ -271,6 +271,35 @@ class ReflectionJob(Job):
         await self.companion.reflect()
 
 
+LAST_INTENTION_KEY = "last_intention_at"
+
+
+class IntentionJob(Job):
+    """While the user is away, note forward intentions from the recent conversation — things Mari
+    means to bring up or find out next time. Idle + cooldown gated (its own cadence); internal (no
+    surface push). Reach-out consumes these to make its messages purposeful (the "planning" pillar)."""
+    name = "intention"
+
+    def __init__(self, companion, interval: float, min_idle: float, cooldown: float, clock=time.time):
+        self.companion = companion
+        self.interval = interval
+        self.min_idle = min_idle
+        self.cooldown = cooldown
+        self.clock = clock
+
+    async def run(self) -> None:
+        if self.companion.is_asleep() or self.companion.is_busy():
+            return
+        if self.companion.idle_seconds() < self.min_idle:
+            return
+        now = self.clock()
+        last = self.companion.meta.get_json(LAST_INTENTION_KEY, 0) or 0
+        if now - last < self.cooldown:
+            return
+        await asyncio.to_thread(self.companion.meta.set_json, LAST_INTENTION_KEY, now)
+        await self.companion.form_intentions()
+
+
 LAST_PERSONA_EDIT_KEY = "last_persona_edit_at"
 
 

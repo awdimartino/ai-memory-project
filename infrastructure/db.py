@@ -71,6 +71,19 @@ MIGRATIONS = [
     """
     ALTER TABLE sessions ADD COLUMN title TEXT;
     """,
+    # v8 — intentions: Mari's private forward agenda (the Generative-Agents "planning"
+    # pillar) — things she means to bring up or find out, minted during idle reflection
+    # and drawn on by reach-out. fulfilled_at is set when she acts on one.
+    """
+    CREATE TABLE intentions (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        content      TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        fulfilled_at TEXT,
+        active       INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX idx_intentions_active ON intentions(active);
+    """,
 ]
 
 

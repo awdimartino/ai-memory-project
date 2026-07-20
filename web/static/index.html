@@ -709,6 +709,12 @@
       } else { th.appendChild(el("div", "st-empty", "no thoughts yet — she reflects while you're away")); }
       box.appendChild(th);
 
+      const intents = s.intentions || [];
+      const ic = card("Intentions", intents.length ? String(intents.length) : null);
+      if (intents.length) intents.forEach((i) => ic.appendChild(el("div", "st-mem", i.content)));
+      else ic.appendChild(el("div", "st-empty", "none yet — she notes these while you're away"));
+      box.appendChild(ic);
+
       const a = card("Activity");
       a.appendChild(kvRow("model", s.model || "—"));
       a.appendChild(kvRow("pending consolidation", String(s.pending_consolidation)));

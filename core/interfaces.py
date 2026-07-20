@@ -132,6 +132,32 @@ class ThoughtStore(Protocol):
         ...
 
 
+class IntentionStore(Protocol):
+    """Persistence for Mari's private forward agenda (the "planning" pillar): short
+    notes of things she means to bring up or find out, minted during reflection and
+    consumed by reach-out."""
+
+    def add(self, content: str) -> int:
+        """Store one intention; return its id."""
+        ...
+
+    def active(self, limit: int | None = None) -> list[dict]:
+        """Open intentions, oldest first, as {id, content, created_at}."""
+        ...
+
+    def fulfill(self, intention_id: int) -> None:
+        """Mark an intention acted-on (retired, timestamped, kept for history)."""
+        ...
+
+    def drop(self, intention_id: int) -> None:
+        """Retire an intention without acting on it (expiry / over-cap pruning)."""
+        ...
+
+    def clear(self) -> None:
+        """Delete every intention (the full-reset admin op)."""
+        ...
+
+
 class ModelManager(Protocol):
     """Loads/unloads LLMs from VRAM (the sleep/standby seam)."""
 

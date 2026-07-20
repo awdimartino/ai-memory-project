@@ -160,6 +160,7 @@ async def status() -> dict:
         },
         "persona": c.meta.get(PERSONA_SELF_KEY) or "",
         "thoughts": c.thoughts.recent(8) if c.thoughts else [],
+        "intentions": c.intentions.active() if c.intentions else [],
         "pending_consolidation": c.pending_count(),
         "last": {
             "reach_out_secs_ago": _ago(LAST_REACHOUT_KEY),

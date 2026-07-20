@@ -145,6 +145,13 @@ REFLECT_ENABLED = os.environ.get("REFLECT_ENABLED", "true").lower() in ("1", "tr
 REFLECT_MIN_IDLE = float(os.environ.get("REFLECT_MIN_IDLE", "120"))      # think after 2 min away
 REFLECT_COOLDOWN = float(os.environ.get("REFLECT_COOLDOWN", "600"))      # at most every ~10 min
 
+# Intentions (the "planning" pillar): during idle, Mari notes forward intentions — things she means to
+# bring up or find out next time — which reach-out then draws on to be purposeful. Its own idle cadence.
+INTENTION_ENABLED = os.environ.get("INTENTION_ENABLED", "true").lower() in ("1", "true", "yes")
+INTENTION_MIN_IDLE = float(os.environ.get("INTENTION_MIN_IDLE", "180"))   # note them a few min after a chat
+INTENTION_COOLDOWN = float(os.environ.get("INTENTION_COOLDOWN", "900"))   # at most ~every 15 min
+INTENTION_MAX_ACTIVE = int(os.environ.get("INTENTION_MAX_ACTIVE", "8"))   # cap the open agenda (drop oldest)
+
 # Self-modifying persona: during idle ticks Mari rewrites a bot-owned "who you've become"
 # slot in her system prompt, reading her thought journal + core memories. How far it may
 # drift is gated by a familiarity meter (derived from message count) so a stranger doesn't

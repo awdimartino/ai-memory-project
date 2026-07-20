@@ -26,8 +26,11 @@ from typing import Awaitable, Callable
 import config
 from core.prompts import (
     FOLLOWUP_CUE,
+    INTENTIONS_SCHEMA,
+    INTENTIONS_SYSTEM,
     REFLECT_CUE,
     build_followup_system,
+    build_intentions_user,
     build_persona_edit_system,
     build_persona_edit_user,
     build_reachout_cue,
@@ -95,13 +98,14 @@ class Companion:
                  history: list[dict] | None = None,
                  unconsolidated: list[dict] | None = None,
                  emotion=None, thoughts=None, model_manager=None,
-                 tools=None, tool_max_iters: int = 5, drives=None):
+                 tools=None, tool_max_iters: int = 5, drives=None, intentions=None):
         self.llm = llm
         self.store = store
         self.memory = memory
         self.meta = meta
         self.emotion = emotion  # EmotionManager, or None when disabled
         self.thoughts = thoughts  # ThoughtStore for the private journal, or None
+        self.intentions = intentions  # IntentionStore (forward agenda / planning), or None
         # DriveManager (multi-drive proactivity), or None when disabled. Updated by the
         # tick's DriveDriftJob and relieved here on each user message (contact).
         self.drives = drives
@@ -255,8 +259,15 @@ class Companion:
         core = self.memory.core_memories()
         extra = [content for content, _ in recalled if content not in core]
         mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        # Anchor the reach-out on the longest-waiting intention, if any — makes it purposeful
+        # ("been meaning to ask...") rather than generic; fulfilled only if she actually sends it.
+        intention = None
+        if self.intentions is not None:
+            pending = self.intentions.active(limit=1)
+            intention = pending[0] if pending else None
         system = build_reachout_system(extra, mood_prompt, core=core,
-                                       persona=self.meta.get(PERSONA_SELF_KEY))
+                                       persona=self.meta.get(PERSONA_SELF_KEY),
+                                       intention=intention["content"] if intention else None)
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -274,6 +285,8 @@ class Companion:
         aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
         self.history.append({"role": "assistant", "content": text})
         self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+        if intention is not None:
+            await asyncio.to_thread(self.intentions.fulfill, intention["id"])
         logger.info("reach-out: %s", text[:80])
         return text
 
@@ -369,6 +382,37 @@ class Companion:
         await asyncio.to_thread(self.thoughts.add, text, dom)
         logger.info("reflected: %s", text[:80])
         return text
+
+    async def form_intentions(self) -> list[str]:
+        """Note forward intentions from the recent conversation — things to bring up or find out
+        next time. Additive + deduped against the open agenda, and caps the active set; returns the
+        new ones. Run during idle by IntentionJob; reach-out draws on them (the planning pillar)."""
+        if self.intentions is None:
+            return []
+        recent = self.history[-config.HISTORY_TURNS:]
+        if not recent:
+            return []
+        existing = [i["content"] for i in self.intentions.active()]
+        raw = await self.llm.structured_json(
+            [{"role": "system", "content": INTENTIONS_SYSTEM},
+             {"role": "user", "content": build_intentions_user(recent, existing)}],
+            INTENTIONS_SCHEMA)
+        proposed = [s.strip() for s in (raw.get("intentions") or [])
+                    if isinstance(s, str) and s.strip()]
+        seen = {e.lower() for e in existing}
+        added: list[str] = []
+        for s in proposed:
+            if s.lower() not in seen:  # cheap dedupe guard on top of the prompt's own
+                await asyncio.to_thread(self.intentions.add, s)
+                seen.add(s.lower())
+                added.append(s)
+        # Cap the open agenda — retire the oldest beyond the cap (expired, not acted on).
+        active = self.intentions.active()
+        for old in active[:max(0, len(active) - config.INTENTION_MAX_ACTIVE)]:
+            await asyncio.to_thread(self.intentions.drop, old["id"])
+        if added:
+            logger.info("formed %d intention(s): %s", len(added), added[0][:60])
+        return added
 
     def familiarity(self) -> float:
         """Relationship depth 0..1, from how much you two have talked (gates persona drift)."""
@@ -512,6 +556,8 @@ class Companion:
         self.store.clear()                       # messages + sessions
         if self.thoughts is not None:
             self.thoughts.clear()
+        if self.intentions is not None:
+            self.intentions.clear()
         self.meta.clear()                        # mood, drives, persona, watermark, cooldowns
         self.history = []
         self._unconsolidated = []

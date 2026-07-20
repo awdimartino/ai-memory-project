@@ -17,6 +17,7 @@ from core.tools import ToolRegistry
 from core.tick import (
     DriveDriftJob,
     IdleConsolidationJob,
+    IntentionJob,
     MoodDriftJob,
     PersonaEditJob,
     ReflectionJob,
@@ -26,6 +27,7 @@ from core.tick import (
 from infrastructure.conversation_store import SqliteConversationStore
 from infrastructure.db import connect
 from infrastructure.embedder import Embedder
+from infrastructure.intention_store import SqliteIntentionStore
 from infrastructure.llm_client import LLMClient
 from infrastructure.memory_store import SqliteMemoryStore
 from infrastructure.meta_store import SqliteMetaStore
@@ -53,6 +55,7 @@ async def build() -> tuple[Companion, str]:
     mem_store = SqliteMemoryStore(conn)
     meta_store = SqliteMetaStore(conn)
     thought_store = SqliteThoughtStore(conn)
+    intention_store = SqliteIntentionStore(conn)
 
     llm = LLMClient(config.BASE_URL, config.API_KEY, config.MODEL, config.TEMPERATURE,
                     no_think=config.NO_THINK,
@@ -108,7 +111,8 @@ async def build() -> tuple[Companion, str]:
     companion = Companion(llm, conv_store, memory, meta_store, active,
                           history, unconsolidated, emotion=emotion, thoughts=thought_store,
                           model_manager=model_manager, tools=tools,
-                          tool_max_iters=config.TOOL_MAX_ITERS, drives=drives)
+                          tool_max_iters=config.TOOL_MAX_ITERS, drives=drives,
+                          intentions=intention_store)
     companion._session_title = conv_store.session_title(active)
 
     # Proactivity heartbeat. Created, not started; the entry point starts it so eval/test
@@ -125,6 +129,9 @@ async def build() -> tuple[Companion, str]:
             jobs.append(ReflectionJob(companion, config.TICK_INTERVAL,
                                       config.REFLECT_MIN_IDLE, config.REFLECT_COOLDOWN,
                                       drives=drives, threshold=config.DRIVE_RESTLESSNESS_THRESHOLD))
+        if config.INTENTION_ENABLED:
+            jobs.append(IntentionJob(companion, config.TICK_INTERVAL,
+                                     config.INTENTION_MIN_IDLE, config.INTENTION_COOLDOWN))
         if config.PERSONA_EDIT_ENABLED:
             jobs.append(PersonaEditJob(companion, config.TICK_INTERVAL,
                                        config.PERSONA_EDIT_MIN_IDLE, config.PERSONA_EDIT_COOLDOWN,

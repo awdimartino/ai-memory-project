@@ -160,6 +160,18 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   flashes on screen. The web UI drops the typing bubble and shows a faint **"· Mari stayed quiet"** marker.
   **Ungated for now** (she can pass on anything); add mood/low-effort gating if she goes quiet too often. Gate
   logic offline-tested; suite green. *(Uncommitted as of 2026-07-19 — user testing live.)*
+- **Intentions — a private forward agenda (the "planning" pillar, 2026-07-19):** Mari keeps short notes of things
+  she means to bring up or find out next time, so proactivity is *goal-directed* rather than generic. Schema **v8**
+  `intentions` table + `SqliteIntentionStore` (+ Protocol): add / `active()` oldest-first (FIFO) / `fulfill` /
+  `drop` / `clear`. **Minting:** `Companion.form_intentions()` asks the brain for genuinely-new intentions from the
+  recent window, deduped against the open agenda and capped at `INTENTION_MAX_ACTIVE` (8, oldest dropped); driven by
+  **`IntentionJob`** (idle + `INTENTION_COOLDOWN` gated, its own cadence — internal, nothing pushed). **Consumption:**
+  `reach_out()` anchors on the **longest-waiting** intention ("You've had this on your mind to bring up…") and
+  **fulfills it only if she actually sends**; a PASS leaves it open. **Visible** via `GET /status` + an "Intentions"
+  status-panel card. **Prompt gotcha (fixed):** the first draft said "most reflections add none", which set the
+  default to empty and made thinking-off qwen return `[]` even on a window full of follow-ups (the same shallow-pass
+  failure as the memory-extraction bug); rebalanced with concrete examples → 3/3 on a rich window, `[]` on a barren
+  meta-chat. `tests/test_intentions.py` (16 offline cases). Live-verified: formed "ask how Deadlock is going".
 - **Web UI: status panel + conversation tabs:** a live **status panel** (right side)
   polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity, the 6 mood bars, memory
   (core list + retired/superseded facts + counts), self-description, the private thought journal, and
@@ -463,11 +475,11 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
 **★ Completing the Generative Agents cognitive loop (idea pass 2026-07-19).** Arc A gave Mari drives + energy; the
 triad from Park et al.'s "Smallville" agents is **memory (§B) + reflection (her journal) + planning — the one she's
 missing.** Adding planning makes the inner life *goal-directed*:
-- **★ Intentions / a private agenda — NEW, highest-leverage.** A small persisted `IntentionStore` of things she
-  means to bring up or find out ("ask how Alex's jacket turned out", "learn what he does for work"), minted/updated
-  by `ReflectionJob` and drawn on by `ReachOutJob`/`FollowUpJob` — so proactive messages become *purposeful* ("been
-  wondering how the jacket came out") instead of generic. Turns reactive proactivity into goal-directed; a small
-  extension of the reflection loop, and the single biggest jump in perceived autonomy.
+- **★ Intentions / a private agenda — BUILT 2026-07-19** (schema v8 + `IntentionStore` + `IntentionJob`; see §2 for
+  the shipped design). Proactivity is now goal-directed: reach-out anchors on the longest-waiting intention.
+  **Remaining in this item:** (a) **chat-path awareness** — let her raise an intention mid-conversation, not only on
+  a reach-out (riskier: could read as pushy, so it needs its own gate); (b) **expiry** of stale intentions beyond the
+  size cap; (c) let **follow-up** draw on them too.
 - **Learned operating-notes (reflection that changes behavior) — NEW.** Reflection currently feeds the *persona*
   (who she is); nothing adjusts *how she acts* turn-to-turn. Add short "notes to self" distilled from experience
   ("Alex bristles at lots of questions — ease off"), injected live into `build_system` — the self-improving closed
@@ -503,6 +515,11 @@ missing.** Adding planning makes the inner life *goal-directed*:
 - **Surface her inner life** — expose a light "current preoccupation" in the status panel from her latest
   thought/intention ("mulling over your jacket project", "curious about shooters"), so she reads as continuously
   present, not idle-until-pinged. (Open-LLM-VTuber surfaces the AI's unspoken thoughts.)
+- **Prompt inspector (dev/transparency, user-requested 2026-07-19)** — a per-turn view (like the existing response
+  inspector's `<details>`) that shows the **exact assembled prompt** sent to the model — system persona + tools
+  note + core/recalled memories + mood + the history window + the user turn — formatted readable. Great for
+  debugging persona/memory/tool injection. Server would need to return the built `system` (+ message list) on the
+  `done` frame (or a `GET /prompt/{turn}`); the UI adds a second collapsible tab next to "inspect".
 
 ### D. Reach beyond the tab
 - ~~**Push notifications** (e.g. Bark)~~ **DONE + LIVE-VERIFIED (2026-07-19):** a **reach-out** now pushes to the

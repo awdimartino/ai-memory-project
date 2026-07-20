@@ -199,10 +199,56 @@ def build_reachout_cue(away: str) -> str:
 
 
 def build_reachout_system(memories: list[str], mood: str | None = None,
-                          core: list[str] | None = None, persona: str | None = None) -> str:
-    """System prompt for a proactive message: persona + memories + mood + reach-out framing."""
-    base = build_system(memories, mood, core=core, persona=persona)
-    return f"{base}\n\n{_REACHOUT_ADDENDUM}"
+                          core: list[str] | None = None, persona: str | None = None,
+                          intention: str | None = None) -> str:
+    """System prompt for a proactive message: persona + memories + mood + reach-out framing,
+    optionally anchored on an `intention` (something she's been meaning to bring up)."""
+    parts = [build_system(memories, mood, core=core, persona=persona), _REACHOUT_ADDENDUM]
+    if intention:
+        parts.append(f"You've had this on your mind to bring up with them: \"{intention}\". If it still "
+                     f"feels natural, lead with it; if it doesn't fit the moment, reply PASS.")
+    return "\n\n".join(parts)
+
+
+# --- Intentions (Mari's private forward agenda — the "planning" pillar) ---
+
+INTENTIONS_SYSTEM = f"""You are the quiet, forward-looking part of {BOT_NAME}, between conversations.
+
+Read the recent conversation and note the INTENTIONS it leaves you with — small, specific things you'd
+genuinely want to bring up or find out the *next* time you talk:
+- an open thread to follow up on (they were about to do something -> "ask how it went")
+- something they mentioned that you're curious to hear more about
+- a natural question about their life that would help you know them better
+
+Write each as ONE short first-person phrase starting with a verb, e.g. "ask how their dye project turned out",
+"find out what they do for work", "check in about that game they mentioned".
+
+Rules:
+- About THEIR life or your shared conversation — never about {BOT_NAME} herself, the app, or an invented plan.
+- Don't repeat or reword an intention you already have (listed below).
+- Don't invent things that were never actually discussed.
+- If the conversation genuinely left no open threads at all, return an empty list."""
+
+INTENTIONS_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "intentions",
+        "schema": {
+            "type": "object",
+            "properties": {"intentions": {"type": "array", "items": {"type": "string"}}},
+            "required": ["intentions"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def build_intentions_user(recent_msgs: list[dict], existing: list[str]) -> str:
+    convo = "\n".join(
+        f"{'User' if m['role'] == 'user' else BOT_NAME}: {m['content']}" for m in recent_msgs)
+    have = "\n".join(f"- {i}" for i in existing) or "(none yet)"
+    return (f"Recent conversation:\n{convo}\n\nIntentions you already have in mind:\n{have}\n\n"
+            f"List any genuinely NEW intentions from this conversation (or an empty list).")
 
 
 # --- Follow-up (a spontaneous second message right after her own reply) ---
