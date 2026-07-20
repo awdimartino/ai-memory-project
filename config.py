@@ -117,6 +117,16 @@ RECALL_MIN_SIMILARITY = _f("RECALL_MIN_SIMILARITY", 0.55)
 # durable fact isn't drowned in a large, low-signal window — extraction misses a lone fact
 # buried in 20+ messages of banter (measured). Each consolidation is still backgrounded.
 CONSOLIDATE_WINDOW = _i("CONSOLIDATE_WINDOW", 10)
+# Salience gate on consolidation. A window of "morning" / "ok" should not spend the
+# same machinery as one where he says his dad is sick, and a fixed cadence spends it
+# identically on both -- which fills memory with trivia. Generative Agents fires
+# reflection on an ACCUMULATED importance threshold rather than a timer; the emotion
+# classifier already gives us the accumulator for free.
+# The window stays a HARD CEILING (consolidate at CONSOLIDATE_WINDOW regardless) so a
+# long flat stretch still gets saved; salience only lets an emotionally loaded window
+# fire EARLY, never late. Set SALIENCE_MIN_MESSAGES > 0 to require some minimum.
+CONSOLIDATE_SALIENCE = _f("CONSOLIDATE_SALIENCE", 2.0)   # summed |mood delta| to fire early
+SALIENCE_MIN_MESSAGES = _i("SALIENCE_MIN_MESSAGES", 4)   # never fire below this many
 
 # Lifecycle: when consolidating, compare a new fact against existing memories this
 # similar (higher than recall — only genuinely related facts get an LLM decision).
@@ -132,6 +142,16 @@ MEMORY_DUP_SIMILARITY = _f("MEMORY_DUP_SIMILARITY", 0.97)
 # surfaces them. The extractor marks facts as core; when the set exceeds this cap, the
 # brain re-ranks and demotes the least essential back to regular (searchable) memory.
 CORE_MEMORY_MAX = _i("CORE_MEMORY_MAX", 12)
+# Sticky / cooldown on core-fact injection, counted in TURNS. Core facts were injected
+# unconditionally on every single turn, which is the structural cause of a companion
+# sounding like it's reading off a card -- a fact that is ALWAYS present reads as
+# recitation no matter how the persona is worded.
+# STICKY: once injected, keep it in for this many turns so it can't flicker out
+# mid-topic. COOLDOWN: after that, hold it back until this many turns have passed.
+CORE_STICKY_TURNS = _i("CORE_STICKY_TURNS", 3)
+CORE_COOLDOWN_TURNS = _i("CORE_COOLDOWN_TURNS", 8)
+# Facts that must never be held back -- her name is not recitation, it's knowing you.
+CORE_ALWAYS_PATTERN = os.environ.get("CORE_ALWAYS_PATTERN", "name is")
 
 # Emotion (pillar 2). A local RoBERTa GoEmotions classifier maps each message to
 # 28 emotions, folded into 6 mood channels that decay toward a baseline. Runs on

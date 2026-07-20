@@ -125,6 +125,15 @@ class EmotionManager:
                        if s >= self.noise and l != "neutral"]
         return {"detected": significant[:6], "mood": dict(self.state)}
 
+    def arousal(self) -> float:
+        """How far the current mood sits from baseline, summed across channels.
+
+        A cheap salience signal: near 0 during small talk, high after a conversation
+        that actually moved her. Used to consolidate memory early on emotionally
+        loaded windows instead of on a flat message count.
+        """
+        return sum(abs(self.state[c] - BASELINE_STATE[c]) for c in CHANNELS)
+
     async def drift(self) -> dict:
         """Decay mood one step toward baseline without any new input, and persist.
 

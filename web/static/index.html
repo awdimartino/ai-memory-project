@@ -427,6 +427,9 @@
     }
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) { unread = 0; document.title = botName; setFavicon(); }
+      // The server pushes to your phone only when the chat isn't actually in front of
+      // you; a backgrounded tab counts as away, same as a closed one.
+      wsSend({ type: "presence", visible: !document.hidden });
     });
 
     function addBubble(role, text, opts = {}) {
@@ -551,7 +554,9 @@
       const proto = location.protocol === "https:" ? "wss" : "ws";
       setConn("wait", "connecting");
       socket = new WebSocket(`${proto}://${location.host}/ws`);
-      socket.onopen = () => { retry = 0; setConn("on", "connected"); };
+      socket.onopen = () => { retry = 0; setConn("on", "connected");
+        // re-report visibility after a reconnect; the server assumes visible on connect
+        wsSend({ type: "presence", visible: !document.hidden }); };
       socket.onmessage = handleMessage;
       socket.onclose = () => {
         setConn("off", "reconnecting…");

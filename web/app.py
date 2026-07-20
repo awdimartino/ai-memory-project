@@ -46,6 +46,18 @@ class AppState:
     phone: PhonePush | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     connections: set = field(default_factory=set)
+    # Which open sockets currently have the tab VISIBLE. A socket can be connected
+    # while the tab sits in the background, and that's the case that matters: a
+    # message she sends to a tab you can't see is a message you don't get.
+    visible: dict = field(default_factory=dict)
+
+    def is_present(self) -> bool:
+        """True when the user has the chat actually in front of them.
+
+        Not merely "a socket is open" — a backgrounded tab is the same as a closed
+        one for the purpose of whether a message reaches them.
+        """
+        return any(self.visible.get(ws) for ws in self.connections)
 
 
 state = AppState()
@@ -73,11 +85,18 @@ async def _broadcast(message: dict) -> None:
         state.connections.discard(ws)
 
 
-async def _notify_reachout(message: dict) -> None:
-    """Reach-out notifier: push to open browser tabs AND (if configured) the user's phone."""
+async def _notify(message: dict) -> None:
+    """Deliver one unprompted message: always to open tabs, to the phone if she'd miss it.
+
+    Push fires whenever the chat isn't actually in front of the user — tab closed,
+    browser closed, or simply another tab in focus. Pushing while they're looking
+    right at it is just a duplicate buzz; not pushing while they're away means the
+    message may as well not have been sent.
+    """
     await _broadcast(message)
-    if state.phone is not None:
-        await state.phone.push(message.get("content", ""))
+    if state.phone is None or state.is_present():
+        return
+    await state.phone.push(message.get("content", ""))
 
 
 @contextlib.asynccontextmanager
@@ -98,13 +117,13 @@ async def lifespan(_app: FastAPI):
         # registered here rather than in the shared bootstrap.
         if config.REACHOUT_ENABLED:
             companion.tick.register(ReachOutJob(
-                companion, _notify_reachout, config.TICK_INTERVAL,
+                companion, _notify, config.TICK_INTERVAL,
                 config.REACHOUT_MIN_IDLE, config.REACHOUT_COOLDOWN,
                 drives=companion.drives, threshold=config.DRIVE_CONNECTION_THRESHOLD))
         if config.FOLLOWUP_ENABLED:
             # A spontaneous "double-text" right after her own reply; also needs the broadcaster.
             companion.tick.register(FollowUpJob(
-                companion, _broadcast, config.TICK_INTERVAL, config.FOLLOWUP_CHANCE,
+                companion, _notify, config.TICK_INTERVAL, config.FOLLOWUP_CHANCE,
                 config.FOLLOWUP_MIN_DELAY, config.FOLLOWUP_WINDOW))
         companion.tick.start()  # proactivity heartbeat
     logger.info("web ready at http://%s:%d (model=%s, phone push=%s)", config.WEB_HOST,
@@ -279,6 +298,7 @@ async def ws(websocket: WebSocket) -> None:
     await websocket.accept()
     companion = state.companion
     state.connections.add(websocket)
+    state.visible[websocket] = True   # a tab that just connected is being looked at
     await websocket.send_json({"type": "ready", "model": state.model, "bot": config.BOT_NAME})
     await _send_conversations(websocket)
     await _replay_history(websocket)  # proactive messages replay here too (logged as assistant turns)
@@ -287,6 +307,12 @@ async def ws(websocket: WebSocket) -> None:
         while True:
             data = await websocket.receive_json()
             t = data.get("type")
+
+            if t == "presence":
+                # The tab tells us when it's hidden/shown; drives whether an unprompted
+                # message also goes to the phone.
+                state.visible[websocket] = bool(data.get("visible"))
+                continue
 
             if t == "user":
                 text = (data.get("text") or "").strip()
@@ -356,6 +382,7 @@ async def ws(websocket: WebSocket) -> None:
         pass
     finally:
         state.connections.discard(websocket)
+        state.visible.pop(websocket, None)
 
 
 if __name__ == "__main__":

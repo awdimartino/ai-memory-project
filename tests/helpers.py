@@ -80,11 +80,21 @@ def fact(content: str, core: bool = False, category: str = "user") -> dict:
 class FakeMemory:
     """A memory manager that recalls nothing — for tests about everything else."""
 
+    def __init__(self):
+        self.injected: list[tuple[list[int], int]] = []
+
     async def recall(self, text):
         return []
 
     def core_memories(self):
         return []
+
+    def core_for_turn(self, turn):
+        """(contents, ids) eligible this turn — nothing, for tests about other things."""
+        return [], []
+
+    def mark_injected(self, memory_ids, turn):
+        self.injected.append((list(memory_ids), turn))
 
 
 class FakeConv:
@@ -93,6 +103,7 @@ class FakeConv:
     def __init__(self, message_count: int = 100):
         self._id = 0
         self._count = message_count
+        self.self_notes_log: list[str] = []
 
     def add_message(self, sid, role, content):
         self._id += 1
@@ -103,6 +114,14 @@ class FakeConv:
 
     def set_title(self, sid, title):
         pass
+
+    def log_self_notes(self, content):
+        """Revision log for the operating-notes slot (RRR scoring)."""
+        self.self_notes_log.append(content)
+        return len(self.self_notes_log)
+
+    def recent_self_notes(self, limit):
+        return list(reversed(self.self_notes_log[-limit:]))
 
 
 class InMemoryMeta:

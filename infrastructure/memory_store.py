@@ -105,6 +105,39 @@ class SqliteMemoryStore(SqliteStore):
             "SELECT COUNT(*) FROM memories WHERE active = 0"
         ).fetchone()[0]
 
+    def core_for_injection(self, turn: int, cooldown: int, sticky: int) -> list[dict]:
+        """Core facts eligible to be injected on `turn`.
+
+        A fact is eligible when it is STICKY (injected within the last `sticky` turns,
+        so it doesn't flicker out mid-topic) or COOLED DOWN (not injected for at least
+        `cooldown` turns). Everything in between is held back.
+
+        Core facts used to be injected unconditionally, every single turn, which is the
+        structural reason a companion starts sounding like it's reading off a card --
+        and no amount of persona tuning fixes a fact that is simply always present.
+        """
+        rows = self.conn.execute(
+            "SELECT id, content, last_injected_turn FROM memories "
+            "WHERE active = 1 AND core = 1 "
+            "  AND (last_injected_turn = 0"                    # never injected
+            "       OR ? - last_injected_turn <= ?"            # sticky window
+            "       OR ? - last_injected_turn >= ?) "          # cooled down
+            "ORDER BY id",
+            (turn, sticky, turn, cooldown),
+        ).fetchall()
+        return [{"id": r["id"], "content": r["content"]} for r in rows]
+
+    def mark_injected(self, memory_ids: list[int], turn: int) -> None:
+        """Record that these memories went into the prompt on `turn`."""
+        if not memory_ids:
+            return
+        marks = ",".join("?" * len(memory_ids))
+        with self._lock:
+            self.conn.execute(
+                f"UPDATE memories SET last_injected_turn = ?, inject_count = inject_count + 1 "
+                f"WHERE id IN ({marks})", (turn, *memory_ids))
+            self.conn.commit()
+
     def counts(self) -> dict:
         """All three counts in ONE scan, for the status panel (polled every 3s).
 

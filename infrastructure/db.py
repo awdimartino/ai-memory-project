@@ -137,6 +137,27 @@ MIGRATIONS = [
     );
     CREATE INDEX idx_intentions_active ON intentions(active);
     """,
+    # v9 — injection bookkeeping + self-note revision history.
+    #
+    # `last_injected_turn` / `inject_count` support sticky-and-cooldown injection:
+    # core facts used to be injected on EVERY turn unconditionally, which is the
+    # structural cause of a companion sounding like it's reading off a card. Counting
+    # in TURNS (not wall time) matches how the effect is felt — it's about how many
+    # messages ago she last said it, not how many minutes.
+    #
+    # `self_notes_log` keeps every revision of the operating-notes slot, which is
+    # otherwise overwritten wholesale. Without history you cannot compute the
+    # Reflection Repetition Rate, and repetition in self-generated rules is the
+    # signal that they're confabulated (scripts/rrr_diagnostic.py).
+    """
+    ALTER TABLE memories ADD COLUMN last_injected_turn INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE memories ADD COLUMN inject_count INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE self_notes_log (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        content    TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

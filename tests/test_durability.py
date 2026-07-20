@@ -50,6 +50,12 @@ class FakeMemory:
     def core_memories(self):
         return []
 
+    def core_for_turn(self, turn):
+        return [], []
+
+    def mark_injected(self, memory_ids, turn):
+        pass
+
     async def consolidate(self, chunk, session_id):
         if self.fail:
             raise RuntimeError("boom")

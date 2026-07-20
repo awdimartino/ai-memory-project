@@ -65,8 +65,21 @@ class SqliteConversationStore(SqliteStore):
             self.conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             self.conn.commit()
 
+    def log_self_notes(self, content: str) -> int:
+        """Append one revision of the operating-notes slot (for RRR scoring)."""
+        cur = self._write(
+            "INSERT INTO self_notes_log (content, created_at) VALUES (?, ?)",
+            (content, utcnow()))
+        return cur.lastrowid
+
+    def recent_self_notes(self, limit: int) -> list[str]:
+        """Most recent operating-note revisions, newest first."""
+        rows = self.conn.execute(
+            "SELECT content FROM self_notes_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [r["content"] for r in rows]
+
     def clear(self) -> None:
-        """Delete every conversation and message (the full-reset admin op)."""
+        """Delete every conversation, message and self-note revision (full reset)."""
         with self._lock:
             self.conn.execute("DELETE FROM messages")
             self.conn.execute("DELETE FROM sessions")

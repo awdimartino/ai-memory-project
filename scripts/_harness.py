@@ -37,6 +37,14 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def repo_path(*parts: str) -> str:
+    """Absolute path inside the repo, so a script works from any working directory."""
+    return os.path.join(_ROOT, *parts)
+
+
 def scratch_env(db_name: str = "scratch.db", **overrides) -> str:
     """Point the app at a throwaway DB with background jobs off. Returns the db path.
 

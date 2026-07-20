@@ -26,6 +26,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 
 import config
+from core.embodiment import embodiment_claim
+from core.textsim import is_repeat
 from core.prompts import (
     FOLLOWUP_CUE,
     INTENTIONS_SCHEMA,
@@ -195,7 +197,9 @@ class Companion:
             if self._asleep:
                 await self.wake()  # reload the LLM before the first reply after standby
             recalled = await self.memory.recall(user_text)
-            core = self.memory.core_memories()
+            # Turn-gated: sticky/cooldown so core facts aren't in literally every prompt.
+            turn = self.store.message_count()
+            core, core_ids = self.memory.core_for_turn(turn)
             persona = self.meta.get(PERSONA_SELF_KEY)
 
             # Emotion is autonomic (Tier-1): the user's message shifts mood, which
@@ -269,6 +273,8 @@ class Companion:
                 self._followups_left = config.FOLLOWUP_MAX_PER_TURN
                 self._last_reply_at = time.monotonic()
 
+            if core_ids:
+                await asyncio.to_thread(self.memory.mark_injected, core_ids, turn)
             self._maybe_consolidate()
             return TurnResult("" if silent else text, stats, recalled, emotion_info,
                               core, stats.get("tools"), silent=silent)
@@ -296,13 +302,28 @@ class Companion:
         return extra, core, mood_prompt
 
     async def _aside(self, system: str, cue: str) -> str | None:
-        """Generate one unprompted message. Returns None if she declines or says nothing."""
+        """Generate one unprompted message. Returns None if she declines or says nothing.
+
+        Also drops anything claiming a physical experience she didn't have. Staying
+        quiet is already a valid outcome here, so a fabricated "I found a good spot to
+        sit" (an actual logged follow-up) costs nothing to discard — whereas letting it
+        through is a falsifiable lie, which is the thing that collapses trust. The
+        prompt forbids this too; the filter exists because ~a quarter of the base
+        model's dialogue prior is exactly these utterances.
+        """
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
         messages.append({"role": "user", "content": cue})
         text, _ = await self.llm.stream(messages, _sink)
         text = text.strip()
-        return None if not text or _is_pass(text) else text
+        if not text or _is_pass(text):
+            return None
+        claim = embodiment_claim(text)
+        if claim:
+            logger.info("aside discarded, claims an experience she didn't have (%r): %s",
+                        claim, text[:80])
+            return None
+        return text
 
     async def _log_assistant_turn(self, text: str) -> None:
         """Record one of her unprompted messages as a real assistant turn.
@@ -406,6 +427,14 @@ class Companion:
 
         text = await self._aside(system, REFLECT_CUE)
         if text is None:
+            return None
+        # Programmatic repeat guard. The prompt above already shows her `recent` and
+        # asks her not to repeat, and it does not hold: measured RRR 0.26 over the real
+        # journal, with five near-verbatim pairs and three byte-identical entries. A
+        # restated thought is not a new thought, and repetition in self-generated
+        # content predicts it's confabulated rather than important.
+        if is_repeat(text, recent):
+            logger.info("reflection discarded, restates a recent thought: %s", text[:80])
             return None
 
         dom = None
@@ -550,6 +579,10 @@ class Companion:
             return None
         text = text[:config.SELFNOTES_MAX_CHARS].strip()
         await asyncio.to_thread(self.meta.set, SELF_NOTES_KEY, text)
+        # Log the revision. The slot is overwritten wholesale, so without this there's
+        # no history to score for repetition — and an operating-rule that keeps getting
+        # re-derived is the signature of a WRONG one, not an important one.
+        await asyncio.to_thread(self.store.log_self_notes, text)
         logger.info("self-notes updated: %s", text[:80].replace("\n", " | "))
         return text
 
@@ -562,13 +595,34 @@ class Companion:
         """
         if self._consol_lock.locked():
             return
-        if len(self._unconsolidated) < config.CONSOLIDATE_WINDOW:
+        if len(self._unconsolidated) < config.CONSOLIDATE_WINDOW and not self._is_salient():
             return
         # Take at most ONE window; a lone fact drowns in a huge, low-signal chunk (extraction
         # misses a single fact buried in 20+ noisy messages). The rest stays buffered.
         chunk = self._unconsolidated[:config.CONSOLIDATE_WINDOW]
         self._unconsolidated = self._unconsolidated[config.CONSOLIDATE_WINDOW:]
         asyncio.create_task(self._consolidate(chunk))
+
+    def _is_salient(self) -> bool:
+        """Has enough emotionally-charged material accumulated to consolidate early?
+
+        A fixed window spends identical effort on "morning / ok" and on the
+        conversation where he says his dad is sick — which is exactly backwards, and
+        fills memory with trivia. Generative Agents fires reflection on an accumulated
+        importance threshold rather than a timer; the emotion classifier gives us that
+        accumulator for free.
+
+        This only lets a charged window fire EARLY. The window size remains a hard
+        ceiling above, so a long flat stretch is still consolidated — salience can
+        never make her save less, only sooner.
+        """
+        if self.emotion is None or config.CONSOLIDATE_SALIENCE <= 0:
+            return False
+        if len(self._unconsolidated) < config.SALIENCE_MIN_MESSAGES:
+            return False
+        # Distance of the current mood from its baseline: how far this conversation
+        # has moved her, summed across channels.
+        return self.emotion.arousal() >= config.CONSOLIDATE_SALIENCE
 
     async def _consolidate(self, chunk: list[dict]) -> None:
         async with self._consol_lock:
