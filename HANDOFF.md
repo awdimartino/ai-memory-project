@@ -1,8 +1,13 @@
 # v2.2 Handoff — resume here
 
 Short brief for picking up the AI-memory-companion build in a fresh session.
-**The authoritative design + full build log is [`V2_PLAN.md`](V2_PLAN.md) — read it first.**
-This file is the quick "where are we / how to run / what's next" summary.
+**This file is the living state: where we are, what's next, what to watch.**
+
+For how the thing actually *works*, the docs are now the better entry point:
+[`README.md`](README.md) (start here) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
+[`docs/TUNING.md`](docs/TUNING.md) (symptom → knob) · [`docs/TESTING.md`](docs/TESTING.md) ·
+[`docs/EXTENDING.md`](docs/EXTENDING.md) · [`evals/README.md`](evals/README.md) (the gold set).
+The authoritative design rationale + full build log is [`V2_PLAN.md`](V2_PLAN.md).
 
 > **2026-07-20: a research sweep reshaped the roadmap.** §8 gained **§G (what NOT to build)** and
 > **§H (findings that challenge things already built)** — read both before picking up any §A/§B item.
