@@ -505,6 +505,37 @@ tool-calling **prong A** below (no migration, still worthwhile).
     revisited (goal: ~5s + still coherent). Thinking on/off is template-controlled (chat_template_kwargs/reasoning_effort
     are no-ops, same as qwen).
 
+**✅ ANSWERED 2026-07-20: Gemma thinking-OFF is 6.0s — and it does NOT fix the reasoning gap.**
+The deciding data point this section asked for, measured (`model_tryout.py`, template edited to
+`{% set enable_thinking = false %}`, `reason=0c` confirming it took):
+
+| model | avg / 11 tests | `bat_ball` |
+|---|---|---|
+| qwen3.5-9b (production) | **2.7s** | **WRONG** |
+| gemma-4-12b-qat thinking-off | **6.0s** (was ~13s on) | **WRONG** |
+
+**The reframe this forces is the valuable part.** A live session raised "are we hitting qwen 9b's
+intelligence limits?" — but a **12B fails the same reasoning probe**, while §0 already records
+gpt-oss going **WRONG → OK when `reasoning_effort` went low → medium**. So `bat_ball` is gated by
+**thinking, not parameters**. What's being hit is the ceiling of **thinking-OFF** — accepted
+deliberately for the ~20× consolidation speedup — and buying it back needs a reasoning budget, not
+new weights. **That is exactly what this section is parked on.** ⚠️ Do not migrate models hoping to
+fix reasoning; the measurement says it won't.
+
+Gemma also answered `identity` with *"I'm Mari. Just hanging out for now, honestly. How's your day
+going so far?"* — three sentences, ending on a question, the failure that killed qwen3-8b (72%
+q-end). Non-conclusive (bake-off persona, no closing reminder), but `bakeoff_personality.py` should
+run before Gemma is called viable.
+
+**⚠️ MoE on 16GB is a dead end as catalogued.** `qwen/qwen3-30b-a3b-2507` offers **only Q4_K_M at
+18.56 GB** in LM Studio (no Q3 variant; download aborted, nothing spent). MoE reduces *compute* per
+token, not *weights in memory*, so 3B-active buys nothing on the VRAM constraint — the experts still
+have to live somewhere. The clean fix is llama.cpp's `--cpu-moe`, the same class of flag LM Studio
+was already found to strip. Treat 2026 "best local LLM" guides with suspicion: one claims Llama 4
+Scout (109B total) "fits on a 12GB card at Q4", which is off by ~5×.
+
+**Still-fitting untested candidate:** Qwen3 14B @ Q4_K_M (~9 GB).
+
 **Tool-calling reliability — plan still valid, unstarted.** `tool_eval.py` noisy (22/23/25, run ×3). **TIME
 inconsistency = temperature** (0.8 too hot for routing; 0.2 → TIME 7/8) → **prong A: per-call temperature** in
 `infrastructure/llm_client.py` (cool the tool-decision pass ~0.2–0.3, keep the answer at 0.8). No serving change,
