@@ -139,7 +139,13 @@ connection lost rows under concurrent writes (measured 594/600, with `SystemErro
 
 ## Change a prompt
 
-All prompt text lives in `core/prompts.py`. Two things to know before you edit:
+All prompt text lives in `core/prompts.py`. Three things to know before you edit:
+
+**Add text as a labelled block.** `system_blocks()` is the single assembly point and returns
+`(label, text)` pairs; `build_system()` just joins them. A new block needs a short, unique label —
+that label is what the prompt inspector shows, and it's how anyone (including you, later) attributes
+a strange reply to the thing that caused it. `tests/test_prompt_blocks.py` pins the invariant that
+the blocks rejoin to exactly the string sent, so an inspector can never show a prompt that wasn't.
 
 **Position beats volume.** Small models follow the rule nearest the generation point far better
 than the same rule buried 1,500 tokens up. When a rule isn't holding, **move it later** before you

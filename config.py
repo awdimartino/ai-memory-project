@@ -100,6 +100,13 @@ BOT_NAME = os.environ.get("BOT_NAME", "Mari")
 # across restarts as context.
 HISTORY_TURNS = _i("HISTORY_TURNS", 20)
 
+# How many recent prompts the inspector keeps (chat turns, reach-outs, follow-ups).
+# In-memory and bounded on purpose: it answers "why did she just say that", and a
+# follow-up firing right after a reply would otherwise push the interesting one out
+# of a single-slot buffer. Deliberately NOT persisted — the value expires in a few
+# turns and a table would cost a migration to store debugging chaff.
+PROMPT_LOG_MAX = _i("PROMPT_LOG_MAX", 12)
+
 # Persistence.
 DB_PATH = os.environ.get("DB_PATH", "companion.db")
 

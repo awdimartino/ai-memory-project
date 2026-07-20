@@ -21,6 +21,7 @@ import asyncio
 import logging
 import re
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
@@ -33,16 +34,17 @@ from core.prompts import (
     INTENTIONS_SCHEMA,
     INTENTIONS_SYSTEM,
     REFLECT_CUE,
-    build_followup_system,
     build_intentions_user,
     build_persona_edit_system,
     build_persona_edit_user,
     build_reachout_cue,
-    build_reachout_system,
     build_reflect_system,
     build_self_notes_system,
     build_self_notes_user,
-    build_system,
+    followup_blocks,
+    join_blocks,
+    reachout_blocks,
+    system_blocks,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,6 +167,11 @@ class Companion:
         self._session_title: str | None = session_title
         # The proactivity heartbeat, attached by bootstrap; started by the entry point.
         self.tick = None
+        # Recent prompts, newest last, for the prompt inspector. In-memory and bounded:
+        # this is a debugging window on "why did she just say that", not a record —
+        # persisting it would mean a schema migration and a growing table for data
+        # whose value expires within a few turns.
+        self._prompts: deque = deque(maxlen=config.PROMPT_LOG_MAX)
 
     def switch_conversation(self, session_id: int) -> None:
         """Make `session_id` the active conversation: rebind history + title. Everything
@@ -189,6 +196,29 @@ class Companion:
     def pending_count(self) -> int:
         """Messages awaiting consolidation (the tick may flush these while idle)."""
         return len(self._unconsolidated)
+
+    def _record_prompt(self, kind: str, blocks: list[tuple[str, str]],
+                       messages: list[dict]) -> dict:
+        """Log one generation's prompt for the inspector. Returns the record, so the
+        caller can attach the reply once it exists.
+
+        `messages` is the array actually handed to the model, stored as-is — the
+        inspector's whole value is being the ground truth, so nothing here
+        reconstructs or summarises what was sent.
+        """
+        record = {
+            "kind": kind,
+            "at": time.time(),
+            "blocks": [{"label": label, "text": text} for label, text in blocks],
+            "messages": [dict(m) for m in messages],
+            "reply": None,   # filled in after generation; None => she stayed quiet
+        }
+        self._prompts.append(record)
+        return record
+
+    def prompt_log(self) -> list[dict]:
+        """Recent prompts, newest first — for the prompt inspector."""
+        return list(reversed(self._prompts))
 
     async def send(self, user_text: str, on_token: Callable[[str], Awaitable]) -> TurnResult:
         """Recall + react, stream a reply, log, and maybe consolidate. Returns a TurnResult."""
@@ -215,13 +245,15 @@ class Companion:
             tool_names = self.tools.names() if self.tools else None
             # Her open agenda rides along softly — she may raise one if the talk gets there.
             agenda = [i["content"] for i in self.intentions.active()] if self.intentions else None
-            system = build_system(extra, mood_prompt, core=core, persona=persona,
-                                  tools=tool_names, allow_silence=True, intentions=agenda,
-                                  self_notes=self.meta.get(SELF_NOTES_KEY))
+            blocks = system_blocks(extra, mood_prompt, core=core, persona=persona,
+                                   tools=tool_names, allow_silence=True, intentions=agenda,
+                                   self_notes=self.meta.get(SELF_NOTES_KEY))
+            system = join_blocks(blocks)
 
             messages = [{"role": "system", "content": system}]
             messages.extend(self.history[-config.HISTORY_TURNS:])
             messages.append({"role": "user", "content": user_text})
+            prompt_record = self._record_prompt("chat", blocks, messages)
 
             # She may choose to stay silent by replying "PASS". Gate the token stream so the
             # word PASS never reaches the UI: hold any prefix that could still become "PASS",
@@ -248,6 +280,7 @@ class Companion:
                 text, stats = await self.llm.stream(messages, guarded)
 
             silent = _is_pass(text)
+            prompt_record["reply"] = None if silent else text
 
             uid = await asyncio.to_thread(self.store.add_message, self.session_id, "user", user_text)
             self.history.append({"role": "user", "content": user_text})
@@ -301,7 +334,7 @@ class Companion:
         mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
         return extra, core, mood_prompt
 
-    async def _aside(self, system: str, cue: str) -> str | None:
+    async def _aside(self, blocks: list[tuple[str, str]], cue: str, kind: str) -> str | None:
         """Generate one unprompted message. Returns None if she declines or says nothing.
 
         Also drops anything claiming a physical experience she didn't have. Staying
@@ -310,10 +343,15 @@ class Companion:
         through is a falsifiable lie, which is the thing that collapses trust. The
         prompt forbids this too; the filter exists because ~a quarter of the base
         model's dialogue prior is exactly these utterances.
+
+        Takes labelled `blocks` rather than an assembled system string so the prompt
+        inspector can attribute an out-of-nowhere message to the block that caused it;
+        `kind` names the path for the inspector's list.
         """
-        messages = [{"role": "system", "content": system}]
+        messages = [{"role": "system", "content": join_blocks(blocks)}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
         messages.append({"role": "user", "content": cue})
+        record = self._record_prompt(kind, blocks, messages)
         text, _ = await self.llm.stream(messages, _sink)
         text = text.strip()
         if not text or _is_pass(text):
@@ -322,7 +360,11 @@ class Companion:
         if claim:
             logger.info("aside discarded, claims an experience she didn't have (%r): %s",
                         claim, text[:80])
+            # Recorded as discarded rather than dropped: a filtered aside is exactly
+            # the kind of invisible event the inspector should still show.
+            record["reply"] = f"(discarded — claimed an experience she didn't have: {text})"
             return None
+        record["reply"] = text
         return text
 
     async def _log_assistant_turn(self, text: str) -> None:
@@ -348,12 +390,13 @@ class Companion:
         if self.intentions is not None:
             pending = self.intentions.active(limit=1)
             intention = pending[0] if pending else None
-        system = build_reachout_system(extra, mood_prompt, core=core,
-                                       persona=self.meta.get(PERSONA_SELF_KEY),
-                                       intention=intention["content"] if intention else None,
-                                       self_notes=self.meta.get(SELF_NOTES_KEY))
+        blocks = reachout_blocks(extra, mood_prompt, core=core,
+                                 persona=self.meta.get(PERSONA_SELF_KEY),
+                                 intention=intention["content"] if intention else None,
+                                 self_notes=self.meta.get(SELF_NOTES_KEY))
 
-        text = await self._aside(system, build_reachout_cue(_humanize_away(self.idle_seconds())))
+        text = await self._aside(blocks, build_reachout_cue(_humanize_away(self.idle_seconds())),
+                                 "reach-out")
         if text is None:
             logger.info("reach-out: stayed quiet")
             return None
@@ -395,12 +438,12 @@ class Companion:
         # A follow-up may fold in an intention if it connects; it doesn't explicitly fulfill one —
         # form_intentions' resolution pass clears whatever the conversation actually covered.
         pending = self.intentions.active(limit=1) if self.intentions is not None else []
-        system = build_followup_system(extra, mood_prompt, core=core,
-                                       persona=self.meta.get(PERSONA_SELF_KEY),
-                                       intention=pending[0]["content"] if pending else None,
-                                       self_notes=self.meta.get(SELF_NOTES_KEY))
+        blocks = followup_blocks(extra, mood_prompt, core=core,
+                                 persona=self.meta.get(PERSONA_SELF_KEY),
+                                 intention=pending[0]["content"] if pending else None,
+                                 self_notes=self.meta.get(SELF_NOTES_KEY))
 
-        text = await self._aside(system, FOLLOWUP_CUE)
+        text = await self._aside(blocks, FOLLOWUP_CUE, "follow-up")
         if text is None:
             self._followups_left = 0
             logger.info("follow-up: stayed quiet")

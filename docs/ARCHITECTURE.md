@@ -46,9 +46,14 @@ Two related disciplines, same origin:
 3. **Core facts.** Identity facts injected directly, subject to a sticky/cooldown window so they
    aren't in *literally* every prompt. The name bypasses that gate.
 4. **Emotion (autonomic).** RoBERTa scores the message; 28 labels fold into 6 mood channels.
-5. **Build the prompt.** `build_system()` assembles: persona → tools note → her self-description →
-   learned self-notes → core facts → recalled facts → open intentions → mood → a terse
-   end-of-prompt reminder.
+5. **Build the prompt.** `system_blocks()` assembles labelled blocks in order: base persona → tools
+   note → her self-description → learned self-notes → core facts → recalled facts → open
+   intentions → mood → a terse end-of-prompt reminder. `build_system()` is `join_blocks()` over
+   that — **one assembly point, deliberately**, so the prompt inspector (header → "prompt") can
+   show which block produced a reply without re-deriving the prompt. An inspector that
+   reconstructed it would drift from what was sent and mislead exactly when you're debugging.
+   Reach-out and follow-up add their own framing blocks on top (`reachout_blocks`,
+   `followup_blocks`); the last dozen prompts are kept in memory for the inspector.
 6. **Generate.** Streams through the tool loop when tools are registered. She may reply `PASS`,
    which means silence — a gate holds the token stream so the word never flashes on screen.
 7. **Log.** Both turns to the episodic store; the assistant turn is skipped on a silent turn.

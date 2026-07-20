@@ -68,6 +68,13 @@ message wakes her.
 **She can reach your phone.** Unprompted messages push via a self-hosted Bark server whenever the
 chat isn't actually in front of you.
 
+**You can see exactly why she said something.** The prompt inspector (header → "prompt") shows the
+last dozen generations — chat turns, reach-outs and follow-ups — broken into labelled blocks:
+base persona, her self-written persona, learned self-notes, core memory, recalled facts,
+intentions, mood. Seven things inject into the same prompt, so which one moved a reply is
+otherwise unanswerable. It shows the blocks the prompt was *built* from rather than a
+reconstruction, so it can't drift from what was actually sent.
+
 ---
 
 ## Layout

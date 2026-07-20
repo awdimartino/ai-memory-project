@@ -536,7 +536,8 @@ missing.** Adding planning makes the inner life *goal-directed*:
   meta slot + `SelfNotesJob` + a voice guard; full design in §2). The self-improving closed loop is closed: she now
   distills her own "ease off the questions" lessons from how the user reacts, and they steer every user-facing
   prompt — the lessons we'd been hand-tuning, learned unsupervised. **Possible later:** let a note *decay* if the
-  behavior it describes stops recurring, and show which note changed a given reply in the prompt-inspector tab (§8-C).
+  behavior it describes stops recurring. (Seeing which note was in play for a given reply is **now
+  possible** — the prompt inspector shows the `learned self-notes` block per generation, 2026-07-20.)
 - **Relational continuity — NEW (small).** Let persisted mood/drives shape her *engagement level* (reply length,
   silent turns, warmth) across sessions, not just word choice within one: a little cool after a rough exchange,
   warming back over the next chats. Uses the silent-turn seam built 2026-07-19.
@@ -617,7 +618,7 @@ specific one rather than the direction.
 - **Farewell ritual + forward continuity - NEW** - greetings/farewells plus an explicit "talk to
   you tomorrow". Measured **69% vs 35%** on a behavioural bond marker, and the gap **widened** over
   time rather than decaying. She does "talk about the time apart"; she has neither of these.
-- **Time-of-day awareness**, **surface her inner life**, **prompt inspector** (user-requested).
+- **Time-of-day awareness**, **surface her inner life**. ~~**prompt inspector**~~ **DONE 2026-07-20.**
 
 ### D. Reach beyond the tab
 - ~~**Push notifications**~~ **DONE 2026-07-19.** **Extended 2026-07-20 (user request):** push now
@@ -732,6 +733,32 @@ back ON, and the test runner crashing on unicode when reporting a failure.
   reach-out opens factual-first and stops hedging about interrupting.
 - **Push now fires whenever the chat isn't in front of you** (user request) — closed, backgrounded,
   or no tab at all. Follow-ups push too.
+
+### ✅ DONE 2026-07-20 (later session): prompt inspector — **needs a browser look**
+
+Header → **"prompt"**. Shows the last `PROMPT_LOG_MAX` (12) generations — chat turns, reach-outs
+and follow-ups — as a turn list plus the exact prompt behind the selected one, split into labelled
+blocks (base persona / self-written persona / learned self-notes / core memory / recalled memories
+/ intentions / mood / closing reminder, plus reach-out and follow-up framing). Static blocks are
+collapsed by default so what *varies* is what you see; the history + final cue and the reply
+(including a `PASS` shown as "stayed quiet", and asides discarded by the embodiment filter) are
+there too.
+
+**The design point worth keeping.** `core/prompts.py` now has ONE assembly point,
+`system_blocks()` → `(label, text)` pairs, and `build_system()` is `join_blocks()` over it. The
+inspector renders those blocks, so it cannot show a prompt that wasn't sent — a reconstruction
+would drift and would mislead exactly when you're using it to debug. The refactor was verified
+byte-identical against `HEAD` across **2412 prompt combinations** before anything was built on it,
+and `tests/test_prompt_blocks.py` pins the rejoin invariant permanently.
+
+**Immediately useful finding:** on a turn with persona + self-notes + core + two recalled facts,
+the system prompt was **6302 chars (~1575 tokens), of which the base persona is 5378 — 85%**. Worth
+knowing before anyone adds another always-on block.
+
+**What's NOT verified:** the browser rendering. The endpoint, the record shape and the block/label
+data were verified offline (a real `send()` through a stubbed model, plus a scratch server on
+:8099), but nobody has opened the tab. Take a look before trusting the layout, especially on mobile.
+Recording is in-memory only — no schema change, and it resets on restart.
 
 ### ✅ DONE (code + offline tests): recall fixed by a contrast gate — **live eval still owed**
 
@@ -897,8 +924,7 @@ the measured distributions, including the two false-positive guards.)*
   TRICKY 6/6. The §E "always-on recall index" may be a better lever than temperature.
 
 ### User-requested, still deferred
-- **Prompt-inspector tab** (§C) — more valuable than ever: persona, intentions, self-notes AND now
-  a turn-gated core set all inject, so this is the only way to see which one moved a reply.
+- ~~**Prompt-inspector tab** (§C)~~ **DONE 2026-07-20** — header → "prompt". See the entry above.
 - **Follow-up decay** — 2-3 chained messages with tapering probability instead of the hard cap of 1.
 
 ### Parked

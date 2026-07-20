@@ -202,6 +202,16 @@ async def memories(c: Live) -> dict:
     return {"memories": c.all_memories() if c else []}
 
 
+@app.get("/prompts")
+async def prompts(c: Live) -> dict:
+    """Recent prompts, newest first — for the prompt inspector.
+
+    Polled on open rather than pushed over the socket: the full prompt is a few KB
+    per turn and nobody needs it on the hot path of every reply.
+    """
+    return {"prompts": c.prompt_log() if c else []}
+
+
 @app.post("/memory/edit")
 async def memory_edit(payload: dict, c: Live) -> dict:
     """Rewrite a memory's text and re-embed it so recall still matches (hits LM Studio)."""

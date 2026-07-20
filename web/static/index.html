@@ -267,6 +267,41 @@
     .danger:hover { background: color-mix(in srgb, var(--bad) 26%, transparent); }
     .mem-empty { color: var(--muted); font-size: 13px; padding: 28px; text-align: center; }
 
+    /* ---------- Prompt inspector ---------- */
+    /* Two panes: the turns that were generated, and the exact prompt behind the
+       selected one. Wider than the memory modal because prompt text is the content. */
+    .modal-box.wide { width: min(1040px, 96vw); }
+    .pi-body { display: flex; min-height: 0; flex: 1; }
+    .pi-turns { width: 216px; flex: none; overflow-y: auto; border-right: 1px solid var(--line); padding: 8px; }
+    .pi-turn { padding: 8px 9px; border-radius: 9px; cursor: pointer; margin-bottom: 3px; border: 1px solid transparent; }
+    .pi-turn:hover { background: var(--elev); }
+    .pi-turn.active { background: var(--elev); border-color: var(--line); }
+    .pi-turn .k { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .pi-turn .kind { text-transform: uppercase; letter-spacing: .04em; font-size: 9px; padding: 1px 6px; border-radius: 20px; border: 1px solid var(--line); }
+    .pi-turn .kind.chat { color: var(--user); }
+    .pi-turn .kind.reachout, .pi-turn .kind.followup { color: var(--mari); }
+    .pi-turn .t { font-size: 12px; color: var(--text); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pi-turn .t.quiet { color: var(--faint); font-style: italic; }
+    .pi-detail { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 16px; }
+    .pi-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+    .pi-chip { font-size: 10px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--line); color: var(--muted); background: var(--elev); }
+    .pi-chip.on { color: var(--text); border-color: var(--faint); }
+    .pi-block { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+    .pi-block > summary { display: flex; align-items: center; gap: 8px; padding: 8px 11px; cursor: pointer; font-size: 12px; user-select: none; list-style: none; }
+    .pi-block > summary::-webkit-details-marker { display: none; }
+    .pi-block > summary:hover { background: var(--elev); }
+    .pi-block .lbl { font-weight: 600; }
+    .pi-block .n { margin-left: auto; color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .pi-block pre { margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--bg); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .pi-msg { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 12px 0 5px; }
+    .pi-sec { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 7px; }
+    .pi-reply { border-left: 2px solid var(--mari); padding: 6px 0 6px 11px; font-size: 13px; margin-bottom: 4px; }
+    .pi-reply.quiet { border-color: var(--faint); color: var(--faint); font-style: italic; }
+    @media (max-width: 760px) {
+      .pi-body { flex-direction: column; }
+      .pi-turns { width: auto; max-height: 132px; border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+
     .avatar.asleep { background: linear-gradient(145deg, #6b5fa0, #48416e); color: #e8e6f5; box-shadow: none; }
     .avatar { transition: box-shadow .5s; }
 
@@ -318,6 +353,7 @@
     <span class="spacer"></span>
     <button id="themeBtn" class="hbtn icon" type="button" title="toggle light / dark">☾</button>
     <button id="manageMem" class="hbtn" type="button">memory</button>
+    <button id="showPrompts" class="hbtn" type="button">prompt</button>
     <button id="toggleStatus" class="hbtn" type="button">panel</button>
   </header>
 
@@ -357,6 +393,19 @@
         <button id="memClear" class="danger" type="button">clear all memories</button>
         <span class="grow"></span>
         <button id="memReset" class="danger" type="button">full reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="promptModal" class="modal hidden">
+    <div class="modal-box wide">
+      <div class="modal-head">
+        Prompt inspector <span class="sub" id="promptCount"></span>
+        <button id="promptClose" class="xbtn" type="button" title="close">×</button>
+      </div>
+      <div class="pi-body">
+        <div id="promptTurns" class="pi-turns"></div>
+        <div id="promptDetail" class="pi-detail"></div>
       </div>
     </div>
   </div>
@@ -841,6 +890,106 @@
       const r = await postJSON("/admin/factory_reset", { confirm: true });
       if (r.ok) location.reload(); else alert("reset failed: " + (r.error || "unknown"));
     };
+
+    // --- Prompt inspector ---
+    // Answers "why did she just say that". Persona, self-written persona, self-notes,
+    // core memory, recall, intentions and mood all inject into the same prompt, so
+    // the labelled blocks (built server-side by prompts.system_blocks — the same call
+    // that builds the string actually sent) are the only way to attribute a reply.
+    const promptModal = document.getElementById("promptModal");
+    // Blocks that are identical every turn. Collapsed by default so what actually
+    // VARIES is what you see first — the base persona alone would bury it.
+    const PI_STATIC = new Set(["base persona", "tools", "closing reminder",
+                               "reach-out framing", "follow-up framing"]);
+    let piPrompts = [], piSel = 0;
+
+    async function loadPrompts() {
+      const turns = document.getElementById("promptTurns");
+      const detail = document.getElementById("promptDetail");
+      try { piPrompts = (await (await fetch("/prompts")).json()).prompts || []; }
+      catch (e) { piPrompts = []; }
+      document.getElementById("promptCount").textContent =
+        piPrompts.length ? `last ${piPrompts.length}` : "";
+      turns.innerHTML = ""; detail.innerHTML = "";
+      if (!piPrompts.length) {
+        detail.innerHTML = '<div class="mem-empty">no prompts yet — say something and they show up here</div>';
+        return;
+      }
+      piSel = 0;
+      piPrompts.forEach((p, i) => turns.appendChild(piTurnRow(p, i)));
+      renderPrompt(piPrompts[0]);
+    }
+
+    function piTurnRow(p, i) {
+      const row = el("div", "pi-turn" + (i === piSel ? " active" : ""));
+      const head = el("div", "k");
+      head.appendChild(el("span", "kind " + p.kind.replace("-", ""), p.kind));
+      head.appendChild(el("span", null, fmtAgo(Math.max(0, Math.round(Date.now() / 1000 - p.at)))));
+      row.appendChild(head);
+      // A null reply means she chose silence — worth seeing, since a PASS leaves no
+      // other trace in the UI at all.
+      const quiet = p.reply == null;
+      row.appendChild(el("div", "t" + (quiet ? " quiet" : ""), quiet ? "stayed quiet" : p.reply));
+      row.onclick = () => {
+        piSel = i;
+        document.querySelectorAll("#promptTurns .pi-turn").forEach((n, j) =>
+          n.classList.toggle("active", j === i));
+        renderPrompt(p);
+      };
+      return row;
+    }
+
+    function renderPrompt(p) {
+      const box = document.getElementById("promptDetail");
+      box.innerHTML = "";
+      box.scrollTop = 0;
+      const system = p.blocks.map((b) => b.text).join("\n\n");
+      // ~4 chars/token is a rough-but-honest gauge; labelled approximate so nobody
+      // reads it as a real count.
+      box.appendChild(el("div", "pi-sec",
+        `system prompt · ${p.blocks.length} blocks · ${system.length} chars · ~${Math.round(system.length / 4)} tokens`));
+
+      const chips = el("div", "pi-chips");
+      p.blocks.forEach((b) => chips.appendChild(el("span", "pi-chip on", b.label)));
+      box.appendChild(chips);
+
+      p.blocks.forEach((b) => {
+        const d = el("details", "pi-block");
+        d.open = !PI_STATIC.has(b.label);
+        const s = el("summary");
+        s.appendChild(el("span", "lbl", b.label));
+        s.appendChild(el("span", "n", b.text.length + " chars"));
+        d.appendChild(s);
+        d.appendChild(el("pre", null, b.text));
+        box.appendChild(d);
+      });
+
+      // Everything after the system message: the history that went in, then the final
+      // turn — for an aside that's the cue, which is what makes an unprompted message
+      // legible ("it's been about 3 hours since they last said anything").
+      const rest = p.messages.slice(1);
+      box.appendChild(el("div", "pi-sec", `conversation sent · ${rest.length} messages`));
+      const conv = el("details", "pi-block");
+      const cs = el("summary");
+      cs.appendChild(el("span", "lbl", "history + final turn"));
+      cs.appendChild(el("span", "n", rest.reduce((n, m) => n + (m.content || "").length, 0) + " chars"));
+      conv.appendChild(cs);
+      conv.appendChild(el("pre", null,
+        rest.map((m) => `[${m.role}] ${m.content}`).join("\n\n")));
+      box.appendChild(conv);
+
+      box.appendChild(el("div", "pi-sec", "reply"));
+      box.appendChild(el("div", "pi-reply" + (p.reply == null ? " quiet" : ""),
+        p.reply == null ? "she stayed quiet (PASS)" : p.reply));
+    }
+
+    document.getElementById("showPrompts").onclick = async () => {
+      await loadPrompts();
+      promptModal.classList.remove("hidden");
+    };
+    document.getElementById("promptClose").onclick = () => promptModal.classList.add("hidden");
+    promptModal.onclick = (e) => { if (e.target === promptModal) promptModal.classList.add("hidden"); };
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") promptModal.classList.add("hidden"); });
 
     // --- Conversation tabs ---
     function renderConversations(list, active) {

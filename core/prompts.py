@@ -161,49 +161,76 @@ def build_system(memories: list[str], mood: str | None = None,
     colors tone without being named. `tools` are the names of registered tools; when
     present, a capabilities block is added (and reconciled with the persona rules).
     """
-    parts = [SYSTEM_PROMPT]
+    return join_blocks(system_blocks(
+        memories, mood, core=core, persona=persona, tools=tools,
+        allow_silence=allow_silence, intentions=intentions, self_notes=self_notes))
+
+
+def join_blocks(blocks: list[tuple[str, str]]) -> str:
+    """Assemble labelled blocks into the string actually sent to the model."""
+    return "\n\n".join(text for _, text in blocks)
+
+
+def system_blocks(memories: list[str], mood: str | None = None,
+                  core: list[str] | None = None, persona: str | None = None,
+                  tools: list[str] | None = None, allow_silence: bool = False,
+                  intentions: list[str] | None = None,
+                  self_notes: str | None = None) -> list[tuple[str, str]]:
+    """The chat system message as labelled `(label, text)` blocks, in prompt order.
+
+    This is the single assembly point; `build_system` is `join_blocks` over it. That
+    matters for the prompt inspector, which displays these labels: an inspector that
+    RE-DERIVED the prompt would drift from what was actually sent and would mislead
+    exactly when you're debugging a strange reply. The labels are the attribution —
+    with base persona, self-written persona, self-notes, core, recall, intentions and
+    mood all injecting at once, which one moved a reply is otherwise unanswerable.
+    """
+    blocks = [("base persona", SYSTEM_PROMPT)]
     tools_note = build_tools_note(tools)
     if tools_note:
-        parts.append(tools_note)
+        blocks.append(("tools", tools_note))
     if persona:
-        parts.append(
+        blocks.append(("self-written persona",
             f"Who you've become as you've gotten to know them (your own evolving sense of "
             f"yourself; let it shape how you are, though the rules above still hold):\n{persona}"
-        )
+        ))
     if self_notes:
-        parts.append(
+        blocks.append(("learned self-notes",
             f"What you've learned about how to be with them, from experience. Let these shape how you "
             f"actually act (the rules above still hold):\n{self_notes}"
-        )
+        ))
     if core:
         lines = "\n".join(f"- {m}" for m in core)
-        parts.append(f"The core things you always know about them (never forget these):\n{lines}")
+        blocks.append(("core memory",
+                       f"The core things you always know about them (never forget these):\n{lines}"))
     if memories:
         lines = "\n".join(f"- {m}" for m in memories)
-        parts.append(
+        blocks.append(("recalled memories",
             f"Some other things that might be relevant right now (from earlier talks). Use "
             f"them naturally when they fit, and never mention that you 'stored' or 'retrieved' "
             f"anything:\n{lines}"
-        )
+        ))
     if intentions:
         lines = "\n".join(f"- {i}" for i in intentions)
-        parts.append(
+        blocks.append(("intentions",
             f"Things you've been meaning to bring up with them, kept in the back of your mind. Only raise "
             f"one if the conversation naturally gets there. Never force one in, never list them out, and "
             f"never derail what they're actually talking about:\n{lines}"
-        )
+        ))
     if mood:
-        parts.append(mood)
+        blocks.append(("mood", mood))
     # A terse reminder right before she generates — small models follow the rules closest to
     # the end far better than the same rules buried 1500+ tokens up in the persona.
     if allow_silence:
-        parts.append("(For this one: you don't have to reply at all. If it doesn't call for a response, "
-                     "or you'd just rather stay quiet right now, reply with exactly PASS and nothing else. "
-                     "If you do reply: ONE short sentence, and don't end on a question.)")
+        blocks.append(("closing reminder",
+                       "(For this one: you don't have to reply at all. If it doesn't call for a response, "
+                       "or you'd just rather stay quiet right now, reply with exactly PASS and nothing else. "
+                       "If you do reply: ONE short sentence, and don't end on a question.)"))
     else:
-        parts.append("(This reply: ONE short sentence, and do not end on a question. "
-                     "Just react or give your take.)")
-    return "\n\n".join(parts)
+        blocks.append(("closing reminder",
+                       "(This reply: ONE short sentence, and do not end on a question. "
+                       "Just react or give your take.)"))
+    return blocks
 
 
 # --- Proactive reach-out (tick loop pushes this to the web UI) ---
@@ -244,12 +271,26 @@ def build_reachout_system(memories: list[str], mood: str | None = None,
                           intention: str | None = None, self_notes: str | None = None) -> str:
     """System prompt for a proactive message: persona + memories + mood + reach-out framing,
     optionally anchored on an `intention` (something she's been meaning to bring up)."""
-    parts = [build_system(memories, mood, core=core, persona=persona, self_notes=self_notes),
-             _REACHOUT_ADDENDUM]
+    return join_blocks(reachout_blocks(memories, mood, core=core, persona=persona,
+                                       intention=intention, self_notes=self_notes))
+
+
+def reachout_blocks(memories: list[str], mood: str | None = None,
+                    core: list[str] | None = None, persona: str | None = None,
+                    intention: str | None = None,
+                    self_notes: str | None = None) -> list[tuple[str, str]]:
+    """`build_reachout_system` as labelled blocks — see `system_blocks`.
+
+    An unprompted message is the hardest one to explain after the fact ("why did she
+    say THAT, out of nowhere?"), so it's the one most worth being able to inspect.
+    """
+    blocks = system_blocks(memories, mood, core=core, persona=persona, self_notes=self_notes)
+    blocks.append(("reach-out framing", _REACHOUT_ADDENDUM))
     if intention:
-        parts.append(f"You've had this on your mind to bring up with them: \"{intention}\". If it still "
-                     f"feels natural, lead with it; if it doesn't fit the moment, reply PASS.")
-    return "\n\n".join(parts)
+        blocks.append(("anchored intention",
+                       f"You've had this on your mind to bring up with them: \"{intention}\". If it still "
+                       f"feels natural, lead with it; if it doesn't fit the moment, reply PASS."))
+    return blocks
 
 
 # --- Intentions (Mari's private forward agenda — the "planning" pillar) ---
@@ -323,12 +364,22 @@ def build_followup_system(memories: list[str], mood: str | None = None,
                           intention: str | None = None, self_notes: str | None = None) -> str:
     """System prompt for a spontaneous follow-up: the normal chat context + follow-up framing,
     optionally with an `intention` she may fold in if it connects to what she just said."""
-    parts = [build_system(memories, mood, core=core, persona=persona, self_notes=self_notes),
-             _FOLLOWUP_ADDENDUM]
+    return join_blocks(followup_blocks(memories, mood, core=core, persona=persona,
+                                       intention=intention, self_notes=self_notes))
+
+
+def followup_blocks(memories: list[str], mood: str | None = None,
+                    core: list[str] | None = None, persona: str | None = None,
+                    intention: str | None = None,
+                    self_notes: str | None = None) -> list[tuple[str, str]]:
+    """`build_followup_system` as labelled blocks — see `system_blocks`."""
+    blocks = system_blocks(memories, mood, core=core, persona=persona, self_notes=self_notes)
+    blocks.append(("follow-up framing", _FOLLOWUP_ADDENDUM))
     if intention:
-        parts.append(f"(You've also been meaning to: \"{intention}\". Only fold it in if it genuinely "
-                     f"connects to what you just said — otherwise ignore it and PASS as usual.)")
-    return "\n\n".join(parts)
+        blocks.append(("carried intention",
+                       f"(You've also been meaning to: \"{intention}\". Only fold it in if it genuinely "
+                       f"connects to what you just said — otherwise ignore it and PASS as usual.)"))
+    return blocks
 
 
 # --- Self-reflection (private thought journal, written during idle ticks) ---
