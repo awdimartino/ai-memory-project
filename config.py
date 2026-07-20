@@ -151,6 +151,8 @@ INTENTION_ENABLED = os.environ.get("INTENTION_ENABLED", "true").lower() in ("1",
 INTENTION_MIN_IDLE = float(os.environ.get("INTENTION_MIN_IDLE", "180"))   # note them a few min after a chat
 INTENTION_COOLDOWN = float(os.environ.get("INTENTION_COOLDOWN", "900"))   # at most ~every 15 min
 INTENTION_MAX_ACTIVE = int(os.environ.get("INTENTION_MAX_ACTIVE", "8"))   # cap the open agenda (drop oldest)
+# Stale intentions expire so the agenda doesn't linger on things that stopped mattering (0 = never).
+INTENTION_MAX_AGE_DAYS = float(os.environ.get("INTENTION_MAX_AGE_DAYS", "7"))
 
 # Self-modifying persona: during idle ticks Mari rewrites a bot-owned "who you've become"
 # slot in her system prompt, reading her thought journal + core memories. How far it may

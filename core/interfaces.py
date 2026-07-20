@@ -153,6 +153,10 @@ class IntentionStore(Protocol):
         """Retire an intention without acting on it (expiry / over-cap pruning)."""
         ...
 
+    def drop_older_than(self, cutoff_iso: str) -> int:
+        """Retire active intentions created before `cutoff_iso`; return how many."""
+        ...
+
     def clear(self) -> None:
         """Delete every intention (the full-reset admin op)."""
         ...

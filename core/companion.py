@@ -21,6 +21,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 
 import config
@@ -183,8 +184,10 @@ class Companion:
             # Core facts are always injected; drop any recalled duplicates of them.
             extra = [content for content, _ in recalled if content not in core]
             tool_names = self.tools.names() if self.tools else None
+            # Her open agenda rides along softly — she may raise one if the talk gets there.
+            agenda = [i["content"] for i in self.intentions.active()] if self.intentions else None
             system = build_system(extra, mood_prompt, core=core, persona=persona,
-                                  tools=tool_names, allow_silence=True)
+                                  tools=tool_names, allow_silence=True, intentions=agenda)
 
             messages = [{"role": "system", "content": system}]
             messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -322,8 +325,12 @@ class Companion:
         core = self.memory.core_memories()
         extra = [content for content, _ in recalled if content not in core]
         mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        # A follow-up may fold in an intention if it connects; it doesn't explicitly fulfill one —
+        # form_intentions' resolution pass clears whatever the conversation actually covered.
+        pending = self.intentions.active(limit=1) if self.intentions is not None else []
         system = build_followup_system(extra, mood_prompt, core=core,
-                                       persona=self.meta.get(PERSONA_SELF_KEY))
+                                       persona=self.meta.get(PERSONA_SELF_KEY),
+                                       intention=pending[0]["content"] if pending else None)
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -389,29 +396,44 @@ class Companion:
         new ones. Run during idle by IntentionJob; reach-out draws on them (the planning pillar)."""
         if self.intentions is None:
             return []
+        # Expire stale items first, so they neither linger nor crowd out fresher ones at the cap.
+        if config.INTENTION_MAX_AGE_DAYS > 0:
+            cutoff = (datetime.now(timezone.utc)
+                      - timedelta(days=config.INTENTION_MAX_AGE_DAYS)).isoformat()
+            gone = await asyncio.to_thread(self.intentions.drop_older_than, cutoff)
+            if gone:
+                logger.info("expired %d stale intention(s)", gone)
         recent = self.history[-config.HISTORY_TURNS:]
         if not recent:
             return []
-        existing = [i["content"] for i in self.intentions.active()]
+        existing = self.intentions.active()
         raw = await self.llm.structured_json(
             [{"role": "system", "content": INTENTIONS_SYSTEM},
-             {"role": "user", "content": build_intentions_user(recent, existing)}],
+             {"role": "user", "content": build_intentions_user(
+                 recent, [i["content"] for i in existing])}],
             INTENTIONS_SCHEMA)
+        # Clear any the conversation actually covered (1-based indices into `existing`). This is how
+        # chat- and follow-up-raised intentions get retired without a second model call.
+        resolved = 0
+        for n in (raw.get("resolved") or []):
+            if isinstance(n, int) and 1 <= n <= len(existing):
+                await asyncio.to_thread(self.intentions.fulfill, existing[n - 1]["id"])
+                resolved += 1
         proposed = [s.strip() for s in (raw.get("intentions") or [])
                     if isinstance(s, str) and s.strip()]
-        seen = {e.lower() for e in existing}
+        seen = {i["content"].lower() for i in existing}
         added: list[str] = []
         for s in proposed:
             if s.lower() not in seen:  # cheap dedupe guard on top of the prompt's own
                 await asyncio.to_thread(self.intentions.add, s)
                 seen.add(s.lower())
                 added.append(s)
-        # Cap the open agenda — retire the oldest beyond the cap (expired, not acted on).
+        # Cap the open agenda — retire the oldest beyond the cap.
         active = self.intentions.active()
         for old in active[:max(0, len(active) - config.INTENTION_MAX_ACTIVE)]:
             await asyncio.to_thread(self.intentions.drop, old["id"])
-        if added:
-            logger.info("formed %d intention(s): %s", len(added), added[0][:60])
+        if added or resolved:
+            logger.info("intentions: +%d new, %d resolved", len(added), resolved)
         return added
 
     def familiarity(self) -> float:

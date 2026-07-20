@@ -168,10 +168,19 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   **`IntentionJob`** (idle + `INTENTION_COOLDOWN` gated, its own cadence — internal, nothing pushed). **Consumption:**
   `reach_out()` anchors on the **longest-waiting** intention ("You've had this on your mind to bring up…") and
   **fulfills it only if she actually sends**; a PASS leaves it open. **Visible** via `GET /status` + an "Intentions"
-  status-panel card. **Prompt gotcha (fixed):** the first draft said "most reflections add none", which set the
-  default to empty and made thinking-off qwen return `[]` even on a window full of follow-ups (the same shallow-pass
-  failure as the memory-extraction bug); rebalanced with concrete examples → 3/3 on a rich window, `[]` on a barren
-  meta-chat. `tests/test_intentions.py` (16 offline cases). Live-verified: formed "ask how Deadlock is going".
+  status-panel card. **Chat + follow-up awareness:** `build_system(..., intentions=[...])` rides the open agenda
+  along on every chat turn, framed *softly* ("only raise one if the conversation naturally gets there; never force
+  one in"), and `build_followup_system(..., intention=...)` lets a double-text fold one in if it connects.
+  **Resolution:** rather than a fuzzy match or a second model call, `form_intentions` also returns the **numbers of
+  existing intentions the conversation covered** and clears them — which is how chat- and follow-up-raised items get
+  retired. **Expiry:** items older than `INTENTION_MAX_AGE_DAYS` (7) are dropped before each pass, so a stale agenda
+  neither lingers nor crowds the cap. **Prompt gotcha (fixed):** the first draft said "most reflections add none",
+  which set the default to empty and made thinking-off qwen return `[]` even on a window full of follow-ups (the same
+  shallow-pass failure as the memory-extraction bug); rebalanced with concrete examples → 3/3 on a rich window, `[]`
+  on a barren meta-chat. `tests/test_intentions.py` (**33 offline cases**). **Live-verified:** formed "ask how
+  Deadlock is going" from the real log; resolution correctly returned `[1]` when a conversation covered the dye
+  intention; and with an open agenda injected, chat showed **0/7 shoehorning into unrelated messages** with
+  personality intact (7/8 one-sentence, 1/8 q-end).
 - **Web UI: status panel + conversation tabs:** a live **status panel** (right side)
   polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity, the 6 mood bars, memory
   (core list + retired/superseded facts + counts), self-description, the private thought journal, and
@@ -475,11 +484,11 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
 **★ Completing the Generative Agents cognitive loop (idea pass 2026-07-19).** Arc A gave Mari drives + energy; the
 triad from Park et al.'s "Smallville" agents is **memory (§B) + reflection (her journal) + planning — the one she's
 missing.** Adding planning makes the inner life *goal-directed*:
-- **★ Intentions / a private agenda — BUILT 2026-07-19** (schema v8 + `IntentionStore` + `IntentionJob`; see §2 for
-  the shipped design). Proactivity is now goal-directed: reach-out anchors on the longest-waiting intention.
-  **Remaining in this item:** (a) **chat-path awareness** — let her raise an intention mid-conversation, not only on
-  a reach-out (riskier: could read as pushy, so it needs its own gate); (b) **expiry** of stale intentions beyond the
-  size cap; (c) let **follow-up** draw on them too.
+- **★ Intentions / a private agenda — BUILT + COMPLETE 2026-07-19** (schema v8 + `IntentionStore` + `IntentionJob`;
+  full design in §2). Proactivity is goal-directed: reach-out anchors on the longest-waiting intention, chat and
+  follow-up carry the agenda *softly*, stale items expire, and `form_intentions` clears whatever the conversation
+  actually covered. **Possible later:** relevance-ranked pick instead of FIFO, and surfacing fulfilled intentions as
+  a "we covered this" history in the UI.
 - **Learned operating-notes (reflection that changes behavior) — NEW.** Reflection currently feeds the *persona*
   (who she is); nothing adjusts *how she acts* turn-to-turn. Add short "notes to self" distilled from experience
   ("Alex bristles at lots of questions — ease off"), injected live into `build_system` — the self-improving closed

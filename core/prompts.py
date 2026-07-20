@@ -131,7 +131,8 @@ def build_tools_note(tool_names: list[str] | None) -> str | None:
 
 def build_system(memories: list[str], mood: str | None = None,
                  core: list[str] | None = None, persona: str | None = None,
-                 tools: list[str] | None = None, allow_silence: bool = False) -> str:
+                 tools: list[str] | None = None, allow_silence: bool = False,
+                 intentions: list[str] | None = None) -> str:
     """The chat system message: the persona, plus memory and mood folded in.
 
     `persona` is Mari's own evolving self-description (written by the self-modifying
@@ -159,6 +160,13 @@ def build_system(memories: list[str], mood: str | None = None,
             f"Some other things that might be relevant right now (from earlier talks). Use "
             f"them naturally when they fit, and never mention that you 'stored' or 'retrieved' "
             f"anything:\n{lines}"
+        )
+    if intentions:
+        lines = "\n".join(f"- {i}" for i in intentions)
+        parts.append(
+            f"Things you've been meaning to bring up with them, kept in the back of your mind. Only raise "
+            f"one if the conversation naturally gets there. Never force one in, never list them out, and "
+            f"never derail what they're actually talking about:\n{lines}"
         )
     if mood:
         parts.append(mood)
@@ -227,7 +235,11 @@ Rules:
 - About THEIR life or your shared conversation — never about {BOT_NAME} herself, the app, or an invented plan.
 - Don't repeat or reword an intention you already have (listed below).
 - Don't invent things that were never actually discussed.
-- If the conversation genuinely left no open threads at all, return an empty list."""
+- If the conversation genuinely left no open threads at all, return an empty list.
+
+Also review the intentions you already have (numbered below): if this conversation clearly COVERED one —
+you asked it, or they answered it — put its number in "resolved" so it can be cleared. Only mark ones
+genuinely addressed here; leave the rest alone."""
 
 INTENTIONS_SCHEMA = {
     "type": "json_schema",
@@ -235,8 +247,11 @@ INTENTIONS_SCHEMA = {
         "name": "intentions",
         "schema": {
             "type": "object",
-            "properties": {"intentions": {"type": "array", "items": {"type": "string"}}},
-            "required": ["intentions"],
+            "properties": {
+                "intentions": {"type": "array", "items": {"type": "string"}},
+                "resolved": {"type": "array", "items": {"type": "integer"}},
+            },
+            "required": ["intentions", "resolved"],
             "additionalProperties": False,
         },
     },
@@ -246,9 +261,10 @@ INTENTIONS_SCHEMA = {
 def build_intentions_user(recent_msgs: list[dict], existing: list[str]) -> str:
     convo = "\n".join(
         f"{'User' if m['role'] == 'user' else BOT_NAME}: {m['content']}" for m in recent_msgs)
-    have = "\n".join(f"- {i}" for i in existing) or "(none yet)"
-    return (f"Recent conversation:\n{convo}\n\nIntentions you already have in mind:\n{have}\n\n"
-            f"List any genuinely NEW intentions from this conversation (or an empty list).")
+    have = "\n".join(f"{n}. {c}" for n, c in enumerate(existing, start=1)) or "(none yet)"
+    return (f"Recent conversation:\n{convo}\n\nIntentions you already have in mind (numbered):\n{have}\n\n"
+            f"List any genuinely NEW intentions from this conversation, and the numbers of any existing "
+            f"ones this conversation resolved.")
 
 
 # --- Follow-up (a spontaneous second message right after her own reply) ---
@@ -269,10 +285,15 @@ FOLLOWUP_CUE = ("(You just messaged them and they haven't replied yet. Only if y
 
 
 def build_followup_system(memories: list[str], mood: str | None = None,
-                          core: list[str] | None = None, persona: str | None = None) -> str:
-    """System prompt for a spontaneous follow-up: the normal chat context + follow-up framing."""
-    base = build_system(memories, mood, core=core, persona=persona)
-    return f"{base}\n\n{_FOLLOWUP_ADDENDUM}"
+                          core: list[str] | None = None, persona: str | None = None,
+                          intention: str | None = None) -> str:
+    """System prompt for a spontaneous follow-up: the normal chat context + follow-up framing,
+    optionally with an `intention` she may fold in if it connects to what she just said."""
+    parts = [build_system(memories, mood, core=core, persona=persona), _FOLLOWUP_ADDENDUM]
+    if intention:
+        parts.append(f"(You've also been meaning to: \"{intention}\". Only fold it in if it genuinely "
+                     f"connects to what you just said — otherwise ignore it and PASS as usual.)")
+    return "\n\n".join(parts)
 
 
 # --- Self-reflection (private thought journal, written during idle ticks) ---

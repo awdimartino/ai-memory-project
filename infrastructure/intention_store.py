@@ -56,6 +56,15 @@ class SqliteIntentionStore:
                 "UPDATE intentions SET active = 0 WHERE id = ?", (intention_id,))
             self.conn.commit()
 
+    def drop_older_than(self, cutoff_iso: str) -> int:
+        """Retire active intentions created before `cutoff_iso` (stale-agenda expiry).
+        Returns how many were dropped."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE intentions SET active = 0 WHERE active = 1 AND created_at < ?", (cutoff_iso,))
+            self.conn.commit()
+            return cur.rowcount
+
     def all(self) -> list[dict]:
         """Every intention (active + retired), newest first — for inspection."""
         rows = self.conn.execute(
