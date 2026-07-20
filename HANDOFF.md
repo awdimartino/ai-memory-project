@@ -416,6 +416,40 @@ still stand:
 - **Mood-drift rate is untuned.** Drift decays one step per tick; at the default 60s tick that settles mood
   over several idle minutes. Tune `TICK_INTERVAL` or the per-channel `DECAY_RATES` (calibrated for
   per-message decay, not per-tick) if it feels off.
+- **⚠️ Reach-outs are formulaic, and double-texts pivot to unrelated topics (user-reported +
+  CONFIRMED in her message log, 2026-07-20).** Both defects are visible in `message_archive`:
+
+  ```
+  38  "It's been a little quiet here since we talked about how real this connection feels…"
+  39  "It feels like the jacket dye project you mentioned is finally turning out…"   <- unrelated
+  57  "i was just thinking about how strange it feels to talk about being a bot…"
+  58  "i was just wondering how your interest in ai chatbots is going…"              <- unrelated
+  ```
+
+  **Cause of the unrelated pivot: the carried-intention block in `followup_blocks()`.** It appends
+  *"You've also been meaning to: X. Only fold it in if it genuinely connects to what you just
+  said"* — and she folds it in regardless. Msg 58 is an intention discharged almost verbatim
+  (`INTENTIONS_SYSTEM` mints *"check in about that game they mentioned"*; 58 is *"ask how their
+  interest in ai chatbots is going"* in a sentence). Same for 39 and the jacket dye. **The
+  follow-up window has become a delivery mechanism for her agenda**, when an afterthought should be
+  about what she *just said*. Msg 39 also asserts an outcome she can't know (*"is finally turning
+  out the way you wanted"*) — confabulation riding along with it.
+  **Likely fix:** drop the carried intention from follow-ups entirely (reach-out is where the
+  agenda belongs, and it already anchors there), or gate it on topical overlap with her own
+  previous message rather than trusting the model to judge "connects".
+
+  **Cause of the formulaic openers: an asymmetry with `reflect()`.** Reflection is given its recent
+  thoughts *and* a programmatic repeat-guard (added 2026-07-20, after RRR 0.26 and three
+  byte-identical entries). **Reach-out and follow-up got neither** — she cannot see what she opened
+  with last time, so nothing pulls her off *"i was just…"*. Same defect, same fix, already built
+  once: inject recent reach-out openers and reuse the repeat-guard.
+
+  **User's rule for what a double-text is FOR (2026-07-20):** not a second topic. Following up to
+  ask whether she's being ignored is legitimate and human. Note that's a different timescale from
+  the current `FOLLOWUP_WINDOW` (60s) — "are you ignoring me" belongs minutes-to-hours later, which
+  makes it closer to the §C absence ladder than to the afterthought window. Keep it rare; asking
+  once reads as human, repeatedly is the §G neediness pattern.
+
 - **Multi-message / "texting burst" replies** — the original "one reply, two messages split by a blank line"
   approach was **fully reverted**. **Revisited differently (2026-07-18):** the follow-up feature (§2) sends a
   *separate, later* second message by **re-prompting** ("got a quick follow-up?") a tick or a few after the
@@ -1237,6 +1271,12 @@ the measured distributions, including the two false-positive guards.)*
 ### User-requested, still deferred
 - ~~**Prompt-inspector tab** (§C)~~ **DONE 2026-07-20** — header → "prompt". See the entry above.
 - **Follow-up decay** — 2-3 chained messages with tapering probability instead of the hard cap of 1.
+  ⚠️ **Fix the unrelated-topic pivot FIRST** (§7) — chaining more messages off a follow-up that
+  already pivots to a random agenda item multiplies the defect instead of adding texture.
+- **★ Reach-out sameness + double-text pivots (2026-07-20, diagnosed in §7)** — formulaic *"i was
+  just…"* openers, and follow-ups that raise an unrelated intention instead of an afterthought.
+  Mechanism identified for both, fixes are small. Deferred only because prompt edits here
+  invalidate the personality baseline and want a gold run.
 - **★ She can make herself unavailable (2026-07-20)** — *"you wouldn't expect a real person to be
   available 24/7."* Full design in **§8-A4**; read it before starting, because the obvious
   implementation re-opens the embodiment problem and the feature sits close to a §G line. Most of
