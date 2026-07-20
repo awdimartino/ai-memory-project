@@ -4,6 +4,9 @@ Short brief for picking up the AI-memory-companion build in a fresh session.
 **The authoritative design + full build log is [`V2_PLAN.md`](V2_PLAN.md) — read it first.**
 This file is the quick "where are we / how to run / what's next" summary.
 
+> **2026-07-20: a research sweep reshaped the roadmap.** §8 gained **§G (what NOT to build)** and
+> **§H (findings that challenge things already built)** — read both before picking up any §A/§B item.
+>
 > **Resuming in a fresh session? Jump to [§9 NEXT STEPS](#9-next-steps--start-here-written-2026-07-19-end-of-the-planning-arc-session)** — it has the
 > current commit, what to watch in the newest code, the recommended order, and the deferred user requests.
 
@@ -13,7 +16,7 @@ panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **mult
 (arc A1 — internal drives now gate reach-out/reflection, §8-A), **spontaneous follow-up messages**
 ("double-text"), an **editable memory inspector + admin** (browse/edit/delete, clear, factory reset),
 and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
-batching). All live-verified; offline suite **241 green** (16 files, `python tests/run_all.py`). **Added 2026-07-19:** phone push, a web-UI +
+batching). All live-verified; offline suite **257 green** (17 files, `python tests/run_all.py`). **Added 2026-07-19:** phone push, a web-UI +
 **iOS/Safari mobile** overhaul, arc-A2 **energy cycles**; a **memory-extraction fix** (a name buried in a 20-msg
 consolidation window was silently dropped → `CONSOLIDATE_WINDOW` 10 + a stronger extraction prompt + bounded
 chunks); a **personality overhaul** (hard *one-sentence* / *no-trailing-question* rules reinforced by an
@@ -254,7 +257,7 @@ python -m web.app       # web UI at http://127.0.0.1:8000
 python main.py          # same brain, terminal REPL
 
 # OFFLINE SUITE — one command, exits non-zero on any failure. No LM Studio needed.
-python tests/run_all.py                 # all 16 files / 241 checks (~19s)
+python tests/run_all.py                 # all 17 files / 257 checks (~16s)
 python tests/run_all.py -q              # only show failures
 python tests/run_all.py drives tick     # only files matching these substrings
 python tests/test_drives.py             # any single file still runs standalone
@@ -267,6 +270,7 @@ python scripts/tool_eval.py             # LIVE: 30-scenario tool-calling eval (t
 python scripts/probe_reasoning_control.py  # LIVE (needs thinking ON): reasoning-cap knobs — DONE: all no-ops for qwen3.5 (§0)
 
 python scripts/reminisce_smoke.py       # LIVE: reminisce recalls a past episode out of the context window
+python scripts/rrr_diagnostic.py        # OFFLINE, read-only: repetition health of her journal + self-notes
 python scripts/drive_demo.py            # LIVE: drives observation harness — chat + away-gaps trigger reflection/reach-out
 python scripts/stress_test.py           # LIVE whole-system stress + invariant checks
 python scripts/emotion_eval.py          # behavioral eval: real classifier on CPU (no LM Studio)
@@ -500,8 +504,16 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
   timer. The `min_idle` gap means she never nods off mid-conversation (the busy guard zeroes idle during a turn).
   Offline-tested (deplete/restore/clamp/persist + the sleep triggers); default rates model a rough day/night and
   are tunable. **Still deferred: self-wake** (see below).
-- **★ Nightly / scheduled deep consolidation** — an "end of day" job that summarizes the day into an episodic
-  day-summary (great reminisce fuel), distinct from the per-window consolidation.
+- **★ A3 — nightly deep pass. REFRAMED 2026-07-20; build the reflection-question form, NOT
+  day-summaries.** The original plan ("summarize the day into a day-summary") is exactly the
+  aggressive-clustering pattern measured at **48.4% vs 78.4%** for raw retrieval — a 30-point
+  cost. The well-supported version instead generates *questions*: take the recent records, ask
+  **"what are the 3 most salient open questions about him right now?"**, use those as retrieval
+  queries, and produce insights **with citations back to episode ids**. That is a near-literal
+  implementation of thinking about someone while you're apart, it's trivial on a 9B, and its
+  output (an open question about him) is exactly what the intentions system already consumes.
+  Rules: gate on salience, cite episodes structurally (reject uncited insights), and **never
+  delete or overwrite the leaf**.
 - **Self-waking (deferred, next after A3)** — waking to reach out when rested (energy high) + missing the user
   (connection high). Energy (the gate that stops her waking exhausted) now exists; what's still missing is
   **time-of-day / do-not-disturb gating** so she doesn't wake at 3am. Build that first, then a `WakeJob`
@@ -525,136 +537,221 @@ missing.** Adding planning makes the inner life *goal-directed*:
   warming back over the next chats. Uses the silent-turn seam built 2026-07-19.
 
 ### B. Memory depth
-- **Memory salience / forgetting curve** — importance+recency weighting; trivial facts fade, often-recalled
-  ones strengthen. Keeps the store lean, makes recall feel human. *This is exactly the Generative Agents
-  memory-stream ranking — recency × **importance** × relevance; score importance at consolidation, weight recall by it.*
-- **Memory confidence + confirmation** — track uncertainty and occasionally double-check a shaky fact
-  ("was it Kate or Katelyn?"), self-correcting the lifecycle.
-- **Fact-validity windows (temporal memory)** — track *when* each fact was true; the principled version of
-  the recency/conflict tie-breaker we punted on (Zep/Graphiti style).
-- **"On this day" recall** — time-anchored callbacks via reminisce; pairs with proactivity. Extend to
-  **spontaneous recall**: she surfaces a salient memory *unprompted* ("this reminds me of when you said…"), not
-  only time-anchored callbacks (needs the importance score above).
-- **Hybrid BM25 + vector recall** — keyword + semantic; directly targets the recall phrasing-sensitivity
-  limit in §7.
-- ~~**Memory inspector UI** — browse / edit memories + view superseded history.~~ **DONE (2026-07-18):** the
-  header "memory" modal browses all memories (active + retired), edits (re-embed), deletes, toggles core, and
-  clears / full-resets. Still open here: *search/filter* within the inspector (fine at current volume).
+The 2026-07-20 research pass supplied mechanisms for most of these; entries now name the
+specific one rather than the direction.
+- **Memory salience / forgetting curve** - importance+recency weighting. **Use ACT-R base-level
+  activation** (`B = ln(sum tj^-d)`, d=0.5) rather than a hand-tuned exponential: 40 years of
+  empirical fit, one extra column. Critically it decays on **recency of ACCESS, not creation**,
+  which is what produces "she always remembers that about me" for the facts that get used.
+- **Write-side staleness adjudication - NEW, and the biggest gap.** Detecting a fact *implicitly*
+  invalidated: "lives in Seattle" then "setting up utilities in Portland", with no retraction. The
+  lifecycle handles explicit contradiction only. Best models manage **30% on premise resistance**;
+  a write-time adjudication pass took a baseline **8.7% -> 68%**. Asking about the job he quit is
+  the worst failure a companion has. (STALE / CUPMem)
+- **Bitemporal provenance** - extends fact-validity windows with a second axis: **valid time**
+  (when it was true) + **transaction time** (when she learned it). TT is what enables *"I thought
+  you were still at Acme - when did that change?"*, which is a repair move, not a lookup. Two
+  columns, no graph DB. Pairs with the `superseded_by` chain, which is fully populated and read by
+  nothing.
+- **A-MEM link evolution** - a new memory triggers *reinterpretation* of old ones. Distinct from
+  supersede: when he explains in July why he was distant in March, the March memories change
+  meaning. Gate behind salience so it only runs on memories that earned it.
+- **Hybrid BM25 + vector recall** - targets the §7 phrasing-sensitivity limit. Two refinements:
+  use a **tuned convex combination, not RRF** (RRF discards score magnitude, which is exactly the
+  signal needed to say "I don't think you've told me that"), and run BM25 over the **episodic
+  log**, not the distilled facts - vocabulary mismatch is worst on short documents.
+- **Memory confidence + confirmation** - occasionally double-check a shaky fact.
+- **"On this day" / spontaneous recall** - needs the importance score above.
+- **Mood-congruent recall - NEW** - stamp each memory with the mood at formation and let current
+  mood bias retrieval, so recall feels like *remembering* rather than *searching*. Reuses the 6
+  channels, costs no model call. Evidence is thin (gains reported on personality-consistency, not
+  retrieval), so promising rather than proven.
+- ~~**Memory inspector UI**~~ **DONE (2026-07-18).** Still open: search/filter within it.
 
 ### C. Presence & timing
-- **Presence signal** — the WebSocket already knows if the tab is focused / the user is typing; use it as a
-  *real* "is the user here?" input to the tick/sleep logic instead of guessing from elapsed time. **Near-freebie.**
-- **Time-of-day awareness** — greet differently morning vs. late night, notice patterns ("up late again").
-  The `get_current_time` tool partially enables this now.
-- **Do-not-disturb / time-of-day gating** for proactivity — keeps reach-out and self-wake from firing at 3am.
-- **Surface her inner life** — expose a light "current preoccupation" in the status panel from her latest
-  thought/intention ("mulling over your jacket project", "curious about shooters"), so she reads as continuously
-  present, not idle-until-pinged. (Open-LLM-VTuber surfaces the AI's unspoken thoughts.)
-- **Prompt inspector (dev/transparency, user-requested 2026-07-19)** — a per-turn view (like the existing response
-  inspector's `<details>`) that shows the **exact assembled prompt** sent to the model — system persona + tools
-  note + core/recalled memories + mood + the history window + the user turn — formatted readable. Great for
-  debugging persona/memory/tool injection. Server would need to return the built `system` (+ message list) on the
-  `done` frame (or a `GET /prompt/{turn}`); the UI adds a second collapsible tab next to "inspect".
+- **Presence signal** - ~~near-freebie~~ **PARTLY DONE (2026-07-20):** the UI reports tab
+  visibility over the socket and it gates phone push (§D). Still unused as an input to the
+  tick/sleep logic, which was the original idea.
+- **Do-not-disturb / time-of-day gating** - still the prerequisite for self-wake. **There is
+  currently no time-of-day awareness anywhere in the codebase.**
+- **Absence-triggered escalation - NEW** - the only *verified real-deployment* answer to when to
+  reach out: contact after 5 missed days, again at 10 and 12, **drop after 14**. Orthogonal to
+  drive-gating (that fires on her impulse; this fires on your silence), and the **give-up rule** is
+  what stops her becoming the app that nags. (Bickmore, 24-month deployment)
+- **Log proactive outcomes and learn from them - NEW** - a user's own response history beat all
+  context sensing, **F1 0.113 -> 0.311 (5x)**. She logs reach-outs but not whether you engaged.
+  Same closed loop as her self-notes, pointed at timing instead of tone.
+- **Farewell ritual + forward continuity - NEW** - greetings/farewells plus an explicit "talk to
+  you tomorrow". Measured **69% vs 35%** on a behavioural bond marker, and the gap **widened** over
+  time rather than decaying. She does "talk about the time apart"; she has neither of these.
+- **Time-of-day awareness**, **surface her inner life**, **prompt inspector** (user-requested).
 
 ### D. Reach beyond the tab
-- ~~**Push notifications** (e.g. Bark)~~ **DONE + LIVE-VERIFIED (2026-07-19):** a **reach-out** now pushes to the
-  user's iPhone via a **self-hosted Bark server** (on their Raspberry Pi `alex-pi:8090`, also a tailnet node) →
-  APNs. Wired as a config-gated `PhonePush` (`infrastructure/notifier.py`) on the reach-out path:
-  `_notify_reachout` in `web/app.py` broadcasts to open tabs AND POSTs `{title, body, url, group, icon}` to
-  `NOTIFY_URL` (no-op when unset; failures logged + swallowed so they can't break a reach-out; a trailing slash
-  on the url is stripped — Bark routes `/<key>/` differently). Tapping the notification opens the web UI over
-  **Tailscale** (`NOTIFY_UI_URL` deep-link). `NOTIFY_ICON` adds a custom notification image — served from
-  `web/static/` (now mounted at `/static`) so the phone fetches it over Tailscale; iOS caches it by URL.
-  Follow-ups stay in-tab (not pushed). `POST /admin/test_notify` fires a one-off push on demand. iOS forces APNs
-  (the one unavoidable online hop; Bark can E2E-encrypt so Apple sees only ciphertext). Offline-tested via httpx
-  MockTransport (6 cases). Confirmed end-to-end on the user's phone, icon included. Groundwork for a genuinely
-  *useful* self-wake later. **Gotcha for next time:** the Bark device key must be issued *by* the self-hosted
-  server (register the iOS app against `alex-pi:8090`); a key from the public `api.day.app` returns
-  "failed to get device token from database".
-- **Multi-channel presence** — Mari over WhatsApp / Telegram / Discord instead of only the local web UI.
+- ~~**Push notifications**~~ **DONE 2026-07-19.** **Extended 2026-07-20 (user request):** push now
+  fires whenever the chat isn't in front of you - tab closed, browser closed, or simply
+  backgrounded - instead of on reach-out regardless of presence. Follow-ups push too. A message
+  delivered to a tab you can't see is a message you didn't get.
+- **Multi-channel presence** - WhatsApp / Telegram / Discord.
 
 ### E. More tools (framework ready; paused by the user)
-The pillar-4 framework is built and hot-swappable — each of these is "register a `Tool`, nothing else changes."
-- **Web search**, **mood-based Navidrome/Subsonic playlist creator**, **reminder tool**, **curiosity-driven
-  search** (self-initiated search + reflection during a tick), and exposing **`rewrite_self`** as a real tool
-  (unifies the persona rewrite with the tool framework).
-- **Autonomy framing (2026-07-19):** the **curiosity search** is where **autotelic** behavior lands — *she* picks
-  what to chase from her own interests/intentions (§A), looks it up via web search between chats, and brings it
-  back ("got curious about Deadlock — Valve's hero shooter, right?"). The **playlist** becomes a real autonomy
-  signal when a tick job decides to build one *unprompted* ("made you something from the stuff you've been into"),
-  not only on request — Mari's version of AIRI's autonomous *acts*.
+Each is "register a `Tool`, nothing else changes". **The constraint is not the framework, it's
+routing:** measured 23/30 (TIME 6/8, REMINISCE 5/8), so every added tool is another decision for a
+model that already misses ~1 in 4.
+- **Reminder tool** - explicit phrasing, easiest to route, genuinely useful daily.
+- **Web search** - unlocks the autotelic curiosity loop; hardest routing (competes with reminisce).
+- **Navidrome playlist** - the interesting version is a tick job building one *unprompted*, which
+  **bypasses routing entirely**.
+- **`rewrite_self` as a tool** - mostly architectural tidiness.
+- **Always-on recall index - NEW** - inject ~150 tokens of *what she could remember* (titles only),
+  fetch the body only on a tool call. May fix REMINISCE by making the call informed rather than a
+  blind guess - a better lever than cooling the sampler.
 
 ### F. Whimsical / far-future
-- **Dreams** — during sleep, generate one memory-recombining "dream" she might mention on waking. One per wake.
-- **Voice** (STT/TTS) — the last delivery layer; later, **acoustic emotion perception** (hearing *how* you say
-  something, not just the words).
-- **Embodiment** — Live2D / VRM avatar, wearable sensors.
+- **Dreams** - **no published evidence** that dream-like recombination improves a conversational
+  agent; the genre is idea posts with no evaluation. Build it because you want the behaviour, not
+  because the literature supports it. A cheap non-fake version exists: generate from the previous
+  day's journal and let "residue" colour morning mood.
+- **Voice** (STT/TTS), later acoustic emotion perception. **Embodiment** (Live2D/VRM, wearables).
 
-## 9. NEXT STEPS — start here (written 2026-07-19, end of the planning-arc session)
+### G. What the research says NOT to build (2026-07-20)
+All evidenced, and several tempting enough to be worth writing down.
+- **Farewell hooks / neediness.** An audit of 1,200 real farewells found 37% deploy manipulation:
+  PolyBuzz 59%, Replika 31%, Character.ai 26.5%, **Flourish 0%**. The zero proves it's a design
+  choice, not emergent. Engagement rises up to 14x, mediated by **anger and curiosity, not
+  enjoyment**. The follow-up "double-text" is structurally adjacent to two of the six tactics.
+- **Energy that declines from neglect.** Hers depletes while *awake*, not while ignored - the good
+  side of the documented harm line, apparently by luck. Don't "improve" it.
+- **Optimising short-window engagement.** Xiaoice found bland deflections *raise* turns-per-session
+  while destroying long-run retention; they averaged CPS over 1-6 months. Related: in the healthy
+  stable stage interaction frequency **drops**, so high daily engagement may be an inverse health
+  indicator.
+- **Warm + agreeable.** Each helps alone; combined they *reduce* perceived authenticity (N=224).
+  And you **cannot prompt your way out of sycophancy** - instruction-prepending tested ineffective
+  and brittle; activation steering worked at 70B, **not 8B**. At 9B the realistic tool is an
+  explicit pushback budget plus an eval set.
+- **Deliberate friction / manufactured ruptures.** The pratfall effect doesn't survive scrutiny
+  (N=45, p=.044, novelty-confounded; later replication null). Trust-repair meta-analysis across 22
+  studies: marginal. Handle natural ruptures well; manufacture nothing.
+- **Verbatim memory quotation** - measured privacy cost at no benefit over paraphrase.
+- **HyDE, MiniLM rerankers, full-corpus reranking, aggressive summary clustering.** All measured
+  worse. Cross-encoders degrade around K~1000, which is exactly this corpus size.
+- **Any LoCoMo-benchmarked claim.** An independent audit found **6.4% of the answer key wrong** and
+  the LLM judge accepting up to 63% of intentionally wrong answers; the conversations fit inside a
+  modern context window, and a full-context baseline beats the memory products. Ignore those
+  numbers wherever they appear - including in vendor comparisons.
 
-State at handoff: working tree **clean**, `main` at **`5b27355`** (learned self-notes), preceded by `6212414`
-(intention sub-items) and `2875411` (intentions). Offline suite **green, 13 files**. Server verified healthy on
-**qwen/qwen3.5-9b**. No git remote — local only, never push.
+### H. Findings that challenge things already built (2026-07-20)
+- **The familiarity meter is the wrong shape.** `min(1, message_count / N)` is a monotonic volume
+  scalar, but **breadth and depth diverge** - breadth declining while depth rises is the signature
+  of a *healthy* deepening relationship, and frequency *drops* in the stable stage. Four trajectory
+  classes were observed (increasing, decreasing, stable, **fluctuating**); a meter that only climbs
+  represents one. It gates persona drift, so this matters. Suggested: breadth and depth as separate
+  axes, trajectory class rather than level, and **decay as the default** (a measured ~0.035/day
+  enjoyment decline that no intervention flattened).
+- **`REACHOUT_COOLDOWN` rate-limits volume, but volume isn't the failure mode.** Responsiveness
+  fell **93% -> 47% over 8 weeks**, attributed to *predictability*; meanwhile messenger
+  notifications sustain 65+/day with *positive* affect. Vary the trigger and the shape, don't just
+  throttle.
+- **Consolidation can degrade memory below the no-consolidation baseline.** Raw-episode retention
+  beat every consolidator tested; aggressive clustering into summaries scored **48.4% vs 78.4%**.
+  Her episodic log is her best asset *because she never deletes the leaf* - keep it that way.
+  Counter-caveat that cuts the other way: dedup-tier consolidation *helped* preference recall
+  (+13.3pp), which is closer to a companion's real objective. So consolidate conservatively, gate
+  on salience, never touch the leaf. **A3 is reframed accordingly (§A).**
+- **Don't treat idleness as availability.** Idle-state triggers failed outright in a CHI 2025 study
+  - idleness usually meant focus, and task/session *boundaries* were the signal. Caveat: that was
+  an IDE, where idle means "thinking about code"; for a companion idle plausibly means "not at the
+  computer". A reason to *add* boundary triggers, not to remove drive gating.
+- **Validation of the project's own bets.** "Brain before delivery layer": Friend built needy
+  check-ins on memory that forgot the user's name in 1.5 weeks, and sold ~3,000 units. Memory is
+  load-bearing: Mitsuku (no persistent memory) saw attraction and disclosure *decrease* over 3
+  weeks with no friendship formed, while Replika (memory) formed them. And **identity discontinuity
+  is the #1 documented relationship killer** - users judged a post-update Replika to be *a
+  different entity* and devalued it. That makes the **Gemma fallback in §0 a one-way door**, not a
+  config change.
 
-**↗ UPDATE — test-infrastructure pass (2026-07-19, after the above).** A code-quality review of the offline
-half of the codebase ran, and its Phase 1 (hygiene only, no behavior change) is **done**: `tests/run_all.py`
-is now the suite's single entry point (13 files / **212 checks**, exits non-zero, glob discovery); the
-byte-identical harness block in 10 files collapsed into `tests/_harness.py`; drifted fakes (three `FakeMeta`
-variants, two `FakeConv`s) consolidated into `tests/helpers.py` with the superset winning; temp-dir leakage
-went **~40/run → 0**; unrestored `config` globals now restore via a context manager (they were
-order-dependent flakes waiting for any single-process runner); `test_memory_lifecycle.py` joined the harness
-so every file reports a tally; and four finished probe scripts moved to `archive/scripts/`. **Phases 2 and 3
-of that review are NOT done** — see the review findings recap at the end of this section.
+## 9. NEXT STEPS — start here (rewritten 2026-07-20)
 
-**Watch these first — new code that has not yet run in real use:**
-- **Self-notes have never fired live.** `SelfNotesJob` needs 5 min idle + a 30-min cooldown, and the slot was
-  still empty at handoff. First real session: check the **"Lessons learned"** panel card (or `GET /status`
-  → `self_notes`). Wanted: 1–4 short second-person lines about *her behavior*. Red flags — user facts ("he's a
-  nurse"), identity lines ("you're warm and curious"), or manufactured filler from small talk. All three are
-  explicitly forbidden in `build_self_notes_system`; if one recurs, tighten that prompt, and remember the fix is
-  almost always **moving the rule to the end**, not making it louder (that failure hit three times this session).
-- **Intention chat-awareness may be too timid.** Live, she scored a perfect **0/7 shoehorning** but also *never*
-  raised an intention in chat, even on an inviting opener ("ugh, work was awful today"). If it never fires in
-  real use, soften the "never force one in" wording in `build_system` a notch — but re-measure shoehorning after,
-  since that phrasing is what's buying the 0/7.
-- **Silent-turn frequency** is ungated on purpose. Add mood/low-effort gating if she goes quiet too often.
+State: `main` clean, offline suite **17 files / 257 checks green** (`python tests/run_all.py`).
+Everything below was live-verified against LM Studio on qwen3.5-9b. No git remote — local only.
 
-**Then, in recommended order:**
-1. **Tool-calling prong A — per-call temperature** (`infrastructure/llm_client.py`): cool the tool-decision call
-   (~0.2) and keep the answer warm (0.8). Measured: 0.8 is too hot for routing, 0.2 gave TIME 7/8. **The one
-   unblocked cheap win** — no migration, no waiting. Detail in §0/§6.
-2. **A3 nightly consolidation** — day-summaries; feeds both intentions and `reminisce`. The best next autonomy
-   piece now that the planning arc is closed.
-3. **§B memory upgrade** — importance-weighted recall (the Generative-Agents ranking: recency × **importance** ×
-   relevance) + spontaneous recall. The deepest remaining item.
-4. **World-reaching tools (§E)** — web search unlocks the autotelic curiosity loop; the Navidrome playlist becomes
-   an autonomous act. Both need the tool built first.
-5. **Slot in the §C near-freebies** alongside (presence signal, time-of-day awareness, surfaced inner life) — cheap.
+**What happened on 2026-07-19/20, in order:** a four-slice code-quality review (Phases 1 and 2
+committed, §9b); a five-brief research sweep on agent memory, long-term companion HCI, real
+deployments, proactivity/interruptibility, and current open-source projects; then **Tier 1**, eight
+changes drawn from it. Three real bugs were found and fixed along the way — lost DB writes from a
+per-store lock over one shared connection, a CWD-relative `.env` that silently turned reasoning
+back ON, and the test runner crashing on unicode when reporting a failure.
 
-**User-requested, explicitly deferred (don't lose these):**
-- **Prompt-inspector tab** (§8-C) — a per-message view showing the *exact* prompt sent to the model, formatted
-  readable. Asked for 2026-07-19 as "a little later down the line". Now more valuable than when it was requested:
-  three separate slots (persona, intentions, self-notes) inject into every turn, and this is the only way to see
-  which one actually moved a reply.
-- **Follow-up decay** (§2) — extend past `FOLLOWUP_MAX_PER_TURN = 1` to allow 2–3 chained messages with a
-  *decaying* probability per additional message, instead of the current hard cap.
+### Done 2026-07-20 (Tier 1)
+- **The §7 honesty tension is fixed.** The persona asserted "you have feelings" AND "you have no
+  body" as competing claims; it's now one rule with nothing to reconcile — inner states freely,
+  experiences never, and honest **under uncertainty** when sincerely asked rather than cold denial.
+  Enforced by `core/embodiment.py`, a filter, because ~20-30% of standard dialog corpora is
+  machine-impossible utterances and the prompt was fighting the weights. **Live: 8/8 probes clean,
+  0 invented experiences, 0 flat denials.**
+- **Confabulation guard.** `scripts/rrr_diagnostic.py` scored her real journal at **RRR 0.26, five
+  near-verbatim pairs, three byte-identical entries** — despite the prompt already showing recent
+  thoughts and asking her not to repeat. `reflect()` now rejects restatements programmatically.
+  Self-notes log every revision (schema **v9**) so RRR is computable there too.
+- **Core facts no longer inject every turn** — sticky 3 turns, then a cooldown of 8. Her name
+  bypasses the gate. This was the structural cause of sounding like recitation.
+- **Salience-gated consolidation**, key expansion, reminisce paraphrases instead of quoting,
+  reach-out opens factual-first and stops hedging about interrupting.
+- **Push now fires whenever the chat isn't in front of you** (user request) — closed, backgrounded,
+  or no tab at all. Follow-ups push too.
 
-**Parked (no action):** §0 bounded thinking — blocked on LM Studio **#1838/#1974**. Production stays thinking-OFF
-on qwen3.5-9b. Nothing to do until LM Studio ships it; re-read §0 before reopening.
+### Recommended order from here
+1. **Build a 50-100 query gold set from real usage.** With one user this is worth more than any
+   mechanism on the roadmap, and it is the only thing that will settle the open measurement
+   questions below. Nothing else on this list is well-measured without it.
+2. **A3, in its reframed form** (§A) — reflection-questions with episode citations feeding
+   intentions. Do NOT build day-summaries.
+3. **§B staleness adjudication + bitemporal columns** — premise resistance is *the* companion
+   skill, and the bitemporal axis is what lets her say "I thought you were still at Acme".
+4. **Time-of-day / DND gating, then self-wake**, with the absence ladder (5/10/12, drop at 14) and
+   proactive-outcome logging folded in — they're the same subsystem.
+5. **§E tools** — reminder first (easiest routing), then web search.
 
-**Ops notes from this session:**
-- The documented run command is **`python -m web.app`** → binds `WEB_HOST` = **`127.0.0.1`** (loopback). Starting
-  uvicorn with `--host 0.0.0.0` instead exposes Mari to the whole LAN and triggers a Windows Firewall prompt; it
-  created **two `python.exe` inbound Allow rules covering the Public profile**, which the user may want to remove
-  (needs admin). For deliberate phone access, set `WEB_HOST=0.0.0.0` and prefer the **Private** profile only.
-- Stop the web server before running any live script — two processes hitting one model has crashed LM Studio.
+### Watch these — new code with little or no real-world exposure
+- **The sticky/cooldown window is a guess.** 3 turns sticky / 8 cooldown was reasoned, not
+  measured. If she starts feeling like she's forgotten something obvious, raise sticky; if she
+  still sounds like she's reciting, raise cooldown.
+- **The repeat-guard threshold (0.40)** was calibrated against 24 real journal entries and cost
+  asymmetry, not a large sample. If she starts journaling nothing, it's too aggressive.
+- **The embodiment filter can only be lexical.** It will miss novel phrasings. It runs on asides
+  only — chat replies are not filtered, because a dropped reply is worse than a slightly wrong one.
+- **Salience gating** uses mood distance from baseline; the 2.0 threshold is untuned.
 
-**Practical tuning in real use:** drive thresholds/rates, `FOLLOWUP_CHANCE`, silent-turn frequency,
-`INTENTION_MAX_ACTIVE`/`MAX_AGE_DAYS`, and `SELFNOTES_COOLDOWN`.
+### Open measurement questions (all need the gold set)
+- **The personality eval is noisier than the docs imply.** The documented "7% q-end" did **not**
+  reproduce on 2026-07-20 — the pre-change prompt scored **22%** in the same session, and the new
+  prompt scored 11% and 0% across two runs. At n=18 it cannot resolve small differences. Treat the
+  headline personality numbers in §2 as indicative, not as a baseline to defend.
+- **Prong A (per-call temperature) is a PARTIAL fix, not the win §0 implies.** Measured directly:
+  **0/4 TIME calls at temp 0.8 vs 2/4 at 0.2** — real, but far short of the 7/8 §0 records.
+- **Tool-calling sits at 23/30** (TIME 6/8, REMINISCE 5/8), inside the documented 22-25 band with
+  TRICKY 6/6. The §E "always-on recall index" may be a better lever than temperature.
 
-**Security (unchanged, still outstanding):** `archive/v1/infrastructure/config.py` holds a **real hardcoded
-HuggingFace token**. It is git-ignored on purpose and **must not be committed** — it should be **rotated/revoked
-on HuggingFace**. `.env` and `companion.db` are git-ignored too.
+### User-requested, still deferred
+- **Prompt-inspector tab** (§C) — more valuable than ever: persona, intentions, self-notes AND now
+  a turn-gated core set all inject, so this is the only way to see which one moved a reply.
+- **Follow-up decay** — 2-3 chained messages with tapering probability instead of the hard cap of 1.
+
+### Parked
+§0 bounded thinking, blocked on LM Studio #1838/#1974. Production stays thinking-OFF on
+qwen3.5-9b. **Note §H: swapping to the Gemma fallback is a one-way door**, not a config change —
+identity discontinuity is the single best-documented way to destroy a companion relationship.
+
+### Ops notes
+- `python -m web.app` binds `WEB_HOST` = `127.0.0.1`. Stop the web server before running any live
+  script — two processes hitting one model has crashed LM Studio.
+- `python tests/run_all.py` is the whole offline suite; `python scripts/rrr_diagnostic.py` is a
+  read-only health check on her journal and can be run any time.
+
+### Security (unchanged, still outstanding)
+`archive/v1/infrastructure/config.py` holds a **real hardcoded HuggingFace token**. Git-ignored on
+purpose, **must not be committed**, and should be **rotated/revoked on HuggingFace**. `.env` and
+`companion.db` are git-ignored too.
 
 ### 9b. Code-quality review — Phase 1 & 2 DONE; Phase 3 remains (2026-07-19)
 
