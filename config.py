@@ -154,6 +154,14 @@ INTENTION_MAX_ACTIVE = int(os.environ.get("INTENTION_MAX_ACTIVE", "8"))   # cap 
 # Stale intentions expire so the agenda doesn't linger on things that stopped mattering (0 = never).
 INTENTION_MAX_AGE_DAYS = float(os.environ.get("INTENTION_MAX_AGE_DAYS", "7"))
 
+# Learned operating-notes (the self-improvement loop): during idle, Mari distills short notes on HOW to be
+# with this person from recent experience ("ease off the questions"), injected live into her prompt. Slower
+# than reflection (a lesson, not a mood) but faster than the persona rewrite (behavior, not identity).
+SELFNOTES_ENABLED = os.environ.get("SELFNOTES_ENABLED", "true").lower() in ("1", "true", "yes")
+SELFNOTES_MIN_IDLE = float(os.environ.get("SELFNOTES_MIN_IDLE", "300"))    # 5 min away
+SELFNOTES_COOLDOWN = float(os.environ.get("SELFNOTES_COOLDOWN", "1800"))   # at most ~every 30 min
+SELFNOTES_MAX_CHARS = int(os.environ.get("SELFNOTES_MAX_CHARS", "400"))    # keep the injected block small
+
 # Self-modifying persona: during idle ticks Mari rewrites a bot-owned "who you've become"
 # slot in her system prompt, reading her thought journal + core memories. How far it may
 # drift is gated by a familiarity meter (derived from message count) so a stranger doesn't

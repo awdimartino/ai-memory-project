@@ -128,9 +128,10 @@ async def persona() -> dict:
 async def status() -> dict:
     """One aggregate view of Mari's whole state — for the web status panel."""
     import time as _time
-    from core.companion import PERSONA_SELF_KEY, familiarity_label
+    from core.companion import PERSONA_SELF_KEY, SELF_NOTES_KEY, familiarity_label
     from core.emotion_manager import CHANNELS
-    from core.tick import LAST_PERSONA_EDIT_KEY, LAST_REACHOUT_KEY, LAST_REFLECT_KEY
+    from core.tick import (
+        LAST_PERSONA_EDIT_KEY, LAST_REACHOUT_KEY, LAST_REFLECT_KEY, LAST_SELFNOTES_KEY)
 
     c = _state.get("companion")
     if not c:
@@ -159,6 +160,7 @@ async def status() -> dict:
             "superseded": store.superseded(8),
         },
         "persona": c.meta.get(PERSONA_SELF_KEY) or "",
+        "self_notes": c.meta.get(SELF_NOTES_KEY) or "",
         "thoughts": c.thoughts.recent(8) if c.thoughts else [],
         "intentions": c.intentions.active() if c.intentions else [],
         "pending_consolidation": c.pending_count(),
@@ -166,6 +168,7 @@ async def status() -> dict:
             "reach_out_secs_ago": _ago(LAST_REACHOUT_KEY),
             "reflect_secs_ago": _ago(LAST_REFLECT_KEY),
             "persona_edit_secs_ago": _ago(LAST_PERSONA_EDIT_KEY),
+            "self_notes_secs_ago": _ago(LAST_SELFNOTES_KEY),
         },
     }
 

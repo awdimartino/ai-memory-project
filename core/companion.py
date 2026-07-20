@@ -19,6 +19,7 @@ strictly contiguous (a failed, re-queued chunk can't be jumped over).
 """
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -37,6 +38,8 @@ from core.prompts import (
     build_reachout_cue,
     build_reachout_system,
     build_reflect_system,
+    build_self_notes_system,
+    build_self_notes_user,
     build_system,
 )
 
@@ -47,6 +50,8 @@ logger = logging.getLogger(__name__)
 CONSOLIDATED_WATERMARK_KEY = "last_consolidated_msg_id"
 # Mari's own evolving self-description (the self-modifying persona slot), in the MetaStore.
 PERSONA_SELF_KEY = "persona_self"
+# Learned operating-notes: what she's worked out about HOW to be with this user (vs. who she is).
+SELF_NOTES_KEY = "self_notes"
 
 
 def familiarity_label(f: float) -> str:
@@ -187,7 +192,8 @@ class Companion:
             # Her open agenda rides along softly — she may raise one if the talk gets there.
             agenda = [i["content"] for i in self.intentions.active()] if self.intentions else None
             system = build_system(extra, mood_prompt, core=core, persona=persona,
-                                  tools=tool_names, allow_silence=True, intentions=agenda)
+                                  tools=tool_names, allow_silence=True, intentions=agenda,
+                                  self_notes=self.meta.get(SELF_NOTES_KEY))
 
             messages = [{"role": "system", "content": system}]
             messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -270,7 +276,8 @@ class Companion:
             intention = pending[0] if pending else None
         system = build_reachout_system(extra, mood_prompt, core=core,
                                        persona=self.meta.get(PERSONA_SELF_KEY),
-                                       intention=intention["content"] if intention else None)
+                                       intention=intention["content"] if intention else None,
+                                       self_notes=self.meta.get(SELF_NOTES_KEY))
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -330,7 +337,8 @@ class Companion:
         pending = self.intentions.active(limit=1) if self.intentions is not None else []
         system = build_followup_system(extra, mood_prompt, core=core,
                                        persona=self.meta.get(PERSONA_SELF_KEY),
-                                       intention=pending[0]["content"] if pending else None)
+                                       intention=pending[0]["content"] if pending else None,
+                                       self_notes=self.meta.get(SELF_NOTES_KEY))
 
         messages = [{"role": "system", "content": system}]
         messages.extend(self.history[-config.HISTORY_TURNS:])
@@ -493,6 +501,41 @@ class Companion:
         text = text[:config.PERSONA_MAX_CHARS].strip()  # hard cap so the slot stays small
         await asyncio.to_thread(self.meta.set, PERSONA_SELF_KEY, text)
         logger.info("persona updated: %s", text[:80])
+        return text
+
+    async def update_self_notes(self) -> str | None:
+        """Distill short operating-notes — how to BE with this user — from the recent conversation.
+
+        The closed loop the persona edit doesn't cover: experience -> principle -> future behavior.
+        edit_persona rewrites who she IS from her private thoughts; this rewrites how she ACTS from
+        how the user actually responded to her. Rewritten wholesale (so revising and dropping notes
+        need no dedupe pass), capped, and injected into every user-facing prompt via build_system.
+        """
+        recent = self.history[-config.HISTORY_TURNS:]
+        if not recent:
+            return None
+        current = self.meta.get(SELF_NOTES_KEY) or ""
+        system = build_self_notes_system(config.SELFNOTES_MAX_CHARS)
+        user = build_self_notes_user(current, recent)
+
+        async def _sink(_t):
+            pass
+
+        text, _ = await self.llm.stream(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}], _sink)
+        text = text.strip()
+        if not text or text.rstrip(".!").strip().upper() == "PASS":
+            logger.info("self-notes: no change")
+            return None
+        # These notes are addressed TO her, so a correct one never names her. When her name shows up
+        # the model has written the note to the USER instead ("You get annoyed when Mari asks
+        # questions"), which injects the lesson backwards — drop the pass and keep the old notes.
+        if re.search(rf"\b{re.escape(config.BOT_NAME)}\b", text, re.IGNORECASE):
+            logger.info("self-notes: discarded, written in the wrong voice: %s", text[:80])
+            return None
+        text = text[:config.SELFNOTES_MAX_CHARS].strip()
+        await asyncio.to_thread(self.meta.set, SELF_NOTES_KEY, text)
+        logger.info("self-notes updated: %s", text[:80].replace("\n", " | "))
         return text
 
     def _maybe_consolidate(self) -> None:

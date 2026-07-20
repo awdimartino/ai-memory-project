@@ -17,7 +17,10 @@ chunks); a **personality overhaul** (hard *one-sentence* / *no-trailing-question
 end-of-prompt reminder → measured **100% one-sentence, 7% q-end**) + a **follow-up rewrite** (rarer, no invented
 experiences); a new **silent-turn** capability (she can `PASS` to not reply → a faint "stayed quiet" marker); and
 a **thinking-depth investigation + 3-model bake-off** that kept qwen and **parked bounded thinking** on LM Studio
-(§0). §8 roadmap gained the **Generative-Agents "planning" arc**.
+(§0). §8 roadmap gained the **Generative-Agents "planning" arc** — and that arc is now **complete**: **intentions**
+(a private forward agenda that makes proactivity goal-directed) plus **learned self-notes** (she distills her own
+"ease off the questions" rules from how Alex reacts, injected into every user-facing prompt), closing the
+memory + reflection + planning triad.
 
 **⚠️ ACTIVE THREAD — PARKED 2026-07-19, waiting on LM Studio; full detail in §0.** Production stays **thinking-OFF
 and stable on qwen3.5-9b.** This session confirmed **bounded thinking is impossible in LM Studio today** — llama.cpp
@@ -181,6 +184,28 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   Deadlock is going" from the real log; resolution correctly returned `[1]` when a conversation covered the dye
   intention; and with an open agenda injected, chat showed **0/7 shoehorning into unrelated messages** with
   personality intact (7/8 one-sentence, 1/8 q-end).
+- **Learned self-notes — reflection that changes behavior (2026-07-19):** the closed loop *experience → principle
+  → future behavior*, and the second half of the planning arc. Mari distills short operating-notes about **how to
+  BE with this user** ("He gets annoyed when you ask questions — react with an opinion instead"), which ride in
+  **every user-facing prompt**. Sibling to the persona edit: that one rewrites **who she is** from her private
+  thoughts, this one rewrites **how she acts** from how the user actually responded to her. **Storage:** a single
+  `self_notes` MetaStore slot (no table) — `Companion.update_self_notes()` **rewrites the whole list wholesale**,
+  so revising, adding and dropping notes all happen in one call with no dedupe pass or fuzzy match. Capped at
+  `SELFNOTES_MAX_CHARS` (400). Driven by **`SelfNotesJob`** (idle + `SELFNOTES_COOLDOWN` 30min, internal).
+  **Injected** via `build_system(..., self_notes=...)`, threaded through chat + reach-out + follow-up.
+  **Visible** in `GET /status` + a "Lessons learned" panel card. **Two prompt bugs found and fixed live:**
+  (1) notes came back in *first person with quotes* ("Push back when I ask a question") — ambiguous about who "I"
+  is, fixed with an explicit person rule → **0/8 slips**; (2) tightening that rule pushed the PASS instruction off
+  the end and barren-window PASS collapsed **3/3 → 1/3** (she manufactured filler lessons), fixed by moving a
+  *discriminating* rule to the very end ("a conversation only teaches you something when they reacted to HOW you
+  talked to them; ordinary small talk teaches you nothing") — the recency lesson again. **Voice guard:** these
+  notes are addressed *to* her, so a correct one never names her; when `BOT_NAME` appears the model has written
+  the note to the **user** instead ("You get annoyed when Mari asks questions"), which would inject the lesson
+  **backwards** — `update_self_notes` detects that and drops the pass rather than teaching her the inverse.
+  `tests/test_self_notes.py` (**52 offline cases**). **Live-verified:** perfect discrimination —
+  **9/9 barren PASS, 9/9 real lessons caught, 0/9 voice slips** across 6 scenarios; correctly *revised* a note the
+  conversation disproved (2/2); and injecting notes **did not** regress personality (**8/8 one-sentence, 0/8
+  q-end**, vs. a 7/8 and 1/8 baseline).
 - **Web UI: status panel + conversation tabs:** a live **status panel** (right side)
   polls `GET /status` and shows Mari's whole state — awake/asleep, familiarity, the 6 mood bars, memory
   (core list + retired/superseded facts + counts), self-description, the private thought journal, and
@@ -489,11 +514,11 @@ missing.** Adding planning makes the inner life *goal-directed*:
   follow-up carry the agenda *softly*, stale items expire, and `form_intentions` clears whatever the conversation
   actually covered. **Possible later:** relevance-ranked pick instead of FIFO, and surfacing fulfilled intentions as
   a "we covered this" history in the UI.
-- **Learned operating-notes (reflection that changes behavior) — NEW.** Reflection currently feeds the *persona*
-  (who she is); nothing adjusts *how she acts* turn-to-turn. Add short "notes to self" distilled from experience
-  ("Alex bristles at lots of questions — ease off"), injected live into `build_system` — the self-improving closed
-  loop (experience → principle → future behavior). She'd learn on her own the lessons we've been hand-tuning. Sits
-  next to the self-modifying persona.
+- **★ Learned operating-notes (reflection that changes behavior) — BUILT + COMPLETE 2026-07-19** (`self_notes`
+  meta slot + `SelfNotesJob` + a voice guard; full design in §2). The self-improving closed loop is closed: she now
+  distills her own "ease off the questions" lessons from how the user reacts, and they steer every user-facing
+  prompt — the lessons we'd been hand-tuning, learned unsupervised. **Possible later:** let a note *decay* if the
+  behavior it describes stops recurring, and show which note changed a given reply in the prompt-inspector tab (§8-C).
 - **Relational continuity — NEW (small).** Let persisted mood/drives shape her *engagement level* (reply length,
   silent turns, warmth) across sessions, not just word choice within one: a little cool after a rough exchange,
   warming back over the next chats. Uses the silent-turn seam built 2026-07-19.
@@ -567,9 +592,9 @@ The pillar-4 framework is built and hot-swappable — each of these is "register
 **Recommended order from here (updated 2026-07-19):**
 1. **§0 is PARKED** — bounded thinking waits on LM Studio (#1838/#1974); personality (1-sentence/no-question),
    memory-extraction fix, and silent-turns all landed this session. No action there until LM Studio ships it.
-2. **Complete the Generative Agents loop in arc A** — **★ intentions/planning**, then **learned operating-notes**
-   (both small extensions of `ReflectionJob` + `build_system`). This is now the highest-leverage autonomy work,
-   and **A3 nightly consolidation** feeds it (day-summaries = intention + reminisce fuel).
+2. ~~**Complete the Generative Agents loop in arc A**~~ — **DONE 2026-07-19**: ★ intentions/planning *and* learned
+   self-notes both shipped, so memory + reflection + planning are all in place. What still feeds this arc:
+   **A3 nightly consolidation** (day-summaries = intention + reminisce fuel) and **relational continuity**.
 3. **§B memory upgrade** — importance-weighted recall (the GA ranking) + spontaneous recall. The deepest item.
 4. **World-reaching tools (§E)** — web search unlocks the **autotelic curiosity loop**; the Navidrome playlist
    becomes an autonomous act. Both need the tool built first.

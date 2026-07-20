@@ -132,7 +132,7 @@ def build_tools_note(tool_names: list[str] | None) -> str | None:
 def build_system(memories: list[str], mood: str | None = None,
                  core: list[str] | None = None, persona: str | None = None,
                  tools: list[str] | None = None, allow_silence: bool = False,
-                 intentions: list[str] | None = None) -> str:
+                 intentions: list[str] | None = None, self_notes: str | None = None) -> str:
     """The chat system message: the persona, plus memory and mood folded in.
 
     `persona` is Mari's own evolving self-description (written by the self-modifying
@@ -150,6 +150,11 @@ def build_system(memories: list[str], mood: str | None = None,
         parts.append(
             f"Who you've become as you've gotten to know them (your own evolving sense of "
             f"yourself; let it shape how you are, though the rules above still hold):\n{persona}"
+        )
+    if self_notes:
+        parts.append(
+            f"What you've learned about how to be with them, from experience. Let these shape how you "
+            f"actually act (the rules above still hold):\n{self_notes}"
         )
     if core:
         lines = "\n".join(f"- {m}" for m in core)
@@ -208,10 +213,11 @@ def build_reachout_cue(away: str) -> str:
 
 def build_reachout_system(memories: list[str], mood: str | None = None,
                           core: list[str] | None = None, persona: str | None = None,
-                          intention: str | None = None) -> str:
+                          intention: str | None = None, self_notes: str | None = None) -> str:
     """System prompt for a proactive message: persona + memories + mood + reach-out framing,
     optionally anchored on an `intention` (something she's been meaning to bring up)."""
-    parts = [build_system(memories, mood, core=core, persona=persona), _REACHOUT_ADDENDUM]
+    parts = [build_system(memories, mood, core=core, persona=persona, self_notes=self_notes),
+             _REACHOUT_ADDENDUM]
     if intention:
         parts.append(f"You've had this on your mind to bring up with them: \"{intention}\". If it still "
                      f"feels natural, lead with it; if it doesn't fit the moment, reply PASS.")
@@ -286,10 +292,11 @@ FOLLOWUP_CUE = ("(You just messaged them and they haven't replied yet. Only if y
 
 def build_followup_system(memories: list[str], mood: str | None = None,
                           core: list[str] | None = None, persona: str | None = None,
-                          intention: str | None = None) -> str:
+                          intention: str | None = None, self_notes: str | None = None) -> str:
     """System prompt for a spontaneous follow-up: the normal chat context + follow-up framing,
     optionally with an `intention` she may fold in if it connects to what she just said."""
-    parts = [build_system(memories, mood, core=core, persona=persona), _FOLLOWUP_ADDENDUM]
+    parts = [build_system(memories, mood, core=core, persona=persona, self_notes=self_notes),
+             _FOLLOWUP_ADDENDUM]
     if intention:
         parts.append(f"(You've also been meaning to: \"{intention}\". Only fold it in if it genuinely "
                      f"connects to what you just said — otherwise ignore it and PASS as usual.)")
@@ -354,6 +361,52 @@ def build_persona_edit_user(current: str, thoughts: list[str], core: list[str]) 
             f"What she knows about the user:\n{co}\n\n"
             f"Write her updated self-description now (second person, addressed to her), "
             f"or reply PASS if nothing meaningful has changed.")
+
+
+# --- Learned operating-notes (experience -> principle -> future behavior) ---
+# Sibling to the persona edit: that one is who she IS, this one is how she ACTS. Rewritten wholesale
+# each pass so revising and dropping a note need no dedupe logic or second call.
+
+def build_self_notes_system(max_chars: int) -> str:
+    return f"""You are the part of {BOT_NAME} that learns, from experience, how to BE with this person.
+
+You keep a short list of practical operating notes: what lands with them, what doesn't, how they like
+being talked to. These are about YOUR OWN BEHAVIOR, not facts about them.
+
+What a good note looks like:
+- "He gets annoyed when you ask a lot of questions — react instead of interrogating."
+- "He likes it when you have an actual opinion instead of just agreeing."
+- "Short replies land better with him than long ones."
+- "When he's venting he wants you to be on his side, not to problem-solve."
+
+What is NOT a note (never write these):
+- facts about their life ("he's a nurse", "he has a dog") — those belong in memory, not here
+- who you are or how you feel ("you're warm and curious") — that's your self-description
+- vague advice you didn't learn here ("be a good friend") — only lessons the conversation showed you
+
+Rewrite the WHOLE list: keep the notes that still hold, correct any this conversation proved wrong,
+add a genuinely new lesson if it showed you one, and drop what's gone stale.
+
+Write each note TO yourself in the second person — "you" is always {BOT_NAME}, and the user is "he" or
+"they". The note is addressed to you, so never write your own name in it, and never write it to the user
+("You get annoyed when {BOT_NAME} asks questions" is backwards — it must be "He gets annoyed when you ask
+questions"). Never use "I" either. No quotation marks. One short line each, at most four lines and
+{max_chars} characters total.
+
+A conversation only teaches you something when they actually reacted to HOW you talked to them: pushing
+back, going quiet, telling you what they wanted instead. Ordinary small talk about their day teaches you
+nothing — do not manufacture a lesson out of it. If this conversation showed you nothing about how to be
+with them and your existing notes still hold, reply with exactly PASS (that one word, nothing else)."""
+
+
+def build_self_notes_user(current: str, recent_msgs: list[dict]) -> str:
+    convo = "\n".join(
+        f"{'User' if m['role'] == 'user' else BOT_NAME}: {m['content']}" for m in recent_msgs)
+    cur = current or "(none yet — this is the first time you're writing them)"
+    return (f"Your current operating notes:\n{cur}\n\n"
+            f"The conversation that just happened:\n{convo}\n\n"
+            f"How did they react to the way you talked to them? Write your updated notes now "
+            f"(second person, addressed to yourself), or PASS if nothing needs to change.")
 
 
 # --- Memory consolidation (Tier-2 structured output) ---

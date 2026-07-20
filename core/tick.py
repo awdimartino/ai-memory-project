@@ -300,6 +300,35 @@ class IntentionJob(Job):
         await self.companion.form_intentions()
 
 
+LAST_SELFNOTES_KEY = "last_self_notes_at"
+
+
+class SelfNotesJob(Job):
+    """While the user is away, distill what the last conversation taught Mari about HOW to be with
+    them ("ease off the questions") into her operating-notes slot. Idle + cooldown gated; internal
+    (no surface push). Sibling to PersonaEditJob: that one revises who she is, this one how she acts."""
+    name = "self_notes"
+
+    def __init__(self, companion, interval: float, min_idle: float, cooldown: float, clock=time.time):
+        self.companion = companion
+        self.interval = interval
+        self.min_idle = min_idle
+        self.cooldown = cooldown
+        self.clock = clock
+
+    async def run(self) -> None:
+        if self.companion.is_asleep() or self.companion.is_busy():
+            return
+        if self.companion.idle_seconds() < self.min_idle:
+            return
+        now = self.clock()
+        last = self.companion.meta.get_json(LAST_SELFNOTES_KEY, 0) or 0
+        if now - last < self.cooldown:
+            return
+        await asyncio.to_thread(self.companion.meta.set_json, LAST_SELFNOTES_KEY, now)
+        await self.companion.update_self_notes()
+
+
 LAST_PERSONA_EDIT_KEY = "last_persona_edit_at"
 
 

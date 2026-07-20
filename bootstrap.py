@@ -21,6 +21,7 @@ from core.tick import (
     MoodDriftJob,
     PersonaEditJob,
     ReflectionJob,
+    SelfNotesJob,
     SleepJob,
     TickLoop,
 )
@@ -132,6 +133,9 @@ async def build() -> tuple[Companion, str]:
         if config.INTENTION_ENABLED:
             jobs.append(IntentionJob(companion, config.TICK_INTERVAL,
                                      config.INTENTION_MIN_IDLE, config.INTENTION_COOLDOWN))
+        if config.SELFNOTES_ENABLED:
+            jobs.append(SelfNotesJob(companion, config.TICK_INTERVAL,
+                                     config.SELFNOTES_MIN_IDLE, config.SELFNOTES_COOLDOWN))
         if config.PERSONA_EDIT_ENABLED:
             jobs.append(PersonaEditJob(companion, config.TICK_INTERVAL,
                                        config.PERSONA_EDIT_MIN_IDLE, config.PERSONA_EDIT_COOLDOWN,

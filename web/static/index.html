@@ -698,6 +698,13 @@
       p.appendChild(el("div", s.persona ? "st-mem" : "st-empty", s.persona || "none yet — develops as you talk"));
       box.appendChild(p);
 
+      // What she's worked out about how to be with you (vs. self-description = who she is).
+      const notes = (s.self_notes || "").split("\n").map((l) => l.replace(/^[-*•]\s*/, "").trim()).filter(Boolean);
+      const sn = card("Lessons learned", notes.length ? String(notes.length) : null);
+      if (notes.length) notes.forEach((n) => sn.appendChild(el("div", "st-mem", n)));
+      else sn.appendChild(el("div", "st-empty", "none yet — she works these out from how you talk"));
+      box.appendChild(sn);
+
       const th = card("Private journal", s.thoughts.length ? String(s.thoughts.length) : null);
       if (s.thoughts.length) {
         s.thoughts.forEach((t) => {
@@ -721,6 +728,7 @@
       a.appendChild(kvRow("last reach-out", fmtAgo(s.last.reach_out_secs_ago)));
       a.appendChild(kvRow("last reflection", fmtAgo(s.last.reflect_secs_ago)));
       a.appendChild(kvRow("last persona edit", fmtAgo(s.last.persona_edit_secs_ago)));
+      a.appendChild(kvRow("last self-notes", fmtAgo(s.last.self_notes_secs_ago)));
       box.appendChild(a);
 
       // reflect her state in the header avatar + favicon
