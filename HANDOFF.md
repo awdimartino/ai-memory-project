@@ -669,10 +669,36 @@ model *affirms* instead of *retrieving*) — the case bounded thinking would hel
 **`core/prompts.py` still has the UNCOMMITTED `build_tools_note` change** (left on purpose; strengthened reminisce
 rule + few-shot calibration; scored 22–23 vs 25 baseline — decide revert/rework; **not** committed this session).
 
-**Production config right now:** qwen3.5-9b, thinking OFF (template `{% set enable_thinking = false %}`),
-`NO_THINK=true`, spec decoding OFF, `TEMPERATURE=0.8`. ⚠️ **The template was flipped to `= true` for the 2026-07-19
-probe; flip it back to `= false` in LM Studio to restore thinking-off** (verify: `probe_reasoning_control.py` baseline
-reads ~0).
+**⚠️ PRODUCTION CONFIG CHANGED 2026-07-20 — bounded thinking is now ADOPTED.**
+
+    model            qwen/qwen3.5-9b          (unchanged — no identity discontinuity)
+    thinking         ON, budget 256 tokens    (was OFF via template)
+    template         enable_thinking line REMOVED
+    LM Studio        "[BETA] Enable LM Studio Engine Protocol" ON
+    env (User scope) LLAMA_ARG_THINK_BUDGET=256
+                     LLAMA_ARG_THINK_BUDGET_MESSAGE="... thinking budget exceeded, let's answer now."
+    NO_THINK=true, spec decoding OFF, TEMPERATURE=0.8   (unchanged)
+
+Verified in place: **864 chars reasoning, 6.7s, `bat_ball` 6/6** (matches the 833/6.5s adoption run).
+⚠️ Env vars are read by LM Studio **at launch** — changing the budget requires a full restart, and
+`Start-Process` does not reach the desktop session; relaunch via
+`Start-Process explorer.exe -ArgumentList '"<path>\LM Studio.exe"'`.
+
+**What this costs, and what is now stale:**
+- **Chat 2.7s -> ~6.5s.** The user-facing price of the reasoning win. Consolidation 3.5s -> 5.0s.
+- ⚠️ **The v2.7 gold baseline (114/120) is INVALIDATED** — different serving config, different
+  sampling. Re-baseline before comparing anything to it.
+- ⚠️ The §7 numbers measured thinking-OFF (100% one-sentence, q-end rates, tool-calling 23/30).
+  **Thinking-on may move personality and tool routing in either direction — nothing has re-measured
+  them.** Tool-calling especially: §7 blamed thinking-off for under-calling tools, so this may have
+  *fixed* that for free. Worth `tool_eval.py`.
+
+**The budget sweep is UNFINISHED.** Measured: 256 -> 833c/6.5s/6-6, 512 -> 1500c/10.0s/6-6 (so the
+dial is causal, ~2x budget = ~1.8x reasoning). **512 buys nothing; 96-192 is untested and is where
+chat latency gets bought back.** If ~128 holds 6/6 that is ~4-5s chat with reasoning intact.
+
+**To revert to old production exactly:** put `{% set enable_thinking = false %}` back in the qwen
+template. Env vars can stay — they bound nothing when thinking is off.
 
 ### A. Autonomous inner life ★ (recommended next arc)
 The three the user liked from the GitHub-companion research. Together they replace the single idle-timer
