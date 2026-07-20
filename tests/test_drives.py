@@ -11,12 +11,11 @@ a zero dt is a no-op, and state persists across manager instances.
 
 Run:  python tests/test_drives.py
 """
-import asyncio
 import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import case, run  # also puts the repo root on sys.path
 
 from core.drives import DRIVES, ENERGY_START, DriveManager
 from infrastructure.db import connect
@@ -44,14 +43,6 @@ def _mgr(clock, away_after=90.0):
 def _mood(**channels):
     """A partial mood dict (unspecified channels read as 0.0 via .get)."""
     return channels
-
-
-CASES = []
-
-
-def case(fn):
-    CASES.append(fn)
-    return fn
 
 
 @case
@@ -235,21 +226,5 @@ async def reset_restores_energy():
     conn.close(); os.remove(path)
 
 
-async def main() -> int:
-    failed = 0
-    for fn in CASES:
-        try:
-            await fn()
-            print(f"  PASS  {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {fn.__name__}: {e}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(CASES) - failed}/{len(CASES)} passed")
-    return 1 if failed else 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(run())

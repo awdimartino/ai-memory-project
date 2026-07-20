@@ -11,12 +11,11 @@ mood decays toward baseline over neutral turns, the noise floor drops weak label
 
 Run:  python tests/test_emotion.py
 """
-import asyncio
 import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import case, run  # also puts the repo root on sys.path
 
 from core.emotion_manager import BASELINE_STATE, CHANNELS, EmotionManager
 from infrastructure.db import connect
@@ -39,14 +38,6 @@ def _mgr(script):
     meta = SqliteMetaStore(conn)
     mgr = EmotionManager(FakeClassifier(script), meta, pull_strength=0.4, noise_floor=0.05)
     return mgr, meta, conn, path
-
-
-CASES = []
-
-
-def case(fn):
-    CASES.append(fn)
-    return fn
 
 
 @case
@@ -125,21 +116,5 @@ async def mood_persists_across_instances():
     conn.close(); os.remove(path)
 
 
-async def main() -> int:
-    failed = 0
-    for fn in CASES:
-        try:
-            await fn()
-            print(f"  PASS  {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {fn.__name__}: {e}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(CASES) - failed}/{len(CASES)} passed")
-    return 1 if failed else 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(run())

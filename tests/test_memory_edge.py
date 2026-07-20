@@ -6,12 +6,11 @@ decisions). No LM Studio needed. Each case gets its own fresh DB.
 
 Run:  python tests/test_memory_edge.py
 """
-import asyncio
 import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import case, run  # also puts the repo root on sys.path
 
 import numpy as np
 
@@ -75,14 +74,6 @@ def _mm(fact_lists, decisions):
 async def _consume(mm, n):
     for _ in range(n):
         await mm.consolidate([{"role": "user", "content": "x"}], session_id=1)
-
-
-CASES = []
-
-
-def case(fn):
-    CASES.append(fn)
-    return fn
 
 
 @case
@@ -181,21 +172,5 @@ async def empty_extraction_no_write(mm=None):
     conn.close(); os.remove(path)
 
 
-async def main() -> int:
-    failed = 0
-    for fn in CASES:
-        try:
-            await fn()
-            print(f"  PASS  {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {fn.__name__}: {e}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(CASES) - failed}/{len(CASES)} passed")
-    return 1 if failed else 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(run())

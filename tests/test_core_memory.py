@@ -7,12 +7,11 @@ and the cap is enforced by the brain re-rank (demoting the rest to regular).
 
 Run:  python tests/test_core_memory.py
 """
-import asyncio
 import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import case, run  # also puts the repo root on sys.path
 
 import numpy as np
 
@@ -72,14 +71,6 @@ def _mm(fact_lists, decisions, core_max=12):
                        brain_model="fake", top_k=5, min_sim=0.55,
                        relate_top_k=5, relate_sim=0.6, core_max=core_max)
     return mm, store, conn, path
-
-
-CASES = []
-
-
-def case(fn):
-    CASES.append(fn)
-    return fn
 
 
 @case
@@ -142,21 +133,5 @@ async def core_cap_untouched_when_under_limit():
     conn.close(); os.remove(path)
 
 
-async def main() -> int:
-    failed = 0
-    for fn in CASES:
-        try:
-            await fn()
-            print(f"  PASS  {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {fn.__name__}: {e}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(CASES) - failed}/{len(CASES)} passed")
-    return 1 if failed else 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(run())

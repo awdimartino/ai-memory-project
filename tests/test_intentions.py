@@ -7,11 +7,10 @@ Run:  python tests/test_intentions.py
 """
 import asyncio
 import os
-import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import config_override  # also puts the repo root on sys.path
 
 import config  # noqa: E402
 from core.companion import Companion  # noqa: E402
@@ -134,11 +133,9 @@ async def main():
           f"only genuinely-new added: {added}")
     check(st.count_active() == 3, "existing + 2 new; dups skipped")
 
-    old_max = config.INTENTION_MAX_ACTIVE
-    config.INTENTION_MAX_ACTIVE = 2
-    await _companion(st, FakeLLM(["one brand new thing"]), HIST).form_intentions()
-    check(st.count_active() == 2, f"capped to 2 (oldest dropped), got {st.count_active()}")
-    config.INTENTION_MAX_ACTIVE = old_max
+    with config_override(INTENTION_MAX_ACTIVE=2):
+        await _companion(st, FakeLLM(["one brand new thing"]), HIST).form_intentions()
+        check(st.count_active() == 2, f"capped to 2 (oldest dropped), got {st.count_active()}")
 
     check(await _companion(st, FakeLLM(), history=[]).form_intentions() == [], "empty history is a no-op")
 

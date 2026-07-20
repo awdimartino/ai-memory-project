@@ -8,10 +8,9 @@ interval to confirm start/stop.
 Run:  python tests/test_tick.py
 """
 import asyncio
-import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import case, config_override, run  # also puts the repo root on sys.path
 
 from core.emotion_manager import EmotionManager
 from core.tick import (
@@ -89,14 +88,6 @@ class InMemoryMeta:
 class FakeClassifier:
     def classify(self, text):
         return []
-
-
-CASES = []
-
-
-def case(fn):
-    CASES.append(fn)
-    return fn
 
 
 @case
@@ -615,15 +606,14 @@ async def persona_edit_fires_and_sets_cooldown():
 
 @case
 async def familiarity_scales_with_messages():
-    import config
     from core.companion import Companion, familiarity_label
-    config.FAMILIARITY_MESSAGES = 400
-    c = Companion(llm=None, store=_Store(0), memory=None, meta=None, session_id=1)
-    assert c.familiarity() == 0.0
-    c.store.n = 200
-    assert abs(c.familiarity() - 0.5) < 1e-9
-    c.store.n = 100000
-    assert c.familiarity() == 1.0  # capped
+    with config_override(FAMILIARITY_MESSAGES=400):
+        c = Companion(llm=None, store=_Store(0), memory=None, meta=None, session_id=1)
+        assert c.familiarity() == 0.0
+        c.store.n = 200
+        assert abs(c.familiarity() - 0.5) < 1e-9
+        c.store.n = 100000
+        assert c.familiarity() == 1.0  # capped
     assert "stranger" in familiarity_label(0.0)
     assert "close" in familiarity_label(0.95)
 
@@ -725,21 +715,5 @@ async def start_stop_lifecycle():
     await loop.stop()                        # idempotent
 
 
-async def main() -> int:
-    failed = 0
-    for fn in CASES:
-        try:
-            await fn()
-            print(f"  PASS  {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {fn.__name__}: {e}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(CASES) - failed}/{len(CASES)} passed")
-    return 1 if failed else 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(run())

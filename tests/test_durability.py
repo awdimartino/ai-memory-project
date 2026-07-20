@@ -20,7 +20,7 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import case, config_override, run  # also puts the repo root on sys.path
 
 import config
 import infrastructure.db as db
@@ -89,81 +89,73 @@ def _ids(chunk):
     return [m["id"] for m in chunk]
 
 
-CASES = []
-
-
-def case(fn):
-    CASES.append(fn)
-    return fn
-
-
 @case
 async def watermark_advances_on_window_consolidation():
-    config.CONSOLIDATE_WINDOW = 4  # 2 exchanges
-    path = os.path.join(tempfile.mkdtemp(), "d.db")
-    mem = FakeMemory()
-    comp, conn, conv, meta = _build(path, mem)
+    with config_override(CONSOLIDATE_WINDOW=4):  # 2 exchanges
+        path = os.path.join(tempfile.mkdtemp(), "d.db")
+        mem = FakeMemory()
+        comp, conn, conv, meta = _build(path, mem)
 
-    await comp.send("hi", _noop)   # ids 1,2
-    await comp.send("yo", _noop)   # ids 3,4 -> triggers consolidation
+        await comp.send("hi", _noop)   # ids 1,2
+        await comp.send("yo", _noop)   # ids 3,4 -> triggers consolidation
 
-    ok = await _wait(lambda: meta.get_int(KEY, 0) == 4 and not comp._unconsolidated)
-    assert ok, f"watermark/buffer wrong: wm={meta.get_int(KEY,0)}, buf={len(comp._unconsolidated)}"
-    assert mem.chunks and _ids(mem.chunks[0]) == [1, 2, 3, 4], _ids(mem.chunks[0])
-    conn.close(); os.remove(path)
+        ok = await _wait(lambda: meta.get_int(KEY, 0) == 4 and not comp._unconsolidated)
+        assert ok, f"watermark/buffer wrong: wm={meta.get_int(KEY,0)}, buf={len(comp._unconsolidated)}"
+        assert mem.chunks and _ids(mem.chunks[0]) == [1, 2, 3, 4], _ids(mem.chunks[0])
+        conn.close(); os.remove(path)
 
 
 @case
 async def hard_kill_tail_is_recovered_and_flushed():
-    config.CONSOLIDATE_WINDOW = 100  # never window-triggers here
-    path = os.path.join(tempfile.mkdtemp(), "d.db")
+    with config_override(CONSOLIDATE_WINDOW=100):  # never window-triggers here
+        path = os.path.join(tempfile.mkdtemp(), "d.db")
 
-    # First run: chat, then "crash" (drop the companion WITHOUT flushing).
-    comp, conn, conv, meta = _build(path, FakeMemory())
-    for _ in range(3):
-        await comp.send("x", _noop)          # 6 messages logged, ids 1..6
-    assert meta.get_int(KEY, 0) == 0, "nothing consolidated yet"
-    assert len(comp._unconsolidated) == 6
-    conn.close()  # simulate hard kill: no flush
+        # First run: chat, then "crash" (drop the companion WITHOUT flushing).
+        comp, conn, conv, meta = _build(path, FakeMemory())
+        for _ in range(3):
+            await comp.send("x", _noop)          # 6 messages logged, ids 1..6
+        assert meta.get_int(KEY, 0) == 0, "nothing consolidated yet"
+        assert len(comp._unconsolidated) == 6
+        conn.close()  # simulate hard kill: no flush
 
-    # Restart: the tail must be recovered from the store.
-    mem2 = FakeMemory()
-    comp2, conn2, conv2, meta2 = _build(path, mem2)
-    assert _ids(comp2._unconsolidated) == [1, 2, 3, 4, 5, 6], _ids(comp2._unconsolidated)
+        # Restart: the tail must be recovered from the store.
+        mem2 = FakeMemory()
+        comp2, conn2, conv2, meta2 = _build(path, mem2)
+        assert _ids(comp2._unconsolidated) == [1, 2, 3, 4, 5, 6], _ids(comp2._unconsolidated)
 
-    # A graceful flush now consolidates exactly the recovered tail + checkpoints.
-    await comp2.flush()
-    assert mem2.chunks and _ids(mem2.chunks[0]) == [1, 2, 3, 4, 5, 6]
-    assert meta2.get_int(KEY, 0) == 6
-    conn2.close()
+        # A graceful flush now consolidates exactly the recovered tail + checkpoints.
+        await comp2.flush()
+        assert mem2.chunks and _ids(mem2.chunks[0]) == [1, 2, 3, 4, 5, 6]
+        assert meta2.get_int(KEY, 0) == 6
+        conn2.close()
 
-    # Restart once more: nothing left to recover.
-    comp3, conn3, conv3, meta3 = _build(path, FakeMemory())
-    assert comp3._unconsolidated == [], comp3._unconsolidated
-    conn3.close(); os.remove(path)
+        # Restart once more: nothing left to recover.
+        comp3, conn3, conv3, meta3 = _build(path, FakeMemory())
+        assert comp3._unconsolidated == [], comp3._unconsolidated
+        conn3.close(); os.remove(path)
 
 
 @case
 async def failed_consolidation_requeues_and_holds_watermark():
-    config.CONSOLIDATE_WINDOW = 4
-    path = os.path.join(tempfile.mkdtemp(), "d.db")
-    mem = FakeMemory(fail=True)
-    comp, conn, conv, meta = _build(path, mem)
+    with config_override(CONSOLIDATE_WINDOW=4):
+        path = os.path.join(tempfile.mkdtemp(), "d.db")
+        mem = FakeMemory(fail=True)
+        comp, conn, conv, meta = _build(path, mem)
 
-    await comp.send("hi", _noop)   # ids 1,2
-    await comp.send("yo", _noop)   # ids 3,4 -> consolidation fires, raises
+        await comp.send("hi", _noop)   # ids 1,2
+        await comp.send("yo", _noop)   # ids 3,4 -> consolidation fires, raises
 
-    ok = await _wait(lambda: not comp._consol_lock.locked() and len(comp._unconsolidated) == 4)
-    assert ok, f"requeue failed: buf={len(comp._unconsolidated)}"
-    assert _ids(comp._unconsolidated) == [1, 2, 3, 4]
-    assert meta.get_int(KEY, 0) == 0, "watermark must not advance on failure"
+        ok = await _wait(lambda: not comp._consol_lock.locked() and len(comp._unconsolidated) == 4)
+        assert ok, f"requeue failed: buf={len(comp._unconsolidated)}"
+        assert _ids(comp._unconsolidated) == [1, 2, 3, 4]
+        assert meta.get_int(KEY, 0) == 0, "watermark must not advance on failure"
 
-    # Recover: succeed on flush; the same messages consolidate and checkpoint.
-    mem.fail = False
-    await comp.flush()
-    assert mem.chunks and _ids(mem.chunks[0]) == [1, 2, 3, 4]
-    assert meta.get_int(KEY, 0) == 4
-    conn.close(); os.remove(path)
+        # Recover: succeed on flush; the same messages consolidate and checkpoint.
+        mem.fail = False
+        await comp.flush()
+        assert mem.chunks and _ids(mem.chunks[0]) == [1, 2, 3, 4]
+        assert meta.get_int(KEY, 0) == 4
+        conn.close(); os.remove(path)
 
 
 @case
@@ -221,21 +213,5 @@ async def upgrade_seeds_watermark_to_max_message_id():
     os.remove(path)
 
 
-async def main() -> int:
-    failed = 0
-    for fn in CASES:
-        try:
-            await fn()
-            print(f"  PASS  {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {fn.__name__}: {e}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(CASES) - failed}/{len(CASES)} passed")
-    return 1 if failed else 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(run())

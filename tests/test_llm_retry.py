@@ -7,12 +7,10 @@ tokens have been emitted, which would double-stream).
 
 Run:  python tests/test_llm_retry.py
 """
-import asyncio
-import os
 import sys
 import types
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from _harness import case, run  # also puts the repo root on sys.path
 
 from infrastructure.llm_client import LLMClient, _is_retryable
 
@@ -67,14 +65,6 @@ def _llm(fc, retries=3):
     llm = LLMClient("http://localhost:1234/v1", "k", "m", 0.8, max_retries=retries)
     llm.client = _client(fc)
     return llm
-
-
-CASES = []
-
-
-def case(fn):
-    CASES.append(fn)
-    return fn
 
 
 @case
@@ -142,21 +132,5 @@ async def _collect(bucket, t):
     bucket.append(t)
 
 
-async def main() -> int:
-    failed = 0
-    for fn in CASES:
-        try:
-            await fn()
-            print(f"  PASS  {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"  FAIL  {fn.__name__}: {e}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(CASES) - failed}/{len(CASES)} passed")
-    return 1 if failed else 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(run())
