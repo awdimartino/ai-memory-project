@@ -464,7 +464,56 @@ critical path. Grouped by theme; items the user has **already flagged as liked**
 Full context in [`V2_PLAN.md` §2.9](V2_PLAN.md). **Delivery-layer features stay gated behind a solid
 brain, per the guiding principle.**
 
-### 0. thinking depth + tool-calling reliability — PARKED 2026-07-19 (waiting on LM Studio)
+### 0. thinking depth — ⚠️ **UNPARK: a workaround exists, VERIFIED ON THIS MACHINE 2026-07-20**
+
+**The capability has been on disk the whole time.** A GitHub workaround (found by the user) says to
+enable **"[BETA] Enable LM Studio Engine Protocol"** and set `LLAMA_ARG_THINK_BUDGET` before
+launching LM Studio. Verified against the *installed* binary — `llama-common.dll` in
+`~/.lmstudio/extensions/backends/llama.cpp-win-x86_64-amd-rocm-avx2-2.25.2/` contains:
+
+```
+LLAMA_ARG_THINK_BUDGET   LLAMA_ARG_THINK_BUDGET_MESSAGE   LLAMA_ARG_THINK
+--reasoning-budget       --reasoning-budget-message       --reasoning-format
+```
+
+**Why the 2026-07-19 probe concluded otherwise:** it tested API *parameters* against LM Studio's
+**in-process** llama.cpp bindings, which strip them. Engine Protocol instead spawns
+**`llama-server.exe`** as a subprocess (that binary and `engine-protocol-server-artifacts.json` are
+both in the backend folder), so `LLAMA_ARG_*` reaches llama.cpp's own arg parser. The conclusion
+"bounded thinking is impossible in LM Studio today" was **right about the path tested and wrong
+about the product**.
+
+**Setup (Windows — `export` is bash and will not work):**
+```powershell
+[Environment]::SetEnvironmentVariable("LLAMA_ARG_THINK_BUDGET","256","User")
+[Environment]::SetEnvironmentVariable("LLAMA_ARG_THINK_BUDGET_MESSAGE",
+  "... thinking budget exceeded, let's answer now.","User")
+```
+Persistent (`"User"`) rather than a shell session, because LM Studio is normally launched from the
+Start menu and must inherit the vars.
+
+⚠️ **Also flip the template back to thinking ON** (`{% set enable_thinking = false %}` must go). A
+budget bounds thinking; it cannot bound zero. That template edit is exactly what this section has
+been working around.
+
+**What to measure, in order:**
+1. `scripts/probe_reasoning_control.py` — reasoning chars should now track the budget instead of
+   pinning ~2700-3700 regardless.
+2. **`bat_ball`** via `model_tryout.py` — the discriminator. Both qwen 9B and gemma 12B fail it
+   thinking-OFF, and §0 records gpt-oss going WRONG → OK with more reasoning. If a 256-token budget
+   flips it, that is the whole thesis confirmed.
+3. **Consolidation speed** — the reason thinking was disabled (~50s/call unbounded → ~3.5s off).
+   A budget is only a win if extraction stays fast; this is the make-or-break number.
+4. **Per-request `thinking_budget_tokens`** — previously stripped, but that was the in-process path.
+   If it works under Engine Protocol, the brain can run a tight budget and chat a looser one, which
+   beats one global setting.
+
+⚠️ **LM Studio bug #2147**: a 2.24.0/2.25.0-beta regression leaks thinking and wastes tokens, and
+this machine is on **2.25.2**. If thinking text bleeds into replies, that is the known bug.
+
+**If this works, the llama-server migration below is unnecessary** — keep it as the fallback.
+
+### 0b. the migration fallback (was §0) — PARKED 2026-07-19, superseded by the workaround above
 Production is **thinking-OFF and stable on qwen3.5-9b.** After a full investigation this session the decision is to
 **stay on qwen thinking-off and WAIT for LM Studio to expose a reasoning budget** rather than migrate serving or swap
 the model. Resume when LM Studio ships budget control (watch bug-tracker **#1838 / #1974**); or, independently, do
