@@ -113,6 +113,32 @@ RECALL_TOP_K = _i("RECALL_TOP_K", 5)
 # a too-high cutoff silently drops real matches.
 # Calibrated on nomic-embed-v1.5: real matches ~0.59-0.65, unrelated ~0.50.
 RECALL_MIN_SIMILARITY = _f("RECALL_MIN_SIMILARITY", 0.55)
+
+# --- contrast gate (2026-07-20) -----------------------------------------------
+# The floor above is kept, but it is no longer the ONLY way in. Measured on the
+# gold set's six facts (scripts/recall_margin_probe.py), the absolute score turned
+# out to be a poor discriminator: correct top-1 hits ranged 0.448-0.644 while
+# unrelated queries reached 0.576, so positives and negatives OVERLAP almost
+# completely and no floor separates them. At 0.55 the correct fact was top-1 every
+# time and thrown away anyway — 4/12 recall.
+#
+# What does separate them is CONTRAST: how far the top hit stands above the rest
+# of the corpus. nomic gives each query its own baseline offset (some queries score
+# ~0.5 against everything), and subtracting the corpus median cancels that offset.
+# Same measurement, contrast gate: 11/12 recall. Lowering the floor to 0.50 instead
+# would have scored 10/12 but with more false positives — the gate is strictly the
+# better instrument, which is why the floor did NOT move.
+#
+# The median (not the mean) is the background estimate: it barely shifts when one
+# or two facts are genuinely relevant, so a compound question ("my dog and my job")
+# still clears the gate on both.
+RECALL_CONTRAST_GAP = _f("RECALL_CONTRAST_GAP", 0.06)
+# Backstop so contrast alone can't admit a hit that is weak in absolute terms —
+# in a corpus where everything scores badly, standing out means little.
+RECALL_CONTRAST_FLOOR = _f("RECALL_CONTRAST_FLOOR", 0.42)
+# Below this many memories the median IS the top hit (or its neighbour), so
+# "contrast" is degenerate and only the absolute floor applies.
+RECALL_CONTRAST_MIN_CORPUS = _i("RECALL_CONTRAST_MIN_CORPUS", 3)
 # Consolidate once this many unconsolidated messages accumulate. Kept small (10) so a single
 # durable fact isn't drowned in a large, low-signal window — extraction misses a lone fact
 # buried in 20+ messages of banter (measured). Each consolidation is still backgrounded.

@@ -72,6 +72,9 @@ async def build() -> tuple[Companion, str]:
         config.RECALL_TOP_K, config.RECALL_MIN_SIMILARITY,
         config.MEMORY_RELATE_TOP_K, config.MEMORY_RELATE_SIMILARITY,
         core_max=config.CORE_MEMORY_MAX, dup_sim=config.MEMORY_DUP_SIMILARITY,
+        contrast_gap=config.RECALL_CONTRAST_GAP,
+        contrast_floor=config.RECALL_CONTRAST_FLOOR,
+        contrast_min_corpus=config.RECALL_CONTRAST_MIN_CORPUS,
     )
 
     emotion = await _build_emotion(meta_store)

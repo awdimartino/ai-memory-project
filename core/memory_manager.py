@@ -51,7 +51,9 @@ class MemoryManager:
     def __init__(self, embedder, store, llm, brain_model: str,
                  top_k: int, min_sim: float,
                  relate_top_k: int, relate_sim: float,
-                 core_max: int = 12, dup_sim: float = 0.97):
+                 core_max: int = 12, dup_sim: float = 0.97,
+                 contrast_gap: float = 0.0, contrast_floor: float = 0.0,
+                 contrast_min_corpus: int = 3):
         self.embedder = embedder
         self.store = store
         self.llm = llm
@@ -62,6 +64,11 @@ class MemoryManager:
         self.relate_sim = relate_sim
         self.core_max = core_max
         self.dup_sim = dup_sim  # within-window near-verbatim collapse threshold
+        # Recall's contrast gate (see _rank). Defaults are off, so a MemoryManager
+        # built without them behaves exactly as it did before the gate existed.
+        self.contrast_gap = contrast_gap
+        self.contrast_floor = contrast_floor
+        self.contrast_min_corpus = contrast_min_corpus
 
     def core_memories(self) -> list[str]:
         """Every active core fact (unfiltered). Used by status/inspector views."""
@@ -151,26 +158,54 @@ class MemoryManager:
 
     @staticmethod
     def _rank(vec: np.ndarray, mems: list[dict], mn: np.ndarray | None,
-              top_k: int, min_sim: float) -> list[tuple[dict, float]]:
-        """Cosine KNN of `vec` against a preloaded corpus. Returns (memory, sim), best first."""
+              top_k: int, min_sim: float,
+              contrast_gap: float = 0.0, contrast_floor: float = 0.0,
+              contrast_min_corpus: int = 3) -> list[tuple[dict, float]]:
+        """Cosine KNN of `vec` against a preloaded corpus. Returns (memory, sim), best first.
+
+        A hit is kept if it clears the absolute floor `min_sim`, OR (when
+        `contrast_gap` is set) if it stands that far above the corpus median while
+        still clearing `contrast_floor`.
+
+        The contrast clause exists because the absolute score is a weak
+        discriminator on nomic: correct top-1 hits and unrelated queries occupy the
+        same 0.42-0.64 band, so the floor threw away correct answers (measured
+        4/12 recall) and could not be lowered without admitting noise. Each query
+        carries its own baseline offset — some score ~0.5 against every fact — and
+        subtracting the median cancels it, which is what makes the comparison
+        meaningful across queries. See config.RECALL_CONTRAST_GAP.
+
+        Callers that want pure absolute thresholding (the consolidation `relate`
+        path, which asks a different question: "is this fact close enough to that
+        one to merit a lifecycle decision?") simply leave `contrast_gap` at 0.
+        """
         if mn is None:
             return []
         qn = vec / (np.linalg.norm(vec) + 1e-9)
         sims = mn @ qn
+        keep = sims >= min_sim
+        if contrast_gap and len(sims) >= contrast_min_corpus:
+            # Median over the whole corpus: a background level that barely moves
+            # when one or two facts are genuinely relevant (the mean does).
+            keep |= (sims >= contrast_floor) & (sims - np.median(sims) >= contrast_gap)
         order = np.argsort(-sims)[:top_k]
-        return [(mems[i], float(sims[i])) for i in order if sims[i] >= min_sim]
+        return [(mems[i], float(sims[i])) for i in order if keep[i]]
 
-    async def _search(self, vec: np.ndarray, top_k: int, min_sim: float) -> list[tuple[dict, float]]:
+    async def _search(self, vec: np.ndarray, top_k: int, min_sim: float,
+                      **contrast) -> list[tuple[dict, float]]:
         """Cosine KNN over active memories, loading the corpus for this one query."""
         mems, mn = await self._corpus()
-        return self._rank(vec, mems, mn, top_k, min_sim)
+        return self._rank(vec, mems, mn, top_k, min_sim, **contrast)
 
     async def recall(self, text: str) -> list[tuple[str, float]]:
         """Return up to top_k relevant memories as (content, similarity), best first."""
         # No count() pre-check: _corpus already short-circuits on an empty store, and
         # that guard cost an extra query on every single turn to learn nothing.
         qvec = np.asarray(await self.embedder.embed_query(text), dtype=np.float32)
-        hits = await self._search(qvec, self.top_k, self.min_sim)
+        hits = await self._search(qvec, self.top_k, self.min_sim,
+                                  contrast_gap=self.contrast_gap,
+                                  contrast_floor=self.contrast_floor,
+                                  contrast_min_corpus=self.contrast_min_corpus)
         if hits:
             logger.info("recall: %d hit(s), top sim %.3f", len(hits), hits[0][1])
         return [(m["content"], s) for m, s in hits]

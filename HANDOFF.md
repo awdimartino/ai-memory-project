@@ -733,7 +733,52 @@ back ON, and the test runner crashing on unicode when reporting a failure.
 - **Push now fires whenever the chat isn't in front of you** (user request) — closed, backgrounded,
   or no tab at all. Follow-ups push too.
 
-### ▶ START HERE: fix recall (the next task, specified to start cold)
+### ✅ DONE (code + offline tests): recall fixed by a contrast gate — **live eval still owed**
+
+**Status 2026-07-20, later session.** Implemented, 277 offline checks green. **The gold-set run has
+NOT happened yet** (the machine was busy; the web server is stopped and waiting). That run is the
+first thing to do — see "What's left" below.
+
+**What the measurement changed about the diagnosis.** The brief below said the fix was to keep the
+floor and add a margin. The measurement (`scripts/recall_margin_probe.py`, now checked in, 12
+positive + 13 negative queries) said something stronger: **the absolute score is not a usable
+discriminator at all.** Correct top-1 hits span 0.448–0.644; unrelated queries span 0.424–0.579.
+They overlap almost completely, so *no* floor separates them — and two negatives ("what's your
+favourite colour?" 0.576, "how does photosynthesis work?" 0.557) were already scoring **above the
+0.55 floor**, i.e. production had false positives nobody had measured.
+
+**What shipped.** A **contrast gate**: keep a hit if `sim >= 0.55` (unchanged) **or** if it stands
+`RECALL_CONTRAST_GAP` (0.06) above the **corpus median** while clearing a 0.42 backstop. nomic gives
+each query its own baseline offset — some queries score ~0.5 against every fact — and subtracting
+the median cancels that offset, which is what makes scores comparable across queries. The median
+(not the mean) is the background estimate so a compound question ("my dog and my job") still clears
+the gate on *both* facts. `core/memory_manager.py::_rank`, opt-in via kwargs so consolidation's
+`relate` path stays purely absolute.
+
+| rule | recall | false positives |
+|---|---|---|
+| `sim >= 0.55` (before) | **4/12** | 3 |
+| contrast gate (after) | **11/12** | 5 |
+
+**The honest cost.** Two extra false positives, both **adjacent topics**: "Seattle is supposed to be
+nice" → *lives in Portland*, "my brother never calls me back" → *sister is called Kate*. No
+threshold on a single similarity statistic separates those from true positives like "long shift at
+the shop" → *welder*. Judged a good trade because recalled facts are injected as *"things that
+might be relevant… use them when they fit"* — a false positive is a **true fact Mari may ignore**, a
+possible non-sequitur rather than the confabulation the original brief feared. The negative set is
+also deliberately adversarial (5 of 13 are adjacent by construction), so 5/13 overstates the real
+rate. **The documented next step if precision bites: hybrid BM25 + vector** — lexical evidence is
+exactly what separates these ("brother" shares no words with the fact; "I should call my sister"
+shares two).
+
+**What's left:**
+1. **Run the gold set** (below) — the one thing this change hasn't been measured by end-to-end.
+2. Restart the web server (`python -m web.app`); it was stopped for the eval and left down.
+3. Note there were **two** `web.app` processes running simultaneously — worth understanding, since
+   two processes on one model is the thing that has crashed LM Studio before.
+
+<details>
+<summary>Original cold-start brief (kept — its "how you'll know it worked" section is still the plan)</summary>
 
 **The problem, measured 2026-07-20.** Seed six facts, ask six plain questions. The correct fact is
 the **top hit every single time**; the 0.55 similarity floor throws it away anyway.
@@ -792,6 +837,11 @@ scored 104 / 107 / 106. A category-level move is real; one case flipping is not.
 
 **Before you start:** `python tests/run_all.py` should be 18 files / 267 checks green, and the web
 server should be stopped before any live script (two processes on one model has crashed LM Studio).
+
+</details>
+
+*(Post-fix the suite is **19 files / 277 checks** — `tests/test_recall_contrast.py` pins the gate to
+the measured distributions, including the two false-positive guards.)*
 
 ### Also done 2026-07-20
 - **The gold set exists and v2.2 is the frozen baseline: 106/117 automatic (91%),** 2 known gaps

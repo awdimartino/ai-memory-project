@@ -38,25 +38,43 @@ Work down this list — the causes are quite different:
 2. **Was it a *big, noisy* window?** A lone durable fact drowns in banter — this is the
    documented "name Alex was dropped" bug. `CONSOLIDATE_WINDOW` (10) is small for this reason;
    don't raise it much.
-3. **Is recall failing to surface it?** This is the most likely cause, and **it is a real open
-   bug rather than a tuning problem** — measured 2026-07-20:
+3. **Is recall failing to surface it?** This was the most likely cause until 2026-07-20, when a
+   **contrast gate** fixed it (`RECALL_CONTRAST_GAP`). If you're tuning recall, read this first —
+   the intuitive knob is the wrong one.
 
-   | query | top hit | sim |
-   |---|---|---|
-   | "do I have any pets?" | correct | 0.614 ✓ |
-   | "what do I do for work again?" | correct | **0.525** ✗ |
-   | "remind me where I live" | correct | **0.527** ✗ |
+   The measurement (`python scripts/recall_margin_probe.py`, 12 positive + 13 negative queries
+   over the gold set's six facts) killed the obvious fix: **the absolute score barely
+   discriminates at all.**
 
-   **The correct fact is the top hit every time.** The 0.55 floor is what rejects it. Misses sit
-   at 0.516–0.544, passes at 0.588–0.644.
+   | | range |
+   |---|---|
+   | correct top-1 hits | 0.448 – 0.644 |
+   | unrelated queries | 0.424 – 0.579 |
 
-   ⚠️ **Don't just lower `RECALL_MIN_SIMILARITY` to 0.50.** Unrelated pairs score ~0.50 on nomic,
-   so that trades silent misses for silent confabulation — the worse of the two. Nudging to ~0.545
-   catches most of these but sits inside the noise band and will be fragile.
+   Those overlap almost completely, so **no floor separates them**. At 0.55 the correct fact was
+   the top hit every time and thrown away anyway (4/12 recall) — while "what's your favourite
+   colour?" scored 0.576 and got in.
 
-   The real fix is a **relative margin** (take the top hit when it beats the runner-up clearly,
-   regardless of absolute score) or **hybrid BM25 + vector**. See HANDOFF §B, which now carries
-   the full measurement.
+   ⚠️ **Don't lower `RECALL_MIN_SIMILARITY` to 0.50.** It scores worse on both counts than the
+   gate, because it's the wrong instrument, not the wrong number.
+
+   What works is **contrast**: how far the top hit stands above the corpus *median*. nomic gives
+   each query its own baseline offset (some score ~0.5 against everything), and subtracting the
+   median cancels it. Same measurement: **11/12 recall**. Knobs:
+
+   - `RECALL_CONTRAST_GAP` (0.06) — how far above the median a hit must stand. **This is the
+     precision/recall dial.** Lower admits adjacent topics ("getting a cat" needs 0.054); higher
+     starts dropping real hits ("long shift at the shop" → welder sits at 0.061).
+   - `RECALL_CONTRAST_FLOOR` (0.42) — backstop; standing out means little when everything scores badly.
+   - `RECALL_CONTRAST_MIN_CORPUS` (3) — below this the median *is* the top hit, so only the floor applies.
+
+   **Still imperfect, and known:** adjacent topics are what leak through — "my brother never calls
+   me back" pulls in "sister is called Kate". No threshold on a single similarity statistic
+   separates those from true positives; the fix is lexical evidence (**hybrid BM25 + vector**, the
+   documented next step), since "brother" shares no words with the fact while "I should call my
+   sister" shares two. Note the cost is bounded: recalled facts are injected as *"things that
+   might be relevant… use them when they fit"*, so a false positive is a true fact Mari can
+   ignore — a possible non-sequitur, not a fabrication.
 4. **Should it be core?** Toggle the star in the inspector, or raise `CORE_MEMORY_MAX` (12).
 
 ---
