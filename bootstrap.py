@@ -113,8 +113,8 @@ async def build() -> tuple[Companion, str]:
                           history, unconsolidated, emotion=emotion, thoughts=thought_store,
                           model_manager=model_manager, tools=tools,
                           tool_max_iters=config.TOOL_MAX_ITERS, drives=drives,
-                          intentions=intention_store)
-    companion._session_title = conv_store.session_title(active)
+                          intentions=intention_store,
+                          session_title=conv_store.session_title(active))
 
     # Proactivity heartbeat. Created, not started; the entry point starts it so eval/test
     # harnesses that call build() don't tick. Internal jobs live here; surface-specific

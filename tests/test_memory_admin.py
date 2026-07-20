@@ -119,7 +119,7 @@ async def clear_memories_keeps_conversations():
     mem.add("a fact", None, _emb(), None)
     mem.add("another", None, _emb(0.2), None)
     conv.add_message(sid, "user", "hello")
-    n = await comp.clear_memories()
+    n = comp.clear_memories()   # sync: it does no I/O worth awaiting
     assert n == 2, n
     assert mem.all() == [], "memories wiped"
     assert conv.message_count() == 1, "conversation kept"

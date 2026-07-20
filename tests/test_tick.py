@@ -550,6 +550,10 @@ class PersonaCompanion:
     def is_asleep(self):
         return self._asleep
 
+    def message_count(self):
+        # The job reads this off the facade rather than reaching into `.store`.
+        return self.store.message_count()
+
     async def edit_persona(self):
         self.edit_calls += 1
         return "you've grown fond of them"

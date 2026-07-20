@@ -104,7 +104,8 @@ class Companion:
                  history: list[dict] | None = None,
                  unconsolidated: list[dict] | None = None,
                  emotion=None, thoughts=None, model_manager=None,
-                 tools=None, tool_max_iters: int = 5, drives=None, intentions=None):
+                 tools=None, tool_max_iters: int = 5, drives=None, intentions=None,
+                 session_title: str | None = None):
         self.llm = llm
         self.store = store
         self.memory = memory
@@ -139,8 +140,9 @@ class Companion:
         # this turn, and when her last message went out (to bound the follow-up window).
         self._followups_left = 0
         self._last_reply_at = time.monotonic()
-        # Title of the active conversation (None => untitled; set from the first user message).
-        self._session_title: str | None = None
+        # Title of the active conversation (None => untitled; set from the first user
+        # message). Passed in rather than read here — the constructor stays I/O-free.
+        self._session_title: str | None = session_title
         # The proactivity heartbeat, attached by bootstrap; started by the entry point.
         self.tick = None
 
@@ -444,6 +446,10 @@ class Companion:
             logger.info("intentions: +%d new, %d resolved", len(added), resolved)
         return added
 
+    def message_count(self) -> int:
+        """Total messages exchanged, ever (the persona job's "developed self" gate)."""
+        return self.store.message_count()
+
     def familiarity(self) -> float:
         """Relationship depth 0..1, from how much you two have talked (gates persona drift)."""
         return min(1.0, self.store.message_count() / max(1, config.FAMILIARITY_MESSAGES))
@@ -604,11 +610,49 @@ class Companion:
         """Clear in-memory context only (logs and memories on disk are kept)."""
         self.history.clear()
 
-    async def clear_memories(self) -> int:
+    # --- inspector / admin surface -------------------------------------------------
+    # The facade exists so callers don't bind to the store layout (V2_PLAN §1: "no
+    # reach-through coupling"). The web layer used to reach `c.memory.store.*` and
+    # `companion.store.*` directly for these; each one now has a named seam.
+
+    def memory_snapshot(self) -> dict:
+        """Core facts + counts + recently-retired facts (the status panel's memory card)."""
+        return self.memory.snapshot()
+
+    def all_memories(self) -> list[dict]:
+        """Every memory, active + retired — the inspector modal's list."""
+        return self.memory.all_memories()
+
+    def delete_memory(self, memory_id: int) -> None:
+        """Hard-delete one memory."""
+        self.memory.delete_memory(memory_id)
+
+    def set_memory_core(self, memory_id: int, core: bool) -> None:
+        """Toggle a memory's always-injected core flag."""
+        self.memory.set_core(memory_id, core)
+
+    def rename_conversation(self, session_id: int, title: str) -> None:
+        """Retitle a conversation thread, keeping the cached title in sync if it's ours."""
+        self.store.set_title(session_id, title)
+        if session_id == self.session_id:
+            self._session_title = title
+
+    def delete_conversation(self, session_id: int) -> None:
+        """Delete a conversation thread and its messages (memory/mood/persona are global)."""
+        self.store.delete_session(session_id)
+
+    def list_conversations(self) -> list[dict]:
+        """All conversation threads, for the sidebar."""
+        return self.store.list_conversations()
+
+    def latest_conversation(self) -> int | None:
+        """Most recent thread's id, or None if there are none left."""
+        return self.store.latest_session()
+
+    def clear_memories(self) -> int:
         """Admin: wipe the semantic memory store (keeps conversations, mood, persona,
         thoughts). Returns how many memories were removed."""
-        n = len(self.memory.store.all())
-        self.memory.store.clear()
+        n = self.memory.clear()
         logger.info("admin: cleared %d memories", n)
         return n
 

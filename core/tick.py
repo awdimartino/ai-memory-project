@@ -353,7 +353,7 @@ class PersonaEditJob(Job):
     async def run(self) -> None:
         if self.companion.is_asleep() or self.companion.idle_seconds() < self.min_idle:
             return
-        if self.companion.store.message_count() < self.min_messages:
+        if self.companion.message_count() < self.min_messages:
             return  # too early in the relationship to have a developed self
         now = self.clock()
         last = self.companion.meta.get_json(LAST_PERSONA_EDIT_KEY, 0) or 0

@@ -62,6 +62,38 @@ class MemoryManager:
         self.store.update_content(memory_id, content, vec.tobytes())
         logger.info("edited memory %d", memory_id)
 
+    # --- inspector / admin reads + writes -----------------------------------------
+    # These exist so callers (the web layer, via the Companion facade) never need to
+    # know the manager holds a `.store`, or what that store's API looks like.
+
+    def all_memories(self) -> list[dict]:
+        """Every memory, active + retired — the inspector's list."""
+        return self.store.all()
+
+    def delete_memory(self, memory_id: int) -> None:
+        """Hard-delete one memory (unlike the lifecycle's soft `deactivate`)."""
+        self.store.delete(memory_id)
+
+    def set_core(self, memory_id: int, core: bool) -> None:
+        """Promote into / demote out of the always-injected core set."""
+        self.store.set_core(memory_id, core)
+
+    def clear(self) -> int:
+        """Wipe every memory; returns how many were removed."""
+        n = self.store.count() + self.store.count_superseded()
+        self.store.clear()
+        return n
+
+    def snapshot(self, recent_superseded: int = 8) -> dict:
+        """Core facts + counts + recently-retired facts, for the status panel."""
+        return {
+            "core": self.core_memories(),
+            "active_count": self.store.count(),
+            "core_count": self.store.count_core(),
+            "superseded_count": self.store.count_superseded(),
+            "superseded": self.store.superseded(recent_superseded),
+        }
+
     async def _corpus(self) -> tuple[list[dict], np.ndarray | None]:
         """Load active memories once as `(rows, L2-normalized matrix)`.
 

@@ -95,33 +95,10 @@ async def index() -> FileResponse:
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-@app.get("/thoughts")
-async def thoughts() -> dict:
-    """Mari's recent private reflections (written by the tick loop while you're away)."""
-    companion = _state.get("companion")
-    recent = companion.thoughts.recent(20) if companion and companion.thoughts else []
-    return {"thoughts": recent}
-
-
-@app.get("/core")
-async def core() -> dict:
-    """The core memory: identity-defining facts Mari always keeps in mind."""
-    companion = _state.get("companion")
-    facts = companion.memory.core_memories() if companion else []
-    return {"core": facts}
-
-
-@app.get("/persona")
-async def persona() -> dict:
-    """Mari's evolving self-description (the self-modifying persona) + familiarity."""
-    from core.companion import PERSONA_SELF_KEY
-    companion = _state.get("companion")
-    if not companion:
-        return {"self_description": "", "familiarity": 0.0}
-    return {
-        "self_description": companion.meta.get(PERSONA_SELF_KEY) or "",
-        "familiarity": round(companion.familiarity(), 3),
-    }
+# GET /thoughts, /core and /persona used to live here. All three were fully subsumed
+# by /status (thoughts, memory.core, persona, familiarity) and had no caller left --
+# index.html fetches only /status and /memories, and the REPL's /thoughts, /core and
+# /persona commands read the companion in-process rather than over HTTP.
 
 
 @app.get("/status")
@@ -136,7 +113,6 @@ async def status() -> dict:
     c = _state.get("companion")
     if not c:
         return {"ready": False}
-    store = c.memory.store
     mood = c.emotion.state if c.emotion is not None else None
     drives = c.drives.snapshot() if c.drives is not None else None
     fam = c.familiarity()
@@ -152,13 +128,7 @@ async def status() -> dict:
         "familiarity": {"value": round(fam, 3), "label": familiarity_label(fam)},
         "mood": ({ch: round(mood[ch], 3) for ch in CHANNELS} if mood else None),
         "drives": ({d: round(v, 3) for d, v in drives.items()} if drives else None),
-        "memory": {
-            "core": c.memory.core_memories(),
-            "active_count": store.count(),
-            "core_count": store.count_core(),
-            "superseded_count": store.count_superseded(),
-            "superseded": store.superseded(8),
-        },
+        "memory": c.memory_snapshot(),
         "persona": c.meta.get(PERSONA_SELF_KEY) or "",
         "self_notes": c.meta.get(SELF_NOTES_KEY) or "",
         "thoughts": c.thoughts.recent(8) if c.thoughts else [],
@@ -177,7 +147,7 @@ async def status() -> dict:
 async def memories() -> dict:
     """Every memory (active + retired) with ids/flags — for the inspector modal."""
     c = _state.get("companion")
-    return {"memories": c.memory.store.all() if c else []}
+    return {"memories": c.all_memories() if c else []}
 
 
 @app.post("/memory/edit")
@@ -214,7 +184,7 @@ async def memory_delete(payload: dict) -> dict:
     if not c or mid is None:
         return {"ok": False, "error": "not ready or bad id"}
     async with _state["lock"]:
-        c.memory.store.delete(mid)
+        c.delete_memory(mid)
     return {"ok": True}
 
 
@@ -226,7 +196,7 @@ async def memory_core(payload: dict) -> dict:
     if not c or mid is None:
         return {"ok": False, "error": "not ready or bad id"}
     async with _state["lock"]:  # match the other mutating endpoints
-        c.memory.store.set_core(mid, bool(payload.get("core")))
+        c.set_memory_core(mid, bool(payload.get("core")))
     return {"ok": True}
 
 
@@ -237,7 +207,7 @@ async def memory_clear() -> dict:
     if not c:
         return {"ok": False}
     async with _state["lock"]:
-        n = await c.clear_memories()
+        n = c.clear_memories()
     return {"ok": True, "cleared": n}
 
 
@@ -267,7 +237,7 @@ async def test_notify() -> dict:
 async def _send_conversations(ws: WebSocket) -> None:
     c = _state["companion"]
     await ws.send_json({"type": "conversations",
-                        "list": c.store.list_conversations(), "active": c.session_id})
+                        "list": c.list_conversations(), "active": c.session_id})
 
 
 async def _replay_history(ws: WebSocket) -> None:
@@ -336,9 +306,7 @@ async def ws(websocket: WebSocket) -> None:
                 if rid is None:
                     continue
                 title = (data.get("title") or "").strip()[:60] or "Untitled"
-                companion.store.set_title(rid, title)
-                if rid == companion.session_id:
-                    companion._session_title = title
+                companion.rename_conversation(rid, title)  # keeps its own cache in sync
                 await _send_conversations(websocket)
 
             elif t == "delete":
@@ -347,9 +315,9 @@ async def ws(websocket: WebSocket) -> None:
                     continue
                 async with _state["lock"]:
                     was_active = did == companion.session_id
-                    companion.store.delete_session(did)
+                    companion.delete_conversation(did)
                     if was_active:
-                        nxt = companion.store.latest_session()
+                        nxt = companion.latest_conversation()
                         companion.switch_conversation(nxt) if nxt else companion.new_conversation()
                 if was_active:
                     await _replay_history(websocket)
