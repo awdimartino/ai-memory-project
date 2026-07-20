@@ -4,6 +4,9 @@ Short brief for picking up the AI-memory-companion build in a fresh session.
 **The authoritative design + full build log is [`V2_PLAN.md`](V2_PLAN.md) — read it first.**
 This file is the quick "where are we / how to run / what's next" summary.
 
+> **Resuming in a fresh session? Jump to [§9 NEXT STEPS](#9-next-steps--start-here-written-2026-07-19-end-of-the-planning-arc-session)** — it has the
+> current commit, what to watch in the newest code, the recommended order, and the deferred user requests.
+
 **Milestone: v2.1 complete; v2.2 in progress.** v2.0 built the trustworthy *brain*; v2.1 added the
 persistent-companion layer (core memory, self-modifying persona + familiarity, sleep/standby, status
 panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **multi-drive proactivity**
@@ -589,15 +592,58 @@ The pillar-4 framework is built and hot-swappable — each of these is "register
   something, not just the words).
 - **Embodiment** — Live2D / VRM avatar, wearable sensors.
 
-**Recommended order from here (updated 2026-07-19):**
-1. **§0 is PARKED** — bounded thinking waits on LM Studio (#1838/#1974); personality (1-sentence/no-question),
-   memory-extraction fix, and silent-turns all landed this session. No action there until LM Studio ships it.
-2. ~~**Complete the Generative Agents loop in arc A**~~ — **DONE 2026-07-19**: ★ intentions/planning *and* learned
-   self-notes both shipped, so memory + reflection + planning are all in place. What still feeds this arc:
-   **A3 nightly consolidation** (day-summaries = intention + reminisce fuel) and **relational continuity**.
-3. **§B memory upgrade** — importance-weighted recall (the GA ranking) + spontaneous recall. The deepest item.
-4. **World-reaching tools (§E)** — web search unlocks the **autotelic curiosity loop**; the Navidrome playlist
-   becomes an autonomous act. Both need the tool built first.
-5. **Slot in the C near-freebies** (presence signal, time-of-day awareness, surfaced inner life) alongside — cheap.
-Practical tuning in real use: drive thresholds/rates, `FOLLOWUP_CHANCE`, and **silent-turn frequency** (add the
-mood/low-effort gating if she goes quiet too often).
+## 9. NEXT STEPS — start here (written 2026-07-19, end of the planning-arc session)
+
+State at handoff: working tree **clean**, `main` at **`5b27355`** (learned self-notes), preceded by `6212414`
+(intention sub-items) and `2875411` (intentions). Offline suite **green, 13 files**. Server verified healthy on
+**qwen/qwen3.5-9b**. No git remote — local only, never push.
+
+**Watch these first — new code that has not yet run in real use:**
+- **Self-notes have never fired live.** `SelfNotesJob` needs 5 min idle + a 30-min cooldown, and the slot was
+  still empty at handoff. First real session: check the **"Lessons learned"** panel card (or `GET /status`
+  → `self_notes`). Wanted: 1–4 short second-person lines about *her behavior*. Red flags — user facts ("he's a
+  nurse"), identity lines ("you're warm and curious"), or manufactured filler from small talk. All three are
+  explicitly forbidden in `build_self_notes_system`; if one recurs, tighten that prompt, and remember the fix is
+  almost always **moving the rule to the end**, not making it louder (that failure hit three times this session).
+- **Intention chat-awareness may be too timid.** Live, she scored a perfect **0/7 shoehorning** but also *never*
+  raised an intention in chat, even on an inviting opener ("ugh, work was awful today"). If it never fires in
+  real use, soften the "never force one in" wording in `build_system` a notch — but re-measure shoehorning after,
+  since that phrasing is what's buying the 0/7.
+- **Silent-turn frequency** is ungated on purpose. Add mood/low-effort gating if she goes quiet too often.
+
+**Then, in recommended order:**
+1. **Tool-calling prong A — per-call temperature** (`infrastructure/llm_client.py`): cool the tool-decision call
+   (~0.2) and keep the answer warm (0.8). Measured: 0.8 is too hot for routing, 0.2 gave TIME 7/8. **The one
+   unblocked cheap win** — no migration, no waiting. Detail in §0/§6.
+2. **A3 nightly consolidation** — day-summaries; feeds both intentions and `reminisce`. The best next autonomy
+   piece now that the planning arc is closed.
+3. **§B memory upgrade** — importance-weighted recall (the Generative-Agents ranking: recency × **importance** ×
+   relevance) + spontaneous recall. The deepest remaining item.
+4. **World-reaching tools (§E)** — web search unlocks the autotelic curiosity loop; the Navidrome playlist becomes
+   an autonomous act. Both need the tool built first.
+5. **Slot in the §C near-freebies** alongside (presence signal, time-of-day awareness, surfaced inner life) — cheap.
+
+**User-requested, explicitly deferred (don't lose these):**
+- **Prompt-inspector tab** (§8-C) — a per-message view showing the *exact* prompt sent to the model, formatted
+  readable. Asked for 2026-07-19 as "a little later down the line". Now more valuable than when it was requested:
+  three separate slots (persona, intentions, self-notes) inject into every turn, and this is the only way to see
+  which one actually moved a reply.
+- **Follow-up decay** (§2) — extend past `FOLLOWUP_MAX_PER_TURN = 1` to allow 2–3 chained messages with a
+  *decaying* probability per additional message, instead of the current hard cap.
+
+**Parked (no action):** §0 bounded thinking — blocked on LM Studio **#1838/#1974**. Production stays thinking-OFF
+on qwen3.5-9b. Nothing to do until LM Studio ships it; re-read §0 before reopening.
+
+**Ops notes from this session:**
+- The documented run command is **`python -m web.app`** → binds `WEB_HOST` = **`127.0.0.1`** (loopback). Starting
+  uvicorn with `--host 0.0.0.0` instead exposes Mari to the whole LAN and triggers a Windows Firewall prompt; it
+  created **two `python.exe` inbound Allow rules covering the Public profile**, which the user may want to remove
+  (needs admin). For deliberate phone access, set `WEB_HOST=0.0.0.0` and prefer the **Private** profile only.
+- Stop the web server before running any live script — two processes hitting one model has crashed LM Studio.
+
+**Practical tuning in real use:** drive thresholds/rates, `FOLLOWUP_CHANCE`, silent-turn frequency,
+`INTENTION_MAX_ACTIVE`/`MAX_AGE_DAYS`, and `SELFNOTES_COOLDOWN`.
+
+**Security (unchanged, still outstanding):** `archive/v1/infrastructure/config.py` holds a **real hardcoded
+HuggingFace token**. It is git-ignored on purpose and **must not be committed** — it should be **rotated/revoked
+on HuggingFace**. `.env` and `companion.db` are git-ignored too.
