@@ -78,7 +78,8 @@ async def build() -> tuple[Companion, str]:
 
     # Internal drives (multi-drive proactivity). Cheap deterministic state, persisted like
     # mood; the tick's DriveDriftJob integrates them, and the companion relieves them on
-    # contact. Observed only in this slice — no behavior gates on them yet.
+    # contact. Reach-out gates on `connection` and reflection on `restlessness` (arc A1); energy
+    # biases sleep (A2).
     drives = DriveManager(meta_store, config.DRIVE_AWAY_AFTER) if config.DRIVES_ENABLED else None
 
     # Sleep/standby needs the `lms` CLI; auto-disable if it isn't on this machine.

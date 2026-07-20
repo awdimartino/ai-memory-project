@@ -2,7 +2,10 @@
 
 Defining these as Protocols from the start documents exactly what a persistence
 layer must satisfy and lets us drop in an in-memory fake for deterministic tests
-later (a v1 lesson: this was added too late last time).
+(a v1 lesson: this was added too late last time). The offline suite in tests/ is
+that payoff, so these contracts are load-bearing — a method a caller depends on
+but that isn't declared here is a fake waiting to pass vacuously. Keep them in
+sync with the implementations in infrastructure/.
 """
 from typing import Protocol
 

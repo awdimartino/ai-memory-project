@@ -99,6 +99,23 @@ class TurnResult:
     silent: bool = False             # she chose to stay quiet (no reply shown or logged)
 
 
+async def _sink(_token: str) -> None:
+    """Swallow tokens. Internal generations (reach-out, reflection, persona edit,
+    self-notes) still stream, but nobody is watching them arrive."""
+
+
+def _is_pass(text: str) -> bool:
+    """True when a generation is Mari declining to speak — the PASS convention.
+
+    Shared by every path that offers her the choice (chat silence, reach-out,
+    follow-up, persona edit, self-notes). Tolerates what the model actually returns:
+    surrounding whitespace, a trailing period or exclamation, any casing. This used
+    to be written inline six times in two different operator orders, one of which
+    only worked because callers happened to `.strip()` first.
+    """
+    return text.strip().rstrip(".!").strip().upper() == "PASS"
+
+
 class Companion:
     def __init__(self, llm, store, memory, meta, session_id: int,
                  history: list[dict] | None = None,
@@ -225,7 +242,7 @@ class Companion:
             else:
                 text, stats = await self.llm.stream(messages, guarded)
 
-            silent = text.strip().rstrip(".!").upper() == "PASS"
+            silent = _is_pass(text)
 
             uid = await asyncio.to_thread(self.store.add_message, self.session_id, "user", user_text)
             self.history.append({"role": "user", "content": user_text})
@@ -258,6 +275,43 @@ class Companion:
             self._busy = False
             self._last_activity = time.monotonic()
 
+    # --- shared machinery for her unprompted generations ----------------------------
+    # reach_out / follow_up / reflect are the same shape: gather context, build a
+    # system prompt, generate against [system, ...history, cue], and either take what
+    # came back or accept a PASS. Only the prompt, the cue, and what happens to a real
+    # reply differ, so those three steps live here once.
+
+    async def _recall_context(self) -> tuple[list[str], list[str], str | None]:
+        """The context every unprompted generation wants: (recalled, core, mood prompt).
+
+        Recall is anchored on the last thing the user actually said — she's reaching
+        into the conversation, not responding to a turn.
+        """
+        last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
+        recalled = await self.memory.recall(last_user) if last_user else []
+        core = self.memory.core_memories()
+        extra = [content for content, _ in recalled if content not in core]
+        mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        return extra, core, mood_prompt
+
+    async def _aside(self, system: str, cue: str) -> str | None:
+        """Generate one unprompted message. Returns None if she declines or says nothing."""
+        messages = [{"role": "system", "content": system}]
+        messages.extend(self.history[-config.HISTORY_TURNS:])
+        messages.append({"role": "user", "content": cue})
+        text, _ = await self.llm.stream(messages, _sink)
+        text = text.strip()
+        return None if not text or _is_pass(text) else text
+
+    async def _log_assistant_turn(self, text: str) -> None:
+        """Record one of her unprompted messages as a real assistant turn.
+
+        So it replays on reconnect and counts toward memory, exactly like a reply.
+        """
+        aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
+        self.history.append({"role": "assistant", "content": text})
+        self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+
     async def reach_out(self) -> str | None:
         """Generate an unprompted message from recent context, or None to stay quiet.
 
@@ -265,11 +319,7 @@ class Companion:
         message is logged as an assistant turn (so it also shows up on reconnect) and
         folded into history/the consolidation buffer, just like a normal reply.
         """
-        last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
-        recalled = await self.memory.recall(last_user) if last_user else []
-        core = self.memory.core_memories()
-        extra = [content for content, _ in recalled if content not in core]
-        mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        extra, core, mood_prompt = await self._recall_context()
         # Anchor the reach-out on the longest-waiting intention, if any — makes it purposeful
         # ("been meaning to ask...") rather than generic; fulfilled only if she actually sends it.
         intention = None
@@ -281,22 +331,12 @@ class Companion:
                                        intention=intention["content"] if intention else None,
                                        self_notes=self.meta.get(SELF_NOTES_KEY))
 
-        messages = [{"role": "system", "content": system}]
-        messages.extend(self.history[-config.HISTORY_TURNS:])
-        messages.append({"role": "user", "content": build_reachout_cue(_humanize_away(self.idle_seconds()))})
-
-        async def _sink(_t):
-            pass
-
-        text, _ = await self.llm.stream(messages, _sink)
-        text = text.strip()
-        if not text or text.rstrip(".!").strip().upper() == "PASS":
+        text = await self._aside(system, build_reachout_cue(_humanize_away(self.idle_seconds())))
+        if text is None:
             logger.info("reach-out: stayed quiet")
             return None
 
-        aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
-        self.history.append({"role": "assistant", "content": text})
-        self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+        await self._log_assistant_turn(text)
         if intention is not None:
             await asyncio.to_thread(self.intentions.fulfill, intention["id"])
         logger.info("reach-out: %s", text[:80])
@@ -329,11 +369,7 @@ class Companion:
         if not self.history or self.history[-1]["role"] != "assistant":
             self._followups_left = 0  # she's no longer the last speaker; nothing to follow up
             return None
-        last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
-        recalled = await self.memory.recall(last_user) if last_user else []
-        core = self.memory.core_memories()
-        extra = [content for content, _ in recalled if content not in core]
-        mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        extra, core, mood_prompt = await self._recall_context()
         # A follow-up may fold in an intention if it connects; it doesn't explicitly fulfill one —
         # form_intentions' resolution pass clears whatever the conversation actually covered.
         pending = self.intentions.active(limit=1) if self.intentions is not None else []
@@ -342,23 +378,13 @@ class Companion:
                                        intention=pending[0]["content"] if pending else None,
                                        self_notes=self.meta.get(SELF_NOTES_KEY))
 
-        messages = [{"role": "system", "content": system}]
-        messages.extend(self.history[-config.HISTORY_TURNS:])
-        messages.append({"role": "user", "content": FOLLOWUP_CUE})
-
-        async def _sink(_t):
-            pass
-
-        text, _ = await self.llm.stream(messages, _sink)
-        text = text.strip()
-        if not text or text.rstrip(".!").strip().upper() == "PASS":
+        text = await self._aside(system, FOLLOWUP_CUE)
+        if text is None:
             self._followups_left = 0
             logger.info("follow-up: stayed quiet")
             return None
 
-        aid = await asyncio.to_thread(self.store.add_message, self.session_id, "assistant", text)
-        self.history.append({"role": "assistant", "content": text})
-        self._unconsolidated.append({"id": aid, "role": "assistant", "content": text})
+        await self._log_assistant_turn(text)
         self._followups_left -= 1
         self._last_reply_at = time.monotonic()  # extend the window for a possible next one
         logger.info("follow-up: %s", text[:80])
@@ -372,25 +398,13 @@ class Companion:
         """
         if self.thoughts is None:
             return None
-        last_user = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), None)
-        recalled = await self.memory.recall(last_user) if last_user else []
-        core = self.memory.core_memories()
-        extra = [content for content, _ in recalled if content not in core]
-        mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
+        extra, core, mood_prompt = await self._recall_context()
         recent = [t["content"] for t in self.thoughts.recent(5)]
         system = build_reflect_system(extra, mood_prompt, recent, core=core,
                                       persona=self.meta.get(PERSONA_SELF_KEY))
 
-        messages = [{"role": "system", "content": system}]
-        messages.extend(self.history[-config.HISTORY_TURNS:])
-        messages.append({"role": "user", "content": REFLECT_CUE})
-
-        async def _sink(_t):
-            pass
-
-        text, _ = await self.llm.stream(messages, _sink)
-        text = text.strip()
-        if not text:
+        text = await self._aside(system, REFLECT_CUE)
+        if text is None:
             return None
 
         dom = None
@@ -495,13 +509,10 @@ class Companion:
         system = build_persona_edit_system(fam, config.PERSONA_MAX_CHARS)
         user = build_persona_edit_user(current, thoughts, core)
 
-        async def _sink(_t):
-            pass
-
         text, _ = await self.llm.stream(
             [{"role": "system", "content": system}, {"role": "user", "content": user}], _sink)
         text = text.strip()
-        if not text or text.rstrip(".!").strip().upper() == "PASS":
+        if not text or _is_pass(text):
             logger.info("persona edit: no change")
             return None
         text = text[:config.PERSONA_MAX_CHARS].strip()  # hard cap so the slot stays small
@@ -524,13 +535,10 @@ class Companion:
         system = build_self_notes_system(config.SELFNOTES_MAX_CHARS)
         user = build_self_notes_user(current, recent)
 
-        async def _sink(_t):
-            pass
-
         text, _ = await self.llm.stream(
             [{"role": "system", "content": system}, {"role": "user", "content": user}], _sink)
         text = text.strip()
-        if not text or text.rstrip(".!").strip().upper() == "PASS":
+        if not text or _is_pass(text):
             logger.info("self-notes: no change")
             return None
         # These notes are addressed TO her, so a correct one never names her. When her name shows up

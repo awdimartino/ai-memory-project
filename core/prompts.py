@@ -1,8 +1,15 @@
 """The single home for all prompt text sent to a model.
 
-For the chat slice this is just the starting persona: an emergent personality
-seeded as "friendly, but a stranger". It also carries the v1 anti-hallucination
-and formatting lessons.
+Everything the model is ever told lives here (V2_PLAN §1: one prompt module, so
+persona/voice stays consistent and auditable). That now spans the chat persona —
+an emergent personality seeded as "friendly, but a stranger", carrying the v1
+anti-hallucination and formatting lessons — plus the builders for reach-out,
+follow-up, reflection, persona self-edit, learned self-notes and intentions, and
+the JSON schemas for the structured brain calls (extraction, lifecycle decisions,
+core re-rank).
+
+Ordering matters more than volume here: small models follow the rules nearest the
+generation point far better than the same rules buried in a long preamble.
 """
 from config import BOT_NAME
 

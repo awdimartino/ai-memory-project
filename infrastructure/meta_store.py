@@ -1,8 +1,9 @@
 """SQLite implementation of the MetaStore contract: durable scalar state.
 
 A tiny key/value table for state that must survive restarts but doesn't warrant
-its own schema — the consolidation watermark today, mood channels (pillar 2) and
-pending-tick bookkeeping later. Pure persistence: string values in and out, with
+its own schema — the consolidation watermark, mood channels, drives + energy, the
+persona slot, learned self-notes, and every job's cooldown timestamp. Pure
+persistence: string values in and out, with
 typed helpers layered on top. A lock serializes writes since the connection is
 shared across asyncio's threadpool.
 """

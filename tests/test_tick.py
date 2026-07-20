@@ -537,18 +537,22 @@ class _Store:
 
 
 class PersonaCompanion:
-    def __init__(self, idle, messages, asleep=False):
+    def __init__(self, idle, messages, asleep=False, busy=False):
         self._idle = idle
         self.meta = InMemoryMeta()
         self.store = _Store(messages)
         self.edit_calls = 0
         self._asleep = asleep
+        self._busy = busy
 
     def idle_seconds(self):
         return self._idle
 
     def is_asleep(self):
         return self._asleep
+
+    def is_busy(self):
+        return self._busy
 
     def message_count(self):
         # The job reads this off the facade rather than reaching into `.store`.
@@ -569,6 +573,15 @@ async def persona_edit_gated_by_idle():
     comp = PersonaCompanion(idle=60.0, messages=100)   # not idle enough
     await _persona_job(comp, WallClock()).run()
     assert comp.edit_calls == 0
+
+
+@case
+async def persona_edit_skips_when_busy():
+    # Inherited from CooldownJob. Redundant with the idle gate on a real Companion
+    # (idle reads 0 mid-turn) but explicit, so it holds if that guard ever changes.
+    comp = PersonaCompanion(idle=1000.0, messages=100, busy=True)
+    await _persona_job(comp, WallClock()).run()
+    assert comp.edit_calls == 0, "must not rewrite her persona mid-turn"
 
 
 @case

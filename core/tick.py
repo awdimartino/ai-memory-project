@@ -4,10 +4,16 @@ A small **pluggable job scheduler**, not a hardcoded sequence (V2_PLAN §1.3): t
 loop wakes on a cadence and runs whichever jobs are due. New autonomy behaviors
 register as jobs without touching the loop.
 
-This first slice ships two *internal* jobs — mood drift and idle consolidation —
-that only act once the user has been away for a while, so nothing fires
-mid-conversation. The outward reach-out (an unprompted message pushed over the
-WebSocket) is a later slice that plugs in as another job.
+Jobs come in three shapes. Plain `Job`s run on their interval and self-gate
+(mood drift, drive drift, idle consolidation, follow-up, sleep). `CooldownJob`
+adds the shared protocol the autonomy jobs all wanted — asleep/busy guard, an
+idle gate, a persisted wall-clock cooldown, stamp-before-acting — and
+`DriveGatedJob` swaps that idle gate for an internal drive crossing a threshold,
+so *how she feels* sets the timing rather than a fixed timer.
+
+Internal jobs act only once the user has been away, so nothing fires
+mid-conversation. Outward ones (reach-out, follow-up) need a surface to push to,
+so the web entry point registers those rather than shared bootstrap.
 
 Model calls made by jobs go through the same `LLMClient` lock as chat, so the
 "one model at a time" rule holds. A job that raises is logged and skipped; it
@@ -32,6 +38,91 @@ class Job:
 
     async def run(self) -> None:  # pragma: no cover - overridden
         raise NotImplementedError
+
+
+class CooldownJob(Job):
+    """Base for the idle-gated, cooldown-throttled autonomy jobs.
+
+    Five jobs repeated this protocol verbatim, so it lives here once:
+
+        asleep / mid-turn guard -> does she want to? -> persisted wall-clock
+        cooldown -> stamp the attempt -> act
+
+    **Stamping before acting is load-bearing**, not an ordering detail: it enforces
+    the cooldown even when she declines (PASS), and stops a slow generation from
+    letting the next tick start a second one.
+
+    The cooldown is persisted (in the MetaStore, under `meta_key`) and read in wall
+    time, so a restart doesn't reset the throttle.
+
+    Subclasses set `name` + `meta_key` and implement `act()`; they may override
+    `_wants_to()` (what triggers it), `_ready()` (extra preconditions), and
+    `_on_fire()` (side effects once it's committed to acting).
+    """
+    meta_key: str = ""
+
+    def __init__(self, companion, interval: float, min_idle: float,
+                 cooldown: float, clock=time.time):
+        self.companion = companion
+        self.interval = interval
+        self.min_idle = min_idle
+        self.cooldown = cooldown
+        self.clock = clock
+
+    def _wants_to(self) -> bool:
+        """Left alone long enough? Drive-gated subclasses replace this with a threshold."""
+        return self.companion.idle_seconds() >= self.min_idle
+
+    def _ready(self) -> bool:
+        """Extra precondition beyond wanting to (e.g. enough history). Default: always."""
+        return True
+
+    async def _on_fire(self) -> None:
+        """Committed to acting, cooldown already stamped — discharge drives etc."""
+
+    async def act(self) -> None:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    async def run(self) -> None:
+        c = self.companion
+        # is_busy(): drive-gated jobs don't inherit the idle busy-guard (drives are
+        # only relieved at the END of send()), so guard explicitly against firing
+        # mid-turn. Harmless for the idle-gated ones, whose idle already reads 0.
+        if c.is_asleep() or c.is_busy() or not self._wants_to() or not self._ready():
+            return
+        now = self.clock()
+        if now - (c.meta.get_json(self.meta_key, 0) or 0) < self.cooldown:
+            return
+        await asyncio.to_thread(c.meta.set_json, self.meta_key, now)
+        await self._on_fire()
+        await self.act()
+
+
+class DriveGatedJob(CooldownJob):
+    """A CooldownJob triggered by an internal drive crossing a threshold.
+
+    The drive replaces the idle gate — so *how she feels* sets the timing, not a
+    fixed timer — and falls back to that idle gate when drives are disabled. Firing
+    discharges the drive by its own per-drive amount (connection fully, restlessness
+    only partly, so she may journal a few times over a long absence). The persisted
+    cooldown stays a hard floor over the drive, so a spike still can't make her nag.
+    """
+    drive: str = ""
+
+    def __init__(self, companion, interval: float, min_idle: float, cooldown: float,
+                 drives=None, threshold: float = 0.6, clock=time.time):
+        super().__init__(companion, interval, min_idle, cooldown, clock)
+        self.drives = drives
+        self.threshold = threshold
+
+    def _wants_to(self) -> bool:
+        if self.drives is not None:
+            return self.drives.get(self.drive) >= self.threshold
+        return super()._wants_to()
+
+    async def _on_fire(self) -> None:
+        if self.drives is not None:
+            await self.drives.discharge(self.drive)
 
 
 class TickLoop:
@@ -135,53 +226,27 @@ class MoodDriftJob(Job):
 LAST_REACHOUT_KEY = "last_reachout_at"
 
 
-class ReachOutJob(Job):
+class ReachOutJob(DriveGatedJob):
     """Once the urge to connect is strong enough, maybe send an unprompted message.
 
-    Gated on the **`connection` drive** (multi-drive proactivity): the drive integrates how
-    long the user's been away *and* how she feels — a warm or sad conversation makes her miss
-    them faster than a throwaway one — so this fires sooner then, later otherwise. The drive
-    resets to baseline on contact, so it inherently can't cross mid-conversation. When drives
-    are disabled it falls back to the old idle gate (`idle >= min_idle`). The persisted
-    wall-clock cooldown is a hard floor either way, so she can't nag even if the drive spikes.
+    Gated on the **`connection` drive**: it integrates how long the user's been away
+    *and* how she feels — a warm or sad conversation makes her miss them faster than a
+    throwaway one — so this fires sooner then, later otherwise. The drive resets on
+    contact, so it inherently can't cross mid-conversation.
 
-    The attempt marks the cooldown *and* discharges the drive **before** generating, so a
-    decline or a slow generation can't start a second reach-out. `companion.reach_out()` may
-    still decline (PASS). `notify` pushes the message to the surface (the WebSocket broadcaster).
+    `companion.reach_out()` may still decline (PASS). `notify` pushes a real message to
+    the surface (the WebSocket broadcaster).
     """
     name = "reach_out"
+    meta_key = LAST_REACHOUT_KEY
+    drive = "connection"
 
     def __init__(self, companion, notify, interval: float, min_idle: float,
                  cooldown: float, drives=None, threshold: float = 0.6, clock=time.time):
-        self.companion = companion
+        super().__init__(companion, interval, min_idle, cooldown, drives, threshold, clock)
         self.notify = notify
-        self.interval = interval
-        self.min_idle = min_idle
-        self.cooldown = cooldown
-        self.drives = drives
-        self.threshold = threshold
-        self.clock = clock
 
-    def _wants_to(self) -> bool:
-        """Drive threshold when drives are on; else the old idle gate (graceful fallback)."""
-        if self.drives is not None:
-            return self.drives.get("connection") >= self.threshold
-        return self.companion.idle_seconds() >= self.min_idle
-
-    async def run(self) -> None:
-        # is_busy(): drive-gated jobs no longer inherit the idle busy-guard (drives are only
-        # relieved at the END of send()), so guard explicitly against firing mid-turn.
-        if self.companion.is_asleep() or self.companion.is_busy() or not self._wants_to():
-            return
-        now = self.clock()
-        last = self.companion.meta.get_json(LAST_REACHOUT_KEY, 0) or 0
-        if now - last < self.cooldown:
-            return
-        # Mark the attempt (cooldown + drive discharge) before generating: enforces the
-        # cooldown even on a decline, and stops a slow generation from starting a second one.
-        await asyncio.to_thread(self.companion.meta.set_json, LAST_REACHOUT_KEY, now)
-        if self.drives is not None:
-            await self.drives.discharge("connection")
+    async def act(self) -> None:
         message = await self.companion.reach_out()
         if message:
             await self.notify({"type": "proactive", "content": message})
@@ -229,110 +294,57 @@ class FollowUpJob(Job):
 LAST_REFLECT_KEY = "last_reflect_at"
 
 
-class ReflectionJob(Job):
+class ReflectionJob(DriveGatedJob):
     """While the user is away, have Mari write a short private thought to her journal.
 
-    Gated on the **`restlessness` drive** (mental idleness) — same shape as reach-out but
-    internal: nothing is pushed to the user, the thought is just stored via
-    `companion.reflect()`. Falls back to the idle gate when drives are off; the persisted
-    cooldown is a hard floor. A reflection only *partly* discharges restlessness (she can
-    still be restless), so she may journal a few times over a long absence.
+    Same shape as reach-out but internal: nothing is pushed to the user, the thought is
+    just stored via `companion.reflect()`. Gated on **`restlessness`** (mental idleness),
+    which only partly discharges — so she may journal a few times over a long absence.
     """
     name = "reflection"
+    meta_key = LAST_REFLECT_KEY
+    drive = "restlessness"
 
     def __init__(self, companion, interval: float, min_idle: float,
                  cooldown: float, drives=None, threshold: float = 0.4, clock=time.time):
-        self.companion = companion
-        self.interval = interval
-        self.min_idle = min_idle
-        self.cooldown = cooldown
-        self.drives = drives
-        self.threshold = threshold
-        self.clock = clock
+        super().__init__(companion, interval, min_idle, cooldown, drives, threshold, clock)
 
-    def _wants_to(self) -> bool:
-        """Drive threshold when drives are on; else the old idle gate (graceful fallback)."""
-        if self.drives is not None:
-            return self.drives.get("restlessness") >= self.threshold
-        return self.companion.idle_seconds() >= self.min_idle
-
-    async def run(self) -> None:
-        # is_busy() guard: drive-gated, so it no longer inherits the idle busy-guard (drives
-        # are only relieved at the end of send()) — don't reflect mid-turn.
-        if self.companion.is_asleep() or self.companion.is_busy() or not self._wants_to():
-            return
-        now = self.clock()
-        last = self.companion.meta.get_json(LAST_REFLECT_KEY, 0) or 0
-        if now - last < self.cooldown:
-            return
-        await asyncio.to_thread(self.companion.meta.set_json, LAST_REFLECT_KEY, now)
-        if self.drives is not None:
-            await self.drives.discharge("restlessness")
+    async def act(self) -> None:
         await self.companion.reflect()
 
 
 LAST_INTENTION_KEY = "last_intention_at"
 
 
-class IntentionJob(Job):
+class IntentionJob(CooldownJob):
     """While the user is away, note forward intentions from the recent conversation — things Mari
     means to bring up or find out next time. Idle + cooldown gated (its own cadence); internal (no
     surface push). Reach-out consumes these to make its messages purposeful (the "planning" pillar)."""
     name = "intention"
+    meta_key = LAST_INTENTION_KEY
 
-    def __init__(self, companion, interval: float, min_idle: float, cooldown: float, clock=time.time):
-        self.companion = companion
-        self.interval = interval
-        self.min_idle = min_idle
-        self.cooldown = cooldown
-        self.clock = clock
-
-    async def run(self) -> None:
-        if self.companion.is_asleep() or self.companion.is_busy():
-            return
-        if self.companion.idle_seconds() < self.min_idle:
-            return
-        now = self.clock()
-        last = self.companion.meta.get_json(LAST_INTENTION_KEY, 0) or 0
-        if now - last < self.cooldown:
-            return
-        await asyncio.to_thread(self.companion.meta.set_json, LAST_INTENTION_KEY, now)
+    async def act(self) -> None:
         await self.companion.form_intentions()
 
 
 LAST_SELFNOTES_KEY = "last_self_notes_at"
 
 
-class SelfNotesJob(Job):
+class SelfNotesJob(CooldownJob):
     """While the user is away, distill what the last conversation taught Mari about HOW to be with
     them ("ease off the questions") into her operating-notes slot. Idle + cooldown gated; internal
     (no surface push). Sibling to PersonaEditJob: that one revises who she is, this one how she acts."""
     name = "self_notes"
+    meta_key = LAST_SELFNOTES_KEY
 
-    def __init__(self, companion, interval: float, min_idle: float, cooldown: float, clock=time.time):
-        self.companion = companion
-        self.interval = interval
-        self.min_idle = min_idle
-        self.cooldown = cooldown
-        self.clock = clock
-
-    async def run(self) -> None:
-        if self.companion.is_asleep() or self.companion.is_busy():
-            return
-        if self.companion.idle_seconds() < self.min_idle:
-            return
-        now = self.clock()
-        last = self.companion.meta.get_json(LAST_SELFNOTES_KEY, 0) or 0
-        if now - last < self.cooldown:
-            return
-        await asyncio.to_thread(self.companion.meta.set_json, LAST_SELFNOTES_KEY, now)
+    async def act(self) -> None:
         await self.companion.update_self_notes()
 
 
 LAST_PERSONA_EDIT_KEY = "last_persona_edit_at"
 
 
-class PersonaEditJob(Job):
+class PersonaEditJob(CooldownJob):
     """During idle, let Mari rewrite her own self-description (the self-modifying persona).
 
     Slow and rare: needs a minimum amount of history first (`min_messages`), then a long
@@ -340,29 +352,19 @@ class PersonaEditJob(Job):
     is gated by familiarity so a stranger doesn't rewrite herself into a best friend.
     """
     name = "persona_edit"
+    meta_key = LAST_PERSONA_EDIT_KEY
 
     def __init__(self, companion, interval: float, min_idle: float, cooldown: float,
                  min_messages: int, clock=time.time):
-        self.companion = companion
-        self.interval = interval
-        self.min_idle = min_idle
-        self.cooldown = cooldown
+        super().__init__(companion, interval, min_idle, cooldown, clock)
         self.min_messages = min_messages
-        self.clock = clock
 
-    async def run(self) -> None:
-        if self.companion.is_asleep() or self.companion.idle_seconds() < self.min_idle:
-            return
-        if self.companion.message_count() < self.min_messages:
-            return  # too early in the relationship to have a developed self
-        now = self.clock()
-        last = self.companion.meta.get_json(LAST_PERSONA_EDIT_KEY, 0) or 0
-        if now - last < self.cooldown:
-            return
-        await asyncio.to_thread(self.companion.meta.set_json, LAST_PERSONA_EDIT_KEY, now)
+    def _ready(self) -> bool:
+        # Too early in the relationship to have a developed self.
+        return self.companion.message_count() >= self.min_messages
+
+    async def act(self) -> None:
         await self.companion.edit_persona()
-
-
 class SleepJob(Job):
     """Put Mari into standby: unload the LLM from VRAM to free the machine. Two triggers:
     a **long idle** (the practical VRAM-freeing one) OR **low energy** while briefly idle
