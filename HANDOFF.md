@@ -685,10 +685,20 @@ the harness that validated the extraction fix — and that §9 lines up as the �
 scoring a config production never runs. It now goes through `_harness.llm_client()`, which mirrors
 `bootstrap.build()` field-for-field (verified by introspection).
 
-**⚠️ NOT live-verified.** LM Studio was down for this whole pass. The offline suite covers the logic, and
-route tables / imports / client-config parity / env-block equivalence were all checked by introspection —
-but **nothing was run against a real model.** Before trusting it: `python -m web.app`, confirm the status
-panel populates (it now goes through `Companion.memory_snapshot()`), and run one live script.
+**✅ LIVE-VERIFIED (2026-07-20, LM Studio up, qwen3.5-9b).** Every refactored path exercised against
+the real stack on a throwaway DB (the real `companion.db` untouched): streaming chat (19 chunks, streamed
+text == returned text, 76 tok/s) — the highest-risk change, since `stream()` now runs through the tool
+loop; recall via the split `_corpus()`/`_rank()` (0.61–0.68 similarities, right in the calibrated band);
+consolidation + core flagging (4 facts, name/job/location core, pet regular); the tool loop; `_aside()`
+driving reflect (journaled) and reach-out/follow-up (both cleanly PASSed); `_is_pass()` across 7
+spellings; self-notes with the voice guard holding; persona edit; and the durability watermark. Web
+routes, the WS new/rename/delete cycle, and `counts()` all confirmed too.
+
+**Tool-calling scored 23/30 — inside the documented 22–25 noise band, TRICKY 6/6 (no over-triggering),
+so the loop is intact.** The TIME misses are prong A, not a regression: a controlled probe on the same
+code path gave **0/4 calls at temperature 0.8 vs 2/4 at 0.2**. Note that's weaker than the 7/8 §0
+recorded at 0.2 — cooling the routing call helps but does not fully fix TIME, so prong A should be
+measured, not assumed.
 
 ---
 
