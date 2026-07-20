@@ -6,10 +6,9 @@ Uses a real Companion wired to tiny fakes, plus a fake clock for the job gates.
 Run:  python tests/test_self_notes.py
 """
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import _harness  # noqa: F401  — imported for its sys.path side effect
+from helpers import FakeConv, FakeMemory, InMemoryMeta
 
 import config  # noqa: E402
 from core.companion import SELF_NOTES_KEY, Companion  # noqa: E402
@@ -44,46 +43,6 @@ class FakeLLM:
         return {"intentions": [], "resolved": []}
 
 
-class FakeMemory:
-    async def recall(self, text):
-        return []
-
-    def core_memories(self):
-        return []
-
-
-class FakeConv:
-    def __init__(self):
-        self._id = 0
-
-    def add_message(self, sid, role, content):
-        self._id += 1
-        return self._id
-
-    def message_count(self):
-        return 100
-
-    def set_title(self, sid, title):
-        pass
-
-
-class FakeMeta:
-    def __init__(self, data=None):
-        self.data = dict(data or {})
-
-    def get(self, k):
-        return self.data.get(k)
-
-    def set(self, k, v):
-        self.data[k] = v
-
-    def get_json(self, k, default=None):
-        return self.data.get(k, default)
-
-    def set_json(self, k, v):
-        self.data[k] = v
-
-
 HIST = [{"role": "user", "content": "stop asking me so many questions"},
         {"role": "assistant", "content": "fair enough"}]
 
@@ -94,7 +53,7 @@ def _companion(llm, meta, history=HIST):
 
 async def main():
     # --- 1) update_self_notes writes the slot ---
-    meta = FakeMeta()
+    meta = InMemoryMeta()
     llm = FakeLLM()
     out = await _companion(llm, meta).update_self_notes()
     check(out == "You ask him too many questions — ease off.", f"returns the new notes: {out}")
@@ -102,21 +61,21 @@ async def main():
     check("stop asking me so many questions" in llm.asked[0], "the conversation is what it learns from")
 
     # the current notes are fed back in so a rewrite can revise rather than duplicate
-    meta = FakeMeta({SELF_NOTES_KEY: "He likes short replies."})
+    meta = InMemoryMeta({SELF_NOTES_KEY: "He likes short replies."})
     llm = FakeLLM()
     await _companion(llm, meta).update_self_notes()
     check("He likes short replies." in llm.asked[0], "existing notes are shown for revision")
 
     # --- 2) PASS leaves the slot untouched ---
-    meta = FakeMeta({SELF_NOTES_KEY: "He likes short replies."})
+    meta = InMemoryMeta({SELF_NOTES_KEY: "He likes short replies."})
     check(await _companion(FakeLLM("PASS"), meta).update_self_notes() is None, "PASS -> None")
     check(meta.get(SELF_NOTES_KEY) == "He likes short replies.", "PASS does not clobber existing notes")
     for variant in ("PASS.", " pass ", "Pass!"):
-        meta = FakeMeta({SELF_NOTES_KEY: "keep me"})
+        meta = InMemoryMeta({SELF_NOTES_KEY: "keep me"})
         check(await _companion(FakeLLM(variant), meta).update_self_notes() is None, f"{variant!r} is a PASS")
         check(meta.get(SELF_NOTES_KEY) == "keep me", f"{variant!r} preserved the slot")
 
-    meta = FakeMeta({SELF_NOTES_KEY: "keep me"})
+    meta = InMemoryMeta({SELF_NOTES_KEY: "keep me"})
     check(await _companion(FakeLLM("   "), meta).update_self_notes() is None, "empty reply -> None")
     check(meta.get(SELF_NOTES_KEY) == "keep me", "empty reply does not clobber")
 
@@ -126,29 +85,29 @@ async def main():
     for backwards in ("You get annoyed when Mari asks questions — push back on her gently.",
                       "mari should stop asking so many questions.",
                       "He likes it when Mari has an opinion."):
-        meta = FakeMeta({SELF_NOTES_KEY: "keep me"})
+        meta = InMemoryMeta({SELF_NOTES_KEY: "keep me"})
         check(await _companion(FakeLLM(backwards), meta).update_self_notes() is None,
               f"inverted note rejected: {backwards[:40]!r}")
         check(meta.get(SELF_NOTES_KEY) == "keep me", "a rejected note leaves the good notes in place")
 
-    meta = FakeMeta()
+    meta = InMemoryMeta()
     ok_note = "He gets annoyed when you ask questions — react with an opinion instead."
     check(await _companion(FakeLLM(ok_note), meta).update_self_notes() == ok_note,
           "a correctly-voiced note still passes the guard")
     check("marinade" not in config.BOT_NAME.lower(), "guard is word-bounded, not a substring match")
-    meta = FakeMeta()
+    meta = InMemoryMeta()
     check(await _companion(FakeLLM("He likes marinades on everything."), meta).update_self_notes(),
           "a word containing her name as a substring is not a false positive")
 
     # --- 3) hard cap keeps the injected block small ---
-    meta = FakeMeta()
+    meta = InMemoryMeta()
     long = "x" * (config.SELFNOTES_MAX_CHARS + 500)
     out = await _companion(FakeLLM(long), meta).update_self_notes()
     check(len(out) <= config.SELFNOTES_MAX_CHARS, f"capped to {config.SELFNOTES_MAX_CHARS}, got {len(out)}")
     check(len(meta.get(SELF_NOTES_KEY)) <= config.SELFNOTES_MAX_CHARS, "stored value is capped too")
 
     # --- 4) nothing to learn from ---
-    meta = FakeMeta()
+    meta = InMemoryMeta()
     llm = FakeLLM()
     check(await _companion(llm, meta, history=[]).update_self_notes() is None, "empty history -> no-op")
     check(llm.seen == [], "empty history costs no model call")
@@ -168,18 +127,18 @@ async def main():
     check("You've grown fond of him." in both and NOTE in both, "persona + notes both present")
 
     # ... and reach both live generation paths through the Companion, not just the builders
-    meta = FakeMeta({SELF_NOTES_KEY: NOTE})
+    meta = InMemoryMeta({SELF_NOTES_KEY: NOTE})
     llm = FakeLLM("sure")
     c = _companion(llm, meta, history=[{"role": "user", "content": "hey"}])
     await c.send("hey", lambda t: asyncio.sleep(0))
     check(NOTE in llm.seen[-1], "send() injects the notes")
 
-    meta = FakeMeta({SELF_NOTES_KEY: NOTE})
+    meta = InMemoryMeta({SELF_NOTES_KEY: NOTE})
     llm = FakeLLM("been thinking about you")
     await _companion(llm, meta, history=[{"role": "user", "content": "later"}]).reach_out()
     check(NOTE in llm.seen[-1], "reach_out() injects the notes")
 
-    meta = FakeMeta({SELF_NOTES_KEY: NOTE})
+    meta = InMemoryMeta({SELF_NOTES_KEY: NOTE})
     llm = FakeLLM("oh also")
     await _companion(llm, meta, history=[{"role": "assistant", "content": "hi"}]).follow_up()
     check(NOTE in llm.seen[-1], "follow_up() injects the notes")
@@ -220,7 +179,7 @@ async def main():
     def job(c):
         return SelfNotesJob(c, 1.0, min_idle=300, cooldown=1800, clock=clock)
 
-    c = C(FakeMeta(), idle=999)
+    c = C(InMemoryMeta(), idle=999)
     await job(c).run()
     check(c.calls == 1, "runs when idle and off cooldown")
     await job(c).run()
@@ -230,7 +189,7 @@ async def main():
     check(c.calls == 2, "runs again once the cooldown elapses")
 
     for label, kw in (("asleep", {"asleep": True}), ("busy", {"busy": True}), ("not idle", {"idle": 10})):
-        c = C(FakeMeta(), **kw)
+        c = C(InMemoryMeta(), **kw)
         await job(c).run()
         check(c.calls == 0, f"skipped while {label}")
         check(c.meta.get_json(LAST_SELFNOTES_KEY, 0) == 0, f"{label}: cooldown stamp not burned on a skip")

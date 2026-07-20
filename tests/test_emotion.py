@@ -12,28 +12,17 @@ mood decays toward baseline over neutral turns, the noise floor drops weak label
 Run:  python tests/test_emotion.py
 """
 import os
-import sys
-import tempfile
 
-from _harness import case, run  # also puts the repo root on sys.path
+from _harness import case, run, temp_dir# also puts the repo root on sys.path
+from helpers import FakeClassifier
 
 from core.emotion_manager import BASELINE_STATE, CHANNELS, EmotionManager
 from infrastructure.db import connect
 from infrastructure.meta_store import SqliteMetaStore
 
 
-class FakeClassifier:
-    """Returns scripted (label, score) lists, one per react() call."""
-
-    def __init__(self, script):
-        self.script = list(script)
-
-    def classify(self, text):
-        return self.script.pop(0) if self.script else []
-
-
 def _mgr(script):
-    path = os.path.join(tempfile.mkdtemp(), "emo.db")
+    path = os.path.join(temp_dir(), "emo.db")
     conn = connect(path)
     meta = SqliteMetaStore(conn)
     mgr = EmotionManager(FakeClassifier(script), meta, pull_strength=0.4, noise_floor=0.05)

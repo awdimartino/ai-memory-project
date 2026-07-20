@@ -8,10 +8,9 @@ clear_memories (memories only) and factory_reset (everything, in-memory too).
 Run:  python tests/test_memory_admin.py
 """
 import os
-import sys
-import tempfile
 
-from _harness import case, run  # also puts the repo root on sys.path
+from _harness import case, run, temp_dir# also puts the repo root on sys.path
+from helpers import FakeClassifier
 
 import numpy as np
 
@@ -38,13 +37,8 @@ class FakeEmbedder:
         return [0.9, 0.8, 0.7]
 
 
-class FakeClassifier:
-    def classify(self, text):
-        return []
-
-
 def _stores():
-    path = os.path.join(tempfile.mkdtemp(), "admin.db")
+    path = os.path.join(temp_dir(), "admin.db")
     conn = connect(path)
     return (SqliteConversationStore(conn), SqliteMemoryStore(conn),
             SqliteMetaStore(conn), SqliteThoughtStore(conn), conn, path)

@@ -13,7 +13,7 @@ panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **mult
 (arc A1 — internal drives now gate reach-out/reflection, §8-A), **spontaneous follow-up messages**
 ("double-text"), an **editable memory inspector + admin** (browse/edit/delete, clear, factory reset),
 and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
-batching). All live-verified; offline suite **107 green**. **Added 2026-07-19:** phone push, a web-UI +
+batching). All live-verified; offline suite **212 green**. **Added 2026-07-19:** phone push, a web-UI +
 **iOS/Safari mobile** overhaul, arc-A2 **energy cycles**; a **memory-extraction fix** (a name buried in a 20-msg
 consolidation window was silently dropped → `CONSOLIDATE_WINDOW` 10 + a stronger extraction prompt + bounded
 chunks); a **personality overhaul** (hard *one-sentence* / *no-trailing-question* rules reinforced by an
@@ -227,7 +227,7 @@ budget (small models, CPU for the tiny emotion classifier, one model call at a t
   `POST /memory/{edit,delete,core,clear}`, `POST /admin/factory_reset` — confirm-gated). Both destructive
   actions confirm in the browser first.
 - **Tool framework (pillar 4, 2026-07-18):** native OpenAI function-calling, verified **100%
-  reliable** on qwen3.5-9b first (`scripts/tool_probe.py`) — including streamed `tool_calls` deltas.
+  reliable** on qwen3.5-9b first (`archive/scripts/tool_probe.py`) — including streamed `tool_calls` deltas.
   A hot-swappable **`ToolRegistry`** (`core/tools.py`) pairs each `Tool`'s JSON schema with an async
   handler; register one and Mari can call it next turn, nothing else changes. `LLMClient.stream_with_tools`
   runs a **streaming tool loop** that keeps token-streaming the final answer and only loops when the model
@@ -253,21 +253,17 @@ framework are built and live-verified. Everything not built is enrichment or rea
 python -m web.app       # web UI at http://127.0.0.1:8000
 python main.py          # same brain, terminal REPL
 
-python tests/test_memory_lifecycle.py   # offline, no LM Studio needed
-python tests/test_memory_edge.py        # offline edge-case suite (8 cases)
-python tests/test_core_memory.py        # offline core-memory flag/inject/cap (4 cases)
-python tests/test_memory_admin.py       # offline memory admin: all/edit/delete/clear + factory reset (7 cases)
-python tests/test_notifier.py           # offline phone-push (Bark) via httpx MockTransport (6 cases)
-python tests/test_durability.py         # offline hard-kill recovery (4 cases)
-python tests/test_emotion.py            # offline mood logic, fake classifier (7 cases)
-python tests/test_llm_retry.py          # offline LLM transient-retry logic (6 cases)
-python tests/test_tick.py               # tick scheduler + all jobs (reach-out/reflection/persona/sleep/drive-drift/follow-up) + energy-sleep + familiarity (42 cases)
-python tests/test_drives.py             # offline drive + energy dynamics: rise/relax/mood-modulation/contact/discharge/deplete/restore/persist (15 cases)
-python tests/test_tools.py              # offline tool framework: registry + stream loop + reminisce (20 cases)
-python scripts/tool_probe.py            # LIVE: native tool-calling reliability (probe, per-case pass rate)
+# OFFLINE SUITE — one command, exits non-zero on any failure. No LM Studio needed.
+python tests/run_all.py                 # all 13 files / 212 checks (~19s)
+python tests/run_all.py -q              # only show failures
+python tests/run_all.py drives tick     # only files matching these substrings
+python tests/test_drives.py             # any single file still runs standalone
+# Discovery is a glob over tests/test_*.py, so a new test file is picked up with no
+# edit here. (This list used to be maintained by hand and had silently fallen two
+# files — 85 checks — behind.) Shared harness in tests/_harness.py, fakes in
+# tests/helpers.py.
 python scripts/tool_smoke.py            # LIVE: tools end-to-end through the real persona (time + reminisce + no-tool)
 python scripts/tool_eval.py             # LIVE: 30-scenario tool-calling eval (time/reminisce/no-tool/tricky), per-category score
-python scripts/bench_specdec.py         # LIVE: tok/s A/B for spec decoding — DONE: 45 base, +27% predictable / -50% creative → not used (§0)
 python scripts/probe_reasoning_control.py  # LIVE (needs thinking ON): reasoning-cap knobs — DONE: all no-ops for qwen3.5 (§0)
 
 python scripts/reminisce_smoke.py       # LIVE: reminisce recalls a past episode out of the context window
@@ -325,7 +321,9 @@ REPL commands: `/exit` (flushes pending consolidation), `/reset`, `/model <name>
 
 To swap models one-at-a-time for testing, use `lms unload --all` between loads (LM
 Studio JIT keeps them resident otherwise and will exhaust 16 GB). Bake-off + speed
-harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `prompt_test.py`).
+harnesses live in `scripts/` (`bakeoff.py`, `bench_speed.py`, `model_tryout.py`,
+`bakeoff_personality.py`). Four finished probes were moved to `archive/scripts/`
+(see its README for which question each one answered).
 
 ---
 
@@ -598,6 +596,16 @@ State at handoff: working tree **clean**, `main` at **`5b27355`** (learned self-
 (intention sub-items) and `2875411` (intentions). Offline suite **green, 13 files**. Server verified healthy on
 **qwen/qwen3.5-9b**. No git remote — local only, never push.
 
+**↗ UPDATE — test-infrastructure pass (2026-07-19, after the above).** A code-quality review of the offline
+half of the codebase ran, and its Phase 1 (hygiene only, no behavior change) is **done**: `tests/run_all.py`
+is now the suite's single entry point (13 files / **212 checks**, exits non-zero, glob discovery); the
+byte-identical harness block in 10 files collapsed into `tests/_harness.py`; drifted fakes (three `FakeMeta`
+variants, two `FakeConv`s) consolidated into `tests/helpers.py` with the superset winning; temp-dir leakage
+went **~40/run → 0**; unrestored `config` globals now restore via a context manager (they were
+order-dependent flakes waiting for any single-process runner); `test_memory_lifecycle.py` joined the harness
+so every file reports a tally; and four finished probe scripts moved to `archive/scripts/`. **Phases 2 and 3
+of that review are NOT done** — see the review findings recap at the end of this section.
+
 **Watch these first — new code that has not yet run in real use:**
 - **Self-notes have never fired live.** `SelfNotesJob` needs 5 min idle + a 30-min cooldown, and the slot was
   still empty at handoff. First real session: check the **"Lessons learned"** panel card (or `GET /status`
@@ -647,3 +655,59 @@ on qwen3.5-9b. Nothing to do until LM Studio ships it; re-read §0 before reopen
 **Security (unchanged, still outstanding):** `archive/v1/infrastructure/config.py` holds a **real hardcoded
 HuggingFace token**. It is git-ignored on purpose and **must not be committed** — it should be **rotated/revoked
 on HuggingFace**. `.env` and `companion.db` are git-ignored too.
+
+### 9b. Code-quality review findings — Phase 2 & 3 (NOT yet done, 2026-07-19)
+
+A four-slice quality review (core/, infrastructure/, tests/, scripts/+web/) ran on the offline codebase.
+Phase 1 (test hygiene, above) is committed. What remains, in the order recommended:
+
+**Phase 2 — structural, safe, offline-verifiable (~350 lines out).**
+1. **`llm_client.py` duplicate state machine.** `_stream_once` and `_tool_step_once` reimplement the
+   `<think>`-stripping loop near-verbatim, and `stream()`/`_tool_step()` duplicate the retry wrapper.
+   Reimplement `stream()` as `_tool_step(prepped, on_token, None)` + `_tool_stats(...)` and delete
+   `_stream_once` (~70 lines). The file already proves it's safe: the max-iters fallback calls exactly
+   that path. Only delta is a `"tools": []` key in stats — check callers.
+2. **`_search()` hoist.** `MemoryManager.consolidate` calls `_search` per candidate, and each call
+   re-reads the whole `memories` table and rebuilds the numpy matrix. K candidates → K full reads.
+   Hoist the read + normalize out of the loop, score all candidates in one matmul. **Both the core and
+   infrastructure reviewers found this independently** — the only finding with cost that scales.
+3. **Three dead routes in `web/app.py`** — `GET /thoughts`, `/core`, `/persona` have no consumer
+   (`index.html` fetches only `/status` + `/memories`; the REPL reads in-process) and all three are
+   subsumed by `/status`. ~30 lines.
+4. **Facade gap.** Six reach-throughs past `Companion` into stores (`c.memory.store.*`,
+   `companion.store.*`), including `companion._session_title = title` — a private write from outside
+   the class, which `bootstrap.py:117` also does. Worth closing *before* §B memory work adds more
+   store surface to reach through.
+5. **`Companion._aside()` extraction.** `reach_out`/`follow_up`/`reflect` share a byte-identical
+   5-line context block, the same message assembly, five copies of `async def _sink`, and a PASS check
+   that exists in two different operator orders across six sites. ~120 lines, ~70% identical.
+6. **`CooldownJob` / `DriveGatedJob` bases in `tick.py`.** `IntentionJob.run` and `SelfNotesJob.run`
+   are line-for-line identical apart from the meta key; five jobs repeat the same
+   asleep/busy/idle/cooldown/stamp protocol, and `_wants_to` is duplicated verbatim.
+7. **Protocol drift in `core/interfaces.py`.** `count_superseded()`, `superseded()`, `all()`,
+   `count_active()`, `count()` are called by `web/app.py` but undeclared. A fake written strictly to
+   the Protocol would fail against real callers — which defeats the seam's stated purpose.
+8. **`scripts/_harness.py`.** All 17 scripts repeat the same path/UTF-8/client/temp-DB preamble in two
+   incompatible styles. This hides a real defect: **`eval_extraction.py:164` builds its `LLMClient`
+   without `frequency_penalty`/`presence_penalty`/`max_retries`**, so the extraction eval scores a
+   config production never runs — and §9 lines it up as the regression net for the §B memory arc.
+   Fix that line even if the harness is deferred.
+
+**Phase 3 — needs LM Studio + re-measurement (do NOT bundle with the above).**
+- **The `build_system` trailer lands in the wrong place for 3 of 4 callers.** Its own comment explains
+  the design ("small models follow the rules closest to the end"), but `build_reachout_system`,
+  `build_followup_system`, and `build_reflect_system` all append their addendum *after* calling it.
+  For reflect it's actively contradictory: the shared trailer demands "ONE short sentence, and do not
+  end on a question" while `_REFLECT_ADDENDUM` asks for "one or two sentences". ⚠️ **Not a safe
+  refactor** — the measured 100% one-sentence / 7% q-end numbers were obtained *with* the current
+  arrangement, so fixing it invalidates that baseline. Re-run `bakeoff_personality.py` after.
+- **`category` is dead data.** `MEMORY_SCHEMA` dropped it deliberately (`prompts.py` says why: "always
+  'user' — pure dead output tokens"), but consolidation still threads `"category": f.get("category")`
+  (now always `None`) through three `store.add` calls, the Protocol, the DB column, and the inspector UI.
+
+**Also noted, small:** stale module docstrings in `core/tick.py` ("two internal jobs" — there are nine),
+`core/prompts.py` ("just the starting persona" — eight builders), `core/interfaces.py` and
+`infrastructure/meta_store.py` (both describe shipped features as future work); `bootstrap.py:80`
+("no behavior gates on them yet" — false since arc A1); stale model lists in `bakeoff.py`/`bench_speed.py`
+still naming the rejected `neona-12b-i1`; `intention_store.active()` interpolates LIMIT where every
+sibling binds it. **`web/static/index.html` is clean** — a dead-selector scan returned zero, no action.

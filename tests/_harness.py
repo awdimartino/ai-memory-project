@@ -23,14 +23,58 @@ with bare `conn.close(); os.remove(path)` at the end of each case, which never r
 when a case failed — leaking handles and temp dirs exactly when a run goes bad.
 """
 import asyncio
+import atexit
 import contextlib
 import os
+import shutil
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 CASES = []
+
+_TEMP_DIRS: list[str] = []
+_TEMP_CONNS: list = []
+
+
+def track_conn(conn):
+    """Register a connection to be closed at exit; returns it for chaining.
+
+    Windows won't remove a directory holding an open SQLite file, so a case that
+    never closes its connection defeats the cleanup below. Wrap the connect call
+    (`track_conn(connect(path))`) when a case has no natural place to close it.
+    """
+    _TEMP_CONNS.append(conn)
+    return conn
+
+
+def temp_dir() -> str:
+    """A throwaway directory, removed when the process exits.
+
+    Cases used to call `tempfile.mkdtemp()` directly and clean up with
+    `os.remove(path)` — which deletes the *db file* and leaves the directory behind,
+    one per case, forever. Routing them through here means the cleanup happens even
+    when a case fails partway (the common reason teardown never ran).
+
+    Prefer `temp_db()` for the single-connection case; this is for cases that open
+    several connections to one path (crash/restart simulations) where a scoped
+    context manager doesn't fit.
+    """
+    d = tempfile.mkdtemp()
+    _TEMP_DIRS.append(d)
+    return d
+
+
+@atexit.register
+def _cleanup_temp_dirs() -> None:
+    for conn in _TEMP_CONNS:  # close first — an open handle blocks rmtree on Windows
+        with contextlib.suppress(Exception):
+            conn.close()
+    for d in _TEMP_DIRS:
+        shutil.rmtree(d, ignore_errors=True)
+    _TEMP_CONNS.clear()
+    _TEMP_DIRS.clear()
 
 
 def case(fn):
@@ -69,7 +113,7 @@ def temp_db(name: str = "t.db"):
     """
     from infrastructure.db import connect
 
-    d = tempfile.mkdtemp()
+    d = temp_dir()  # also tracked for exit-time cleanup, in case the rmtree below fails
     path = os.path.join(d, name)
     conn = connect(path)
     try:
@@ -77,13 +121,7 @@ def temp_db(name: str = "t.db"):
     finally:
         with contextlib.suppress(Exception):
             conn.close()
-        with contextlib.suppress(Exception):
-            _rmtree(d)
-
-
-def _rmtree(d: str) -> None:
-    import shutil
-    shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(d, ignore_errors=True)
 
 
 @contextlib.contextmanager

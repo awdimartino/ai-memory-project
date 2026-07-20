@@ -12,28 +12,16 @@ a zero dt is a no-op, and state persists across manager instances.
 Run:  python tests/test_drives.py
 """
 import os
-import sys
-import tempfile
 
-from _harness import case, run  # also puts the repo root on sys.path
+from _harness import Clock, case, run, temp_dir# also puts the repo root on sys.path
 
 from core.drives import DRIVES, ENERGY_START, DriveManager
 from infrastructure.db import connect
 from infrastructure.meta_store import SqliteMetaStore
 
 
-class Clock:
-    """A mutable fake clock; advance `.t` to simulate elapsed wall-time."""
-
-    def __init__(self, t=1_000.0):
-        self.t = t
-
-    def __call__(self):
-        return self.t
-
-
 def _mgr(clock, away_after=90.0):
-    path = os.path.join(tempfile.mkdtemp(), "drv.db")
+    path = os.path.join(temp_dir(), "drv.db")
     conn = connect(path)
     meta = SqliteMetaStore(conn)
     mgr = DriveManager(meta, away_after=away_after, clock=clock)

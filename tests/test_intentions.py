@@ -7,12 +7,11 @@ Run:  python tests/test_intentions.py
 """
 import asyncio
 import os
-import tempfile
 from datetime import datetime, timedelta, timezone
 
-from _harness import config_override  # also puts the repo root on sys.path
+from _harness import config_override, temp_dir, track_conn  # also puts the repo root on sys.path
+from helpers import FakeConv, FakeMemory, InMemoryMeta
 
-import config  # noqa: E402
 from core.companion import Companion  # noqa: E402
 from core.prompts import build_followup_system, build_system  # noqa: E402
 from infrastructure.db import connect  # noqa: E402
@@ -28,9 +27,9 @@ def check(cond, msg):
 
 
 def _store():
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    return SqliteIntentionStore(connect(path))
+    # track_conn: this file never closes its stores, so let the harness do it at exit
+    path = os.path.join(temp_dir(), "int.db")
+    return SqliteIntentionStore(track_conn(connect(path)))
 
 
 def _backdate(store, intention_id, days):
@@ -55,30 +54,9 @@ class FakeLLM:
         return self._reply, {"ttft": 0, "tok_per_s": 0, "tokens": 1, "estimated": True}
 
 
-class FakeMemory:
-    async def recall(self, text):
-        return []
-
-    def core_memories(self):
-        return []
-
-
-class FakeConv:
-    def __init__(self):
-        self._id = 0
-
-    def add_message(self, sid, role, content):
-        self._id += 1
-        return self._id
-
-
-class FakeMeta:
-    def get(self, k):
-        return None
-
-
 def _companion(store, llm, history):
-    return Companion(llm, FakeConv(), FakeMemory(), FakeMeta(), 1, history=history, intentions=store)
+    return Companion(llm, FakeConv(), FakeMemory(), InMemoryMeta(), 1,
+                     history=history, intentions=store)
 
 
 HIST = [{"role": "user", "content": "hi"}]
@@ -189,7 +167,7 @@ async def main():
     check(st.count_active() == 1, "PASS does not fulfill the intention")
 
     # --- 7) degrades gracefully with no store ---
-    c = Companion(FakeLLM(), FakeConv(), FakeMemory(), FakeMeta(), 1, history=HIST)
+    c = Companion(FakeLLM(), FakeConv(), FakeMemory(), InMemoryMeta(), 1, history=HIST)
     check(await c.form_intentions() == [], "no IntentionStore -> form_intentions is a no-op")
 
     print(f"OK - {_checks} checks passed")

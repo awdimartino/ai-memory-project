@@ -13,7 +13,6 @@ Two layers, no LM Studio needed:
 
 Run:  python tests/test_tools.py
 """
-import sys
 import types
 
 from _harness import case, run  # also puts the repo root on sys.path

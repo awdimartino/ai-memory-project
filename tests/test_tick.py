@@ -1,16 +1,18 @@
-"""Offline coverage for the tick loop (proactivity scaffolding).
+"""Offline coverage for the tick loop and every job that hangs off it.
 
-Drives the scheduler with a fake clock (deterministic, no real waiting) and the
-two internal jobs with fakes: mood drift only fires when the user is idle and a
-failing job never stops the heartbeat. The one lifecycle test uses a tiny real
-interval to confirm start/stop.
+Drives the scheduler with a fake clock (deterministic, no real waiting) and each
+job with fakes. Covers the loop itself (interval respect, a failing job never
+stopping the heartbeat, start/stop via one tiny real interval) plus all eight
+jobs: mood drift, drive drift, idle consolidation, reach-out, reflection,
+persona edit, follow-up, and sleep — including their idle/cooldown/drive gates,
+the asleep and busy guards, and familiarity scaling.
 
 Run:  python tests/test_tick.py
 """
 import asyncio
-import sys
 
 from _harness import case, config_override, run  # also puts the repo root on sys.path
+from helpers import FakeClassifier, InMemoryMeta
 
 from core.emotion_manager import EmotionManager
 from core.tick import (
@@ -72,22 +74,6 @@ class FakeCompanion:
     async def flush(self):
         self.flushed += 1
         self._pending = 0
-
-
-class InMemoryMeta:
-    def __init__(self):
-        self._d = {}
-
-    def get_json(self, k, default=None):
-        return self._d.get(k, default)
-
-    def set_json(self, k, v):
-        self._d[k] = v
-
-
-class FakeClassifier:
-    def classify(self, text):
-        return []
 
 
 @case

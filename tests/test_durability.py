@@ -17,10 +17,8 @@ Run:  python tests/test_durability.py
 """
 import asyncio
 import os
-import sys
-import tempfile
 
-from _harness import case, config_override, run  # also puts the repo root on sys.path
+from _harness import case, config_override, run, temp_dir# also puts the repo root on sys.path
 
 import config
 import infrastructure.db as db
@@ -92,7 +90,7 @@ def _ids(chunk):
 @case
 async def watermark_advances_on_window_consolidation():
     with config_override(CONSOLIDATE_WINDOW=4):  # 2 exchanges
-        path = os.path.join(tempfile.mkdtemp(), "d.db")
+        path = os.path.join(temp_dir(), "d.db")
         mem = FakeMemory()
         comp, conn, conv, meta = _build(path, mem)
 
@@ -108,7 +106,7 @@ async def watermark_advances_on_window_consolidation():
 @case
 async def hard_kill_tail_is_recovered_and_flushed():
     with config_override(CONSOLIDATE_WINDOW=100):  # never window-triggers here
-        path = os.path.join(tempfile.mkdtemp(), "d.db")
+        path = os.path.join(temp_dir(), "d.db")
 
         # First run: chat, then "crash" (drop the companion WITHOUT flushing).
         comp, conn, conv, meta = _build(path, FakeMemory())
@@ -138,7 +136,7 @@ async def hard_kill_tail_is_recovered_and_flushed():
 @case
 async def failed_consolidation_requeues_and_holds_watermark():
     with config_override(CONSOLIDATE_WINDOW=4):
-        path = os.path.join(tempfile.mkdtemp(), "d.db")
+        path = os.path.join(temp_dir(), "d.db")
         mem = FakeMemory(fail=True)
         comp, conn, conv, meta = _build(path, mem)
 
@@ -163,7 +161,7 @@ async def watermark_never_jumps_past_pending():
     # A newer chunk (ids 5,6) consolidates while an OLDER chunk (ids 3,4) is still pending
     # (e.g. a failed background pass re-queued it). The watermark must clamp below the pending
     # ids, or a crash would leave 3,4 below the watermark and unrecoverable.
-    path = os.path.join(tempfile.mkdtemp(), "d.db")
+    path = os.path.join(temp_dir(), "d.db")
     comp, conn, conv, meta = _build(path, FakeMemory())
     comp._unconsolidated = [{"id": 3, "role": "user", "content": "x"},
                             {"id": 4, "role": "assistant", "content": "y"}]
@@ -175,7 +173,7 @@ async def watermark_never_jumps_past_pending():
 
 @case
 async def watermark_never_regresses():
-    path = os.path.join(tempfile.mkdtemp(), "d.db")
+    path = os.path.join(temp_dir(), "d.db")
     comp, conn, conv, meta = _build(path, FakeMemory())
     meta.set_int(KEY, 10)
     await comp._advance_watermark([{"id": 5, "role": "user", "content": "a"}])  # lower than 10
@@ -187,7 +185,7 @@ async def watermark_never_regresses():
 async def upgrade_seeds_watermark_to_max_message_id():
     # An existing DB (pre-v4) with logged messages must not re-consolidate its
     # whole backlog: the v4 migration seeds the watermark to the current max id.
-    path = os.path.join(tempfile.mkdtemp(), "d.db")
+    path = os.path.join(temp_dir(), "d.db")
     original = db.MIGRATIONS
     try:
         db.MIGRATIONS = original[:3]          # bring the DB up to v3 only

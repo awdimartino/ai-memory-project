@@ -7,7 +7,6 @@ tokens have been emitted, which would double-stream).
 
 Run:  python tests/test_llm_retry.py
 """
-import sys
 import types
 
 from _harness import case, run  # also puts the repo root on sys.path

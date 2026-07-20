@@ -7,84 +7,47 @@ and the cap is enforced by the brain re-rank (demoting the rest to regular).
 
 Run:  python tests/test_core_memory.py
 """
-import os
-import sys
-import tempfile
+import contextlib
 
-from _harness import case, run  # also puts the repo root on sys.path
-
-import numpy as np
+from _harness import case, run, temp_db  # also puts the repo root on sys.path
+from helpers import OneHotEmbedder, ScriptedLLM
+from helpers import fact as _fact
 
 from core.memory_manager import MemoryManager
 from core.prompts import build_system
-from infrastructure.db import connect
 from infrastructure.memory_store import SqliteMemoryStore
 
 _TOPICS = ["live", "dog", "cat", "work", "food", "music", "name"]
 
 
-class FakeEmbedder:
-    def _vec(self, text):
-        v = np.zeros(len(_TOPICS) + 1, dtype=np.float32)
-        low = text.lower()
-        idx = len(_TOPICS)
-        for i, k in enumerate(_TOPICS):
-            if k in low:
-                idx = i
-                break
-        v[idx] = 1.0
-        return v.tolist()
-
-    async def embed_query(self, text):
-        return self._vec(text)
-
-    async def embed_document(self, text):
-        return self._vec(text)
-
-    async def embed_documents(self, texts):
-        return [self._vec(t) for t in texts]
-
-
-class FakeLLM:
-    def __init__(self, fact_lists, decisions):
-        self.fact_lists = list(fact_lists)
-        self.decisions = list(decisions)
-
-    async def structured(self, messages, schema, model=None):
-        return self.fact_lists.pop(0) if self.fact_lists else []
-
-    async def structured_json(self, messages, schema, model=None):
-        # core tests only exercise the core-rerank structured_json ({"keep": [...]});
-        # decisions default is harmless (no lifecycle decision fires with an empty store).
-        return self.decisions.pop(0) if self.decisions else {"decisions": []}
-
-
-def _fact(content, core=False, category="user"):
-    return {"content": content, "category": category, "core": core}
-
-
+@contextlib.contextmanager
 def _mm(fact_lists, decisions, core_max=12):
-    path = os.path.join(tempfile.mkdtemp(), "core.db")
-    conn = connect(path)
-    store = SqliteMemoryStore(conn)
-    mm = MemoryManager(FakeEmbedder(), store, FakeLLM(fact_lists, decisions),
-                       brain_model="fake", top_k=5, min_sim=0.55,
-                       relate_top_k=5, relate_sim=0.6, core_max=core_max)
-    return mm, store, conn, path
+    """Yield `(manager, store)` on a throwaway DB, torn down even on failure.
+
+    Core tests exercise the core-rerank structured_json ({"keep": [...]}); the
+    ScriptedLLM decisions queue serves both, and its {"decisions": []} default is
+    harmless (no lifecycle decision fires against an empty store).
+    """
+    with temp_db("core.db") as (conn, _path):
+        store = SqliteMemoryStore(conn)
+        yield (MemoryManager(OneHotEmbedder(_TOPICS), store,
+                             ScriptedLLM(fact_lists, decisions),
+                             brain_model="fake", top_k=5, min_sim=0.55,
+                             relate_top_k=5, relate_sim=0.6, core_max=core_max),
+               store)
 
 
 @case
 async def core_flag_from_extraction():
-    mm, store, conn, path = _mm(
+    with _mm(
         [[_fact("The user's name is Alex", core=True),
           _fact("The user likes spicy food", core=False)]],
         [],
-    )
-    await mm.consolidate([{"role": "user", "content": "x"}], session_id=1)
-    core = [m["content"] for m in store.core()]
-    assert core == ["The user's name is Alex"], core
-    assert store.count() == 2 and store.count_core() == 1
-    conn.close(); os.remove(path)
+    ) as (mm, store):
+        await mm.consolidate([{"role": "user", "content": "x"}], session_id=1)
+        core = [m["content"] for m in store.core()]
+        assert core == ["The user's name is Alex"], core
+        assert store.count() == 2 and store.count_core() == 1
 
 
 @case
@@ -102,7 +65,7 @@ async def build_system_injects_core_block():
 @case
 async def core_cap_reranks_and_demotes():
     # 5 distinct-topic core facts, cap 3 -> brain keeps 1,2,3 -> 2 demoted.
-    mm, store, conn, path = _mm(
+    with _mm(
         [[_fact("The user lives in Denver", core=True),
           _fact("The user owns a dog", core=True),
           _fact("The user has a cat", core=True),
@@ -110,27 +73,25 @@ async def core_cap_reranks_and_demotes():
           _fact("The user loves spicy food", core=True)]],
         [{"keep": [1, 2, 3]}],   # the rerank call
         core_max=3,
-    )
-    await mm.consolidate([{"role": "user", "content": "x"}], session_id=1)
-    assert store.count() == 5, "all facts still stored"
-    assert store.count_core() == 3, f"cap not enforced: {store.count_core()} core"
-    kept = sorted(m["content"] for m in store.core())
-    assert kept == sorted(["The user lives in Denver", "The user owns a dog",
-                           "The user has a cat"]), kept
-    conn.close(); os.remove(path)
+    ) as (mm, store):
+        await mm.consolidate([{"role": "user", "content": "x"}], session_id=1)
+        assert store.count() == 5, "all facts still stored"
+        assert store.count_core() == 3, f"cap not enforced: {store.count_core()} core"
+        kept = sorted(m["content"] for m in store.core())
+        assert kept == sorted(["The user lives in Denver", "The user owns a dog",
+                               "The user has a cat"]), kept
 
 
 @case
 async def core_cap_untouched_when_under_limit():
-    mm, store, conn, path = _mm(
+    with _mm(
         [[_fact("The user lives in Denver", core=True),
           _fact("The user owns a dog", core=True)]],
         [],   # no rerank call expected (2 <= cap 12)
         core_max=12,
-    )
-    await mm.consolidate([{"role": "user", "content": "x"}], session_id=1)
-    assert store.count_core() == 2
-    conn.close(); os.remove(path)
+    ) as (mm, store):
+        await mm.consolidate([{"role": "user", "content": "x"}], session_id=1)
+        assert store.count_core() == 2
 
 
 if __name__ == "__main__":
