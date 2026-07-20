@@ -313,14 +313,22 @@ def system_blocks(memories: list[str], mood: str | None = None,
         blocks.append(("mood", mood))
     # A terse reminder right before she generates — small models follow the rules closest to
     # the end far better than the same rules buried 1500+ tokens up in the persona.
+    # Her name leads the reminder (2026-07-20): live trials had her lose track of who she
+    # was, and the inspector showed why — "You are {BOT_NAME}" appeared exactly ONCE in an
+    # ~8,300-char prompt, in the opening clause, while `core memory` asserted the USER's
+    # name as an explicit fact. Position beats volume, so the single statement of her
+    # identity sat in the weakest slot with a competing name-fact right there.
+    # It goes at the START of the reminder, not the end: the v2.5 experiment showed the
+    # format rules lose 10 points when they stop being last, so they keep the final slot.
     if allow_silence:
         blocks.append(("closing reminder",
-                       "(For this one: you don't have to reply at all. If it doesn't call for a response, "
-                       "or you'd just rather stay quiet right now, reply with exactly PASS and nothing else. "
-                       "If you do reply: ONE short sentence, and don't end on a question.)"))
+                       f"(You're {BOT_NAME}. For this one: you don't have to reply at all. If it doesn't "
+                       "call for a response, or you'd just rather stay quiet right now, reply with exactly "
+                       "PASS and nothing else. If you do reply: ONE short sentence, and don't end on a "
+                       "question.)"))
     else:
         blocks.append(("closing reminder",
-                       "(This reply: ONE short sentence, and do not end on a question. "
+                       f"(You're {BOT_NAME}. This reply: ONE short sentence, and do not end on a question. "
                        "Just react or give your take.)"))
     return blocks
 
@@ -410,7 +418,14 @@ Rules:
 
 Also review the intentions you already have (numbered below): if this conversation clearly COVERED one —
 you asked it, or they answered it — put its number in "resolved" so it can be cleared. Only mark ones
-genuinely addressed here; leave the rest alone."""
+genuinely addressed here; leave the rest alone.
+
+An intention can only come from something CONCRETE they told you about their own life — a plan they
+have, a person in it, a thing they're doing or dealing with. Talking about you, about AI, about feelings
+in the abstract, or about the conversation itself gives you NOTHING to follow up on, however long or
+interesting it was; on a window like that the correct answer is an empty list. Never reach for a detail
+that isn't there — inventing "that restaurant they mentioned" when no restaurant was ever mentioned is
+far worse than returning nothing, because you will say it to them as though it really happened."""
 
 INTENTIONS_SCHEMA = {
     "type": "json_schema",

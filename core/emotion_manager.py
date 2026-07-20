@@ -56,11 +56,30 @@ CHANNEL_MAP = {
 
 # Per-channel pull toward baseline each turn. Warmth/melancholy are sticky (slow);
 # amusement/interest are of-the-moment (fast).
+#
+# ⚠️ RECALIBRATED 2026-07-20 after a live session ended at melancholy 0.809 ("intense")
+# and warmth 0.812, with the user reporting she had become persistently sad. These were
+# v1-inherited guesses; they are now measured (scratch probe, real classifier):
+#
+#   "my grandad died on tuesday"  ->  melancholy +0.359 in ONE message
+#   decay at state 0.8, old rate  ->             -0.014 per step
+#   => a 26:1 asymmetry: one sad message took ~26 messages to undo, and a full
+#      recovery from "intense" to "faint" took 77 messages / 77 minutes idle.
+#
+# That is a ratchet, not stickiness, and it is why she stayed sad for a whole session.
+# melancholy 0.02 -> 0.08 gives 19 steps for that recovery and ~6 to shed one heavy
+# message, while keeping it the second-slowest channel so the original "deep feelings
+# linger" intent survives. warmth 0.03 -> 0.05 for the identical ratchet (it was also
+# pegged at "intense"); a lighter touch since it wasn't the reported symptom.
+#
+# NOT changed, deliberately: label stacking was measured and is NOT the cause — the sad
+# messages are dominated by a single label (sadness 0.84 + disappointment 0.08), so
+# summing correlated labels was not worth restructuring.
 DECAY_RATES = {
     "irritation": 0.15,
-    "warmth":     0.03,
+    "warmth":     0.05,
     "amusement":  0.25,
-    "melancholy": 0.02,
+    "melancholy": 0.08,
     "unease":     0.10,
     "interest":   0.20,
 }

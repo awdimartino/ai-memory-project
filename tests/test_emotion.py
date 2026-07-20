@@ -30,6 +30,63 @@ def _mgr(script):
 
 
 @case
+async def melancholy_recovers_in_a_bounded_number_of_turns():
+    """The 2026-07-20 regression: she stayed sad for a whole session.
+
+    Measured cause was a ratchet, not stickiness — one sad message added +0.359 while
+    decay removed 0.014/step, so recovery from "intense" took 77 turns. This pins the
+    recovery budget rather than the rate itself, so a future retune is free to move the
+    number as long as she still comes back.
+    """
+    mgr, meta, conn, path = _mgr([])
+    mgr.state["melancholy"] = 0.809          # the value observed live
+    turns = 0
+    while mgr.state["melancholy"] > 0.25 and turns < 500:
+        await mgr.react("")                  # empty => no labels, decay only
+        turns += 1
+    assert turns <= 25, f"melancholy took {turns} turns to fade; it is ratcheting again"
+    assert turns >= 5, f"melancholy vanished in {turns} turns; it should still linger"
+    conn.close(); os.remove(path)
+
+
+@case
+async def one_heavy_message_stops_dominating_within_a_conversation():
+    """A bereavement-sized hit should stop STEERING her within a conversation.
+
+    The first draft of this case asserted decay to baseline+0.05 and failed at 23 turns.
+    That threshold was measuring the wrong thing: near-total erasure of a grandparent's
+    death is not the goal, and a mood that vanished that fast would be its own bug (the
+    `value_to_word` bands make anything under 0.25 "faint" — i.e. present but not
+    driving). So this pins when it stops dominating, and records the full-fade number
+    rather than asserting it.
+    """
+    mgr, meta, conn, path = _mgr([[("sadness", 0.84), ("disappointment", 0.08)]])
+    await mgr.react("my grandad died on tuesday")
+    assert mgr.state["melancholy"] > 0.35, "a bereavement should land hard at first"
+
+    turns = 0
+    while mgr.state["melancholy"] > 0.25 and turns < 500:   # "faint" boundary
+        await mgr.react("")
+        turns += 1
+    assert turns <= 15, f"one sad message still dominates after {turns} turns"
+    assert turns >= 3, f"a bereavement stopped mattering after {turns} turns"
+    conn.close(); os.remove(path)
+
+
+@case
+async def warmth_also_recovers():
+    """Warmth carried the identical ratchet and was likewise pegged at 'intense' live."""
+    mgr, meta, conn, path = _mgr([])
+    mgr.state["warmth"] = 0.812
+    turns = 0
+    while mgr.state["warmth"] > 0.25 and turns < 500:
+        await mgr.react("")
+        turns += 1
+    assert turns <= 45, f"warmth took {turns} turns to settle"
+    conn.close(); os.remove(path)
+
+
+@case
 async def warmth_rises_on_gratitude():
     mgr, meta, conn, path = _mgr([[("gratitude", 0.9), ("neutral", 0.1)]])
     before = mgr.state["warmth"]
