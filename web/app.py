@@ -181,6 +181,7 @@ async def status(c: Live) -> dict:
         "mood": ({ch: round(mood[ch], 3) for ch in CHANNELS} if mood else None),
         "drives": ({d: round(v, 3) for d, v in drives.items()} if drives else None),
         "memory": c.memory_snapshot(),
+        "archive": c.archive_stats(),   # survives factory reset
         "persona": c.meta.get(PERSONA_SELF_KEY) or "",
         "self_notes": c.meta.get(SELF_NOTES_KEY) or "",
         "thoughts": c.thoughts.recent(8) if c.thoughts else [],

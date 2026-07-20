@@ -66,7 +66,35 @@ class ConversationStore(Protocol):
         ...
 
     def clear(self) -> None:
-        """Delete every conversation and message (the full-reset admin op)."""
+        """Delete every conversation and message (the full-reset admin op).
+
+        Must NOT clear the permanent archive below.
+        """
+        ...
+
+    # --- the permanent record (never cleared) ---
+    def begin_new_era(self) -> int:
+        """Mark a discontinuity in the archive (a factory reset); return the new era."""
+        ...
+
+    def current_era(self) -> int:
+        """Which era new messages are filed under."""
+        ...
+
+    def archive_count(self) -> int:
+        """Total messages ever recorded, across every era."""
+        ...
+
+    def archive_eras(self) -> list[dict]:
+        """One row per era: {era, messages, started, ended}."""
+        ...
+
+    def archived_messages(self, limit: int, era: int | None = None) -> list[dict]:
+        """Most recent archived messages, newest first; optionally one era only."""
+        ...
+
+    def search_archive(self, query: str, limit: int) -> list[dict]:
+        """Keyword search across every era, including wiped conversations."""
         ...
 
 

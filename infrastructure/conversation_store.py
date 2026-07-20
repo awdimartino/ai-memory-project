@@ -79,21 +79,121 @@ class SqliteConversationStore(SqliteStore):
         return [r["content"] for r in rows]
 
     def clear(self) -> None:
-        """Delete every conversation, message and self-note revision (full reset)."""
+        """Delete every conversation and message (full reset).
+
+        Does NOT touch `message_archive`. That is the point of the archive: the
+        working state can be wiped as often as testing needs without destroying the
+        record of what was actually said.
+        """
         with self._lock:
             self.conn.execute("DELETE FROM messages")
             self.conn.execute("DELETE FROM sessions")
             self.conn.commit()
 
     def add_message(self, session_id: int, role: str, content: str) -> int:
+        """Append to the working log AND to the permanent archive, in one transaction.
+
+        Both writes happen together so the archive can never miss a message that the
+        working log has: they are the same commit, under the same lock.
+        """
+        now = utcnow()
         with self._lock:
             cur = self.conn.execute(
                 "INSERT INTO messages (session_id, role, content, created_at) "
                 "VALUES (?, ?, ?, ?)",
-                (session_id, role, content, utcnow()),
+                (session_id, role, content, now),
+            )
+            title = self.conn.execute(
+                "SELECT title FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            self.conn.execute(
+                "INSERT INTO message_archive "
+                "(era, session_id, session_title, role, content, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (self._era_locked(), session_id, title["title"] if title else None,
+                 role, content, now),
             )
             self.conn.commit()
             return cur.lastrowid
+
+    # --- the permanent record -------------------------------------------------
+    # `messages` is the working log and a factory reset wipes it. This never gets
+    # wiped by any admin operation. Testing needs a clean slate often; the record of
+    # what was actually said should outlive that.
+
+    def _era_locked(self) -> int:
+        """Current archive era. Caller must already hold the lock."""
+        row = self.conn.execute(
+            "SELECT COALESCE(MAX(era), 1) FROM message_archive").fetchone()
+        return row[0]
+
+    def current_era(self) -> int:
+        """Which era new messages are being filed under."""
+        with self._lock:
+            return self._era_locked()
+
+    def begin_new_era(self) -> int:
+        """Mark a discontinuity (a factory reset). Returns the new era number.
+
+        Stored in the archive itself rather than the meta table, because meta is one
+        of the things a reset clears -- an era counter that resets with the thing it
+        is counting would be useless.
+        """
+        with self._lock:
+            era = self._era_locked() + 1
+            # Nothing to write yet; the next archived message carries the new era.
+            self.conn.execute(
+                "INSERT INTO message_archive "
+                "(era, session_id, session_title, role, content, created_at) "
+                "VALUES (?, NULL, NULL, 'system', ?, ?)",
+                (era, "-- memory cleared; everything below is a fresh start --", utcnow()),
+            )
+            self.conn.commit()
+            return era
+
+    def archive_count(self) -> int:
+        """Total messages ever recorded, across every era."""
+        return self.conn.execute("SELECT COUNT(*) FROM message_archive").fetchone()[0]
+
+    def archive_eras(self) -> list[dict]:
+        """One row per era: how much was said, and when it ran."""
+        rows = self.conn.execute(
+            "SELECT era, COUNT(*) AS n, MIN(created_at) AS started, MAX(created_at) AS ended "
+            "FROM message_archive GROUP BY era ORDER BY era").fetchall()
+        return [{"era": r["era"], "messages": r["n"],
+                 "started": r["started"], "ended": r["ended"]} for r in rows]
+
+    def archived_messages(self, limit: int, era: int | None = None) -> list[dict]:
+        """Most recent archived messages, newest first; optionally one era only."""
+        sql = ("SELECT era, session_id, session_title, role, content, created_at "
+               "FROM message_archive")
+        params: tuple = ()
+        if era is not None:
+            sql += " WHERE era = ?"
+            params = (era,)
+        sql += " ORDER BY id DESC LIMIT ?"
+        rows = self.conn.execute(sql, (*params, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def search_archive(self, query: str, limit: int) -> list[dict]:
+        """Keyword search across EVERY era, including conversations since wiped.
+
+        Same word-tokenized ranking as search_messages, but over the permanent
+        record. Not wired into `reminisce` by default -- see REMINISCE_INCLUDE_ARCHIVE.
+        """
+        words = [w for w in re.findall(r"[\w']+", query.lower()) if len(w) > 2]
+        if not words:
+            return []
+        rows = self.conn.execute(
+            "SELECT era, session_title, role, content, created_at FROM message_archive "
+            "WHERE role != 'system' ORDER BY id DESC LIMIT 4000").fetchall()
+        scored = []
+        for r in rows:
+            low = r["content"].lower()
+            hits = sum(1 for w in words if w in low)
+            if hits:
+                scored.append((hits, dict(r)))
+        scored.sort(key=lambda t: -t[0])
+        return [d for _, d in scored[:limit]]
 
     def recent_messages(self, limit: int) -> list[dict]:
         rows = self.conn.execute(

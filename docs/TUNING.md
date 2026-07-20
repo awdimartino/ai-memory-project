@@ -193,6 +193,30 @@ sessions. Its real payoff is as the gate for a future self-wake.
 
 ---
 
+## I need to wipe her for testing, but keep the conversations
+
+You can. **A factory reset does not destroy conversation history.**
+
+| Operation | Wipes | Keeps |
+|---|---|---|
+| `POST /memory/clear` | semantic memories | conversations, mood, persona, thoughts |
+| `POST /admin/factory_reset` | memories, working log, sessions, thoughts, intentions, all meta | **`message_archive` — every message ever** |
+
+Every message is written to both the working log and an append-only archive in the same
+transaction. Clearing touches only the working log. Each reset opens a new `era`, so the record
+shows where the discontinuity was.
+
+```bash
+python -c "import sys;sys.path.insert(0,'.');from infrastructure.db import connect;from infrastructure.conversation_store import SqliteConversationStore as S;print(S(connect('companion.db')).archive_eras())"
+```
+
+`GET /status` reports `archive.total` and a row per era. Nothing reads the archive back into her
+context yet — that's deliberate, since recalling pre-reset conversations immediately after a reset
+would defeat the point of resetting.
+
+⚠️ **Backup note:** the DB runs in WAL mode. Copying `companion.db` alone can miss recent commits
+still in `companion.db-wal` — copy all three files, or run `PRAGMA wal_checkpoint(TRUNCATE)` first.
+
 ## Things that are NOT knobs
 
 Worth knowing so you don't go looking:

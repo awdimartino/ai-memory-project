@@ -201,8 +201,13 @@ async def upgrade_seeds_watermark_to_max_message_id():
         # v3 schema doesn't have yet (it arrives in v7); we're simulating an old DB.
         conn.execute("INSERT INTO sessions (started_at) VALUES ('t')")
         conn.commit()
+        # Raw SQL for the same reason as the session above: add_message() writes to
+        # message_archive, which doesn't exist until v10. We're simulating a v3 DB.
         for i in range(5):
-            conv.add_message(1, "user", f"m{i}")   # ids 1..5
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content, created_at) "
+                "VALUES (1, 'user', ?, 't')", (f"m{i}",))   # ids 1..5
+        conn.commit()
         conn.close()
 
         db.MIGRATIONS = original               # v4 now available

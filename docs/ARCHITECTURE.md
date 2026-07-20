@@ -72,9 +72,25 @@ Three tiers, deliberately separate:
 
 | Tier | Table | What it is | Read by |
 |---|---|---|---|
-| **Episodic** | `messages` | Every message, verbatim, forever | `reminisce` tool, consolidation |
+| **Episodic** | `messages` | The **working** log — what she operates on | `reminisce`, consolidation |
 | **Semantic** | `memories` | Distilled embedded facts | autonomic recall, every turn |
 | **Core** | `memories.core` | Identity facts | injected directly, not searched |
+| **Archive** | `message_archive` | Every message ever, **append-only** | nothing yet, by design |
+
+**The archive is the one thing no admin operation clears.** `messages` is working state and a
+factory reset wipes it — which is necessary, because testing needs a clean slate often. The
+archive is the record of what was actually said, and losing that to a test reset would be
+unrecoverable. It's deliberately FK-free and denormalized (sessions get deleted; an archive that
+breaks when its parent row goes is not an archive).
+
+An `era` column increments on each factory reset, so a future look-back can tell that a
+discontinuity happened rather than reading across it as one continuous relationship — which
+matters, since identity discontinuity is the best-documented way to damage this kind of
+relationship (HANDOFF §H). The counter lives in the archive itself, not `meta`, because `meta` is
+one of the things a reset clears.
+
+Nothing reads it yet, on purpose: searching pre-reset conversations right after a reset would
+defeat the reset. `Companion.search_archive()` and `archive_stats()` exist for when that changes.
 
 **The episodic log is the most valuable thing here, and nothing ever deletes from it.** Research
 in 2025–26 repeatedly found that LLM-driven consolidation degrades memory *below* a raw-episode

@@ -158,6 +158,36 @@ MIGRATIONS = [
         created_at TEXT NOT NULL
     );
     """,
+    # v10 — the permanent record.
+    #
+    # `messages` is the WORKING log: what she operates on, and what a factory reset
+    # wipes. This is the ARCHIVE: every message ever, append-only, never cleared by
+    # any admin operation. Testing needs a clean slate often; the record of what was
+    # actually said should outlive that.
+    #
+    # Deliberately denormalized and FK-free — sessions get deleted, and an archive
+    # that breaks when its parent row goes is not an archive. `era` increments on
+    # each factory reset, so a future look-back can tell that a discontinuity
+    # happened rather than reading across it as one continuous relationship.
+    #
+    # Seeded from the current messages table so nothing already on disk is lost.
+    """
+    CREATE TABLE message_archive (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        era           INTEGER NOT NULL DEFAULT 1,
+        session_id    INTEGER,
+        session_title TEXT,
+        role          TEXT NOT NULL,
+        content       TEXT NOT NULL,
+        created_at    TEXT NOT NULL
+    );
+    CREATE INDEX idx_archive_era ON message_archive(era);
+    CREATE INDEX idx_archive_session ON message_archive(era, session_id);
+    INSERT INTO message_archive (era, session_id, session_title, role, content, created_at)
+        SELECT 1, m.session_id, s.title, m.role, m.content, m.created_at
+        FROM messages m LEFT JOIN sessions s ON s.id = m.session_id
+        ORDER BY m.id;
+    """,
 ]
 
 

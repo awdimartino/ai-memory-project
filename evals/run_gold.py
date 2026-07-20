@@ -203,9 +203,22 @@ async def run_case(case, cache):
                           ("stores", "not_stores", "stores_core", "retires",
                            "not_retires", "no_new_memory"))
         if needs_store:
-            await comp.flush()
-            for _ in range(300):
+            # send() may ALREADY have spawned a background consolidation via
+            # create_task, which drains the buffer. Waiting naively then means
+            # flush() finds nothing and we score an empty store before the real
+            # pass has even acquired the lock. So: let any spawned task start,
+            # wait it out, flush whatever is left, and wait again.
+            for _ in range(20):
+                await asyncio.sleep(0.05)      # give create_task a chance to run
+                if comp._consol_lock.locked():
+                    break
+            for _ in range(600):
                 if not comp._consol_lock.locked():
+                    break
+                await asyncio.sleep(0.1)
+            await comp.flush()
+            for _ in range(600):
+                if not comp._consol_lock.locked() and not comp._unconsolidated:
                     break
                 await asyncio.sleep(0.1)
         memories = [{"content": m["content"], "active": m["active"], "core": m["core"]}

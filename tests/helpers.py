@@ -96,6 +96,10 @@ class FakeMemory:
     def mark_injected(self, memory_ids, turn):
         self.injected.append((list(memory_ids), turn))
 
+    def clear(self) -> int:
+        """Admin wipe. Returns how many were removed (always 0 — it holds nothing)."""
+        return 0
+
 
 class FakeConv:
     """Conversation store that hands out incrementing ids and forgets everything."""
@@ -146,6 +150,10 @@ class InMemoryMeta:
 
     def set_json(self, k, v):
         self.data[k] = v
+
+    def clear(self):
+        """Wipe every key — mood, drives, persona, watermark, cooldowns."""
+        self.data.clear()
 
 
 class FakeClassifier:

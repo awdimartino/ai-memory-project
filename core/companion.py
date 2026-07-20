@@ -704,6 +704,16 @@ class Companion:
         """Delete a conversation thread and its messages (memory/mood/persona are global)."""
         self.store.delete_session(session_id)
 
+    def archive_stats(self) -> dict:
+        """The permanent record: total messages and a row per era (survives resets)."""
+        return {"total": self.store.archive_count(),
+                "eras": self.store.archive_eras(),
+                "current_era": self.store.current_era()}
+
+    def search_archive(self, query: str, limit: int = 10) -> list[dict]:
+        """Keyword search every conversation ever, including pre-reset ones."""
+        return self.store.search_archive(query, limit)
+
     def list_conversations(self) -> list[dict]:
         """All conversation threads, for the sidebar."""
         return self.store.list_conversations()
@@ -720,12 +730,21 @@ class Companion:
         return n
 
     async def factory_reset(self) -> None:
-        """Admin: wipe EVERYTHING back to a factory-fresh companion — memories,
-        conversations, private thoughts, and all persisted scalar state (mood, drives,
-        persona, consolidation watermark, reach-out/reflect cooldowns) — then start a
-        fresh conversation. In-memory state is reset to match so no reload is required."""
-        self.memory.store.clear()
-        self.store.clear()                       # messages + sessions
+        """Admin: wipe her back to factory-fresh — memories, working conversation log,
+        private thoughts, intentions, and all persisted scalar state (mood, drives,
+        persona, watermark, cooldowns) — then start a fresh conversation. In-memory
+        state is reset to match, so no reload is needed.
+
+        **The message archive is NOT wiped.** Every message ever said is kept in
+        `message_archive`, which no admin operation clears — so the working state can
+        be reset as often as testing needs without losing the record.
+        """
+        # The archive survives on purpose: this wipes what she WORKS on, not the
+        # record of what was said. begin_new_era marks the discontinuity so a future
+        # look-back doesn't read across it as one continuous relationship.
+        self.store.begin_new_era()
+        self.memory.clear()                      # via the manager, not through it
+        self.store.clear()                       # messages + sessions (NOT the archive)
         if self.thoughts is not None:
             self.thoughts.clear()
         if self.intentions is not None:
