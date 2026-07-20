@@ -760,6 +760,38 @@ data were verified offline (a real `send()` through a stubbed model, plus a scra
 :8099), but nobody has opened the tab. Take a look before trusting the layout, especially on mobile.
 Recording is in-memory only — no schema change, and it resets on restart.
 
+### ▶ START HERE (fresh session, written 2026-07-20 end of a long working session)
+
+**Everything is committed; the tree is clean.** Nine commits today, `620ff49` → `3e6cf4f`.
+
+**1. A gold run was IN FLIGHT when this was written — read its result first.**
+```bash
+cat evals/results/v2.6.json          # if this exists, the run finished
+python evals/flaky.py v2.4 v2.6      # v2.6 is the duplicate-guard fix
+```
+- **Compare against v2.4 (117/120), NOT v2.5.** v2.5 was a deliberate experiment that
+  regressed 10 points and was reverted — see the ❌ section below.
+- What it should show: `life-refinement` finally passing (`lifecycle` 5/5). Watch that nothing
+  else moved; the guard only changes what happens on a `duplicate` verdict.
+- If `v2.6.json` does **not** exist, the run died. Re-run:
+  `python evals/run_gold.py --version v2.6 --compare v2.4` (~15 min).
+
+**2. The web server is STOPPED.** It was stopped for the eval and never restarted:
+`python -m web.app`.
+
+**3. Then pick up from "What's actually next" below.**
+
+**Ground rules learned the hard way today — all four cost real time:**
+- **Measure before believing.** Two instruments were wrong in one afternoon (bare-cosine applied
+  to key-expanded vectors; lexical overlap for duplicates). Both were plausible; both measured
+  badly and were caught only by running them.
+- **Run `evals/flaky.py` before attributing any gold move.** Three cases flip both ways and mean
+  nothing.
+- **Run the FULL gold set, never `--only <category>`.** `one_sentence` is asserted across nine
+  categories; a change can lose 8 cases while `format` still reads 5/5.
+- **Keep the working tree runnable.** The user runs Mari live off it; a half-finished edit is a
+  real outage (it happened twice today).
+
 ### ✅ MEASURED 2026-07-20: familiarity fix shipped. **v2.4 is the baseline: 117/120 (98%).**
 
 The base persona no longer tells her she "just met" someone she's talked to for months —
@@ -812,6 +844,37 @@ Two lessons worth more than the experiment:
 
 **Cut B (merging the two embodiment blocks, 2135 chars) is DROPPED** by decision, and this result
 supports that: the same reasoning would have predicted it safe.
+
+### 🧭 What's actually next (2026-07-20, in recommended order)
+
+**A. The measurement blind spot — 16 of 138 cases have NEVER been scored.** They're `manual`
+(`review` in every run) and they include all four `stale-*` premise cases, which the gold set
+itself calls *"the worst failure a companion has"* and which are marked KNOWN GAP. We have been
+optimising what we can see. Reading those 16 replies is a human job (an hour, maybe), and it's the
+only way to know whether the last several changes helped or hurt where it matters most.
+
+**B. Premise resistance (§B) — the biggest real product gap.** She accepts a stale premise: asked
+*"how's the welding going?"* after he said he quit, she plays along. Blocked on A for measurement,
+but the roadmap already names the mechanism (staleness adjudication + bitemporal columns).
+
+**C. `rem-remember-when` — the last standing automatic failure.** Tool routing; the documented
+unblocked lever is **prong A, per-call temperature** in `llm_client.py` (cool the tool decision to
+~0.2, keep the answer warm at 0.8). Measured 0/4 at 0.8 vs 2/4 at 0.2, so it's a partial fix, not
+a cure. ⚠️ Note the v2.5 experiment made this pass *by making tool-firing trigger-happy* and broke
+`notool-feeling` in exchange — a fix here must not just move the threshold.
+
+**D. Make the eval cheap (the leverage item, ~1 hour).** A full run is ~15 min and everything is
+gated on it; four runs happened today. Two pieces: (1) **run cases concurrently** — they're
+already independent (fresh DB each), and LM Studio demonstrably serves ~4 in parallel (it did so
+accidentally today, because `run_gold` builds a fresh `Companion` and therefore a fresh
+`LLMClient`, whose lock is per-instance, so backgrounded consolidation overlapped the next case);
+(2) **cache the emotion classifier across cases** — RoBERTa is currently reloaded for all 138.
+Worth doing before any experiment that needs repeats to beat the noise.
+
+**E. Roadmap proper:** A3 nightly consolidation, §B memory depth. See §8.
+
+**Explicitly DROPPED, don't revive without new evidence:** cut B (merging the two embodiment
+blocks). Same reasoning as the v2.5 format dedup, which lost 10 points.
 
 ### 📏 Read `evals/flaky.py` BEFORE attributing any gold-set move
 
