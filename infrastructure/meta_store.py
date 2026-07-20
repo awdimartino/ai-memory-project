@@ -9,14 +9,11 @@ shared across asyncio's threadpool.
 """
 import json
 import sqlite3
-import threading
+
+from infrastructure.db import SqliteStore, utcnow
 
 
-class SqliteMetaStore:
-    def __init__(self, conn: sqlite3.Connection):
-        self.conn = conn
-        self._lock = threading.Lock()
-
+class SqliteMetaStore(SqliteStore):
     def get(self, key: str) -> str | None:
         row = self.conn.execute(
             "SELECT value FROM meta WHERE key = ?", (key,)

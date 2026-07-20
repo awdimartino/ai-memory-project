@@ -6,23 +6,16 @@ asyncio's threadpool.
 """
 import re
 import sqlite3
-import threading
+
+from infrastructure.db import SqliteStore, utcnow
 from datetime import datetime, timezone
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class SqliteConversationStore:
-    def __init__(self, conn: sqlite3.Connection):
-        self.conn = conn
-        self._lock = threading.Lock()
-
+class SqliteConversationStore(SqliteStore):
     def create_session(self, title: str | None = None) -> int:
         with self._lock:
             cur = self.conn.execute(
-                "INSERT INTO sessions (started_at, title) VALUES (?, ?)", (_utcnow(), title)
+                "INSERT INTO sessions (started_at, title) VALUES (?, ?)", (utcnow(), title)
             )
             self.conn.commit()
             return cur.lastrowid
@@ -86,7 +79,7 @@ class SqliteConversationStore:
             cur = self.conn.execute(
                 "INSERT INTO messages (session_id, role, content, created_at) "
                 "VALUES (?, ?, ?, ?)",
-                (session_id, role, content, _utcnow()),
+                (session_id, role, content, utcnow()),
             )
             self.conn.commit()
             return cur.lastrowid

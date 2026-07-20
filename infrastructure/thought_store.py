@@ -6,24 +6,17 @@ recall. Pure persistence. A lock serializes writes since the connection is share
 across asyncio's threadpool.
 """
 import sqlite3
-import threading
+
+from infrastructure.db import SqliteStore, utcnow
 from datetime import datetime, timezone
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class SqliteThoughtStore:
-    def __init__(self, conn: sqlite3.Connection):
-        self.conn = conn
-        self._lock = threading.Lock()
-
+class SqliteThoughtStore(SqliteStore):
     def add(self, content: str, mood: str | None) -> int:
         with self._lock:
             cur = self.conn.execute(
                 "INSERT INTO thoughts (content, mood, created_at) VALUES (?, ?, ?)",
-                (content, mood, _utcnow()),
+                (content, mood, utcnow()),
             )
             self.conn.commit()
             return cur.lastrowid

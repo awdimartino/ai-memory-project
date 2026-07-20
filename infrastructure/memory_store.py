@@ -5,26 +5,19 @@ MemoryManager (brute-force numpy KNN, which the v1 retrospective confirmed is
 plenty fast at personal scale). This store is pure persistence.
 """
 import sqlite3
-import threading
+
+from infrastructure.db import SqliteStore, utcnow
 from datetime import datetime, timezone
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class SqliteMemoryStore:
-    def __init__(self, conn: sqlite3.Connection):
-        self.conn = conn
-        self._lock = threading.Lock()
-
+class SqliteMemoryStore(SqliteStore):
     def add(self, content: str, category: str | None, embedding: bytes,
             source_session: int | None, core: bool = False) -> int:
         with self._lock:
             cur = self.conn.execute(
                 "INSERT INTO memories (content, category, embedding, created_at, source_session, core) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (content, category, embedding, _utcnow(), source_session, 1 if core else 0),
+                (content, category, embedding, utcnow(), source_session, 1 if core else 0),
             )
             self.conn.commit()
             return cur.lastrowid

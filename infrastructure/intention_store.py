@@ -8,24 +8,17 @@ thoughts (private reflections). Pure persistence; a lock serializes writes on th
 shared connection.
 """
 import sqlite3
-import threading
+
+from infrastructure.db import SqliteStore, utcnow
 from datetime import datetime, timezone
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class SqliteIntentionStore:
-    def __init__(self, conn: sqlite3.Connection):
-        self.conn = conn
-        self._lock = threading.Lock()
-
+class SqliteIntentionStore(SqliteStore):
     def add(self, content: str) -> int:
         with self._lock:
             cur = self.conn.execute(
                 "INSERT INTO intentions (content, created_at) VALUES (?, ?)",
-                (content, _utcnow()),
+                (content, utcnow()),
             )
             self.conn.commit()
             return cur.lastrowid
@@ -45,7 +38,7 @@ class SqliteIntentionStore:
         with self._lock:
             self.conn.execute(
                 "UPDATE intentions SET active = 0, fulfilled_at = ? WHERE id = ?",
-                (_utcnow(), intention_id),
+                (utcnow(), intention_id),
             )
             self.conn.commit()
 
