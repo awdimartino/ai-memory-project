@@ -733,6 +733,66 @@ back ON, and the test runner crashing on unicode when reporting a failure.
 - **Push now fires whenever the chat isn't in front of you** (user request) — closed, backgrounded,
   or no tab at all. Follow-ups push too.
 
+### ▶ START HERE: fix recall (the next task, specified to start cold)
+
+**The problem, measured 2026-07-20.** Seed six facts, ask six plain questions. The correct fact is
+the **top hit every single time**; the 0.55 similarity floor throws it away anyway.
+
+| query | top hit | sim | |
+|---|---|---|---|
+| "do I have any pets?" | correct | 0.614 | kept |
+| "I should call my sister" | correct | 0.644 | kept |
+| "how's the guitar going?" | correct | 0.613 | kept |
+| "what do I do for work again?" | correct | **0.525** | **rejected** |
+| "remind me where I live" | correct | **0.527** | **rejected** |
+| "I should probably take the dog out later" | correct | **0.540** | **rejected** |
+| "I'm so excited, do I have any pets?" | correct | **0.516** | **rejected** |
+
+Misses cluster **0.516–0.544**, keeps cluster **0.588–0.644**, and the floor sits in the gap. This
+is not a ranking problem and not really "phrasing sensitivity" — it is a hard cutoff discarding
+correct top-1 results, in the subsystem the entire project is built on.
+
+**Where the code is.** `core/memory_manager.py`:
+
+- `_corpus()` — loads active memories once, returns rows + the L2-normalised matrix
+- **`_rank(vec, mems, mn, top_k, min_sim)` — the cutoff lives here**, in the final
+  `if sims[i] >= min_sim`. This one line is what you're changing.
+- `_search()` — one query (loads the corpus, then ranks)
+- `recall()` — the public entry, called every turn from `Companion.send()`
+
+**⚠️ Do NOT just lower `RECALL_MIN_SIMILARITY` to 0.50.** The docs record unrelated pairs at
+~0.50 on nomic, so that trades silent misses for silent confabulation — the worse failure. ~0.545
+would catch most of these but sits inside the noise band and will be fragile.
+
+**Approaches, cheapest first:**
+1. **Relative margin.** Accept the top hit when it beats the runner-up by a clear margin,
+   regardless of absolute score — plus a low absolute floor (~0.45) as a backstop. Directly
+   matches the observed failure: correct top-1, low absolute score. Maybe 10 lines.
+2. **Hybrid BM25 + vector.** Use a **tuned convex combination, not RRF** — RRF discards score
+   magnitude, which is the signal needed to say "I don't think you've told me that". Run BM25 over
+   the **episodic log**, not the distilled facts; vocabulary mismatch is worst on short documents.
+   SQLite FTS5 is free here.
+3. **A reranker** over a generous top-k. Most expensive. Do 1 and 2 first, and note cross-encoders
+   degrade around K≈1000, which is this corpus size.
+
+**How you'll know it worked — the gold set already has both halves of this.**
+
+```bash
+python evals/run_gold.py --version v2.3 --compare v2.2 --only recall,no-tool,coherence
+```
+
+*Should start passing:* `recall-pet-indirect`, `recall-job`, `recall-place`, `recall-two-facts`,
+and the known gap `recall-pet-excited` (which would report as `++ fixed!`).
+
+*Must KEEP passing — these are the false-positive guards, and they are the whole risk of this
+change:* `recall-none-unrelated`, `recall-none-empty-store`, `recall2-no-false-positive`.
+
+Then run the full set and compare. Remember the eval is stochastic: three runs of unchanged code
+scored 104 / 107 / 106. A category-level move is real; one case flipping is not.
+
+**Before you start:** `python tests/run_all.py` should be 18 files / 267 checks green, and the web
+server should be stopped before any live script (two processes on one model has crashed LM Studio).
+
 ### Also done 2026-07-20
 - **The gold set exists and v2.2 is the frozen baseline: 106/117 automatic (91%),** 2 known gaps
   still failing, 1 newly fixed, 15 awaiting a human read. 135 cases / 22 categories in
