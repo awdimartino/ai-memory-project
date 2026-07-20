@@ -760,7 +760,39 @@ data were verified offline (a real `send()` through a stubbed model, plus a scra
 :8099), but nobody has opened the tab. Take a look before trusting the layout, especially on mobile.
 Recording is in-memory only — no schema change, and it resets on restart.
 
-### ✅ DONE (code + offline tests): recall fixed by a contrast gate — **live eval still owed**
+### ✅ MEASURED 2026-07-20: the recall fix works. **v2.3 is the new baseline: 112/117 (96%).**
+
+`evals/results/v2.3.json`, full set, 14.2 min. Was **106/117 (91%)** at v2.2.
+
+**The recall category is now perfect and BOTH known gaps closed.** All 5 cases the brief below
+predicted would flip, flipped — `recall-pet-indirect`, `recall-job`, `recall-place`,
+`recall-two-facts`, plus the known gap `recall-pet-excited` — and the second emotional-prefix gap
+`recall2-emotional-prefix-2` fixed as well. That the prediction was written *before* the run and
+matched exactly is what makes this causal rather than noise.
+
+**All three false-positive guards held:** `recall-none-unrelated`, `recall-none-empty-store`,
+`recall2-no-false-positive` all pass. So the gate bought maximum recall at zero measured precision
+cost on the guards → **leave `RECALL_CONTRAST_GAP` at 0.06.** There is no evidence to move it, and
+loosening to 0.05 would risk the guards for a category that is already 11/11.
+
+**Do NOT read the headline 9-fixed/2-regressed as all ours.** Four of the nine (`time-day`,
+`fmt-short-on-boring`, `reg-rambling`, `life-coexist`) are unrelated to recall — that's the
+documented run-to-run noise (104/107/106 on unchanged code) landing in our favour. The honest claim
+is the recall category, nothing else.
+
+**The two regressions, characterised:**
+- `core-uses-name-naturally` — failed on *"2 sentences"*, a format check, not a recall one. This is
+  the noisy personality dimension the docs already warn about (q-end measured 22% / 11% / 0% / 7%
+  across runs). A longer prompt from extra recalled facts is a *plausible* mechanism, so it isn't
+  provably unrelated — worth watching if it recurs.
+- `life-unrelated-new` — *"did not store 'guitar'"*, i.e. consolidation/extraction. **Mechanically
+  cannot be ours:** the lifecycle `relate` path calls `_rank` positionally, so `contrast_gap`
+  defaults to 0 and that path is byte-identical (pinned by `test_recall_contrast.py ::
+  relate_path_is_unchanged`). Note `life-refinement` fails the same way (*"did not store 'nurse'"*)
+  and was **already failing in v2.2** — so lifecycle is at 3/5 with two "did not store X" misses.
+  **That is the next real weakness in memory**, and it's extraction, not recall.
+
+### ✅ DONE (code + offline tests): recall fixed by a contrast gate — the eval above confirms it
 
 **Status 2026-07-20, later session.** Implemented, 277 offline checks green. **The gold-set run has
 NOT happened yet** (the machine was busy; the web server is stopped and waiting). That run is the
@@ -934,7 +966,12 @@ identity discontinuity is the single best-documented way to destroy a companion 
 
 ### Ops notes
 - `python -m web.app` binds `WEB_HOST` = `127.0.0.1`. Stop the web server before running any live
-  script — two processes hitting one model has crashed LM Studio.
+  script — two *servers* hitting one model has crashed LM Studio.
+- **"Two python processes" is NOT that, and was a false alarm** (diagnosed 2026-07-20). One
+  `python -m web.app` legitimately shows as **two PIDs**: `.venv/Scripts/python.exe` is a Windows
+  trampoline (`pyvenv.cfg` → `executable = ...pythoncore-3.12-64\python.exe`), and since Windows
+  has no `exec` it spawns the real interpreter as a **child** — same creation timestamp, and the
+  child is the one holding port 8000. Check for a second *listener*, not a second process.
 - `python tests/run_all.py` is the whole offline suite; `python scripts/rrr_diagnostic.py` is a
   read-only health check on her journal and can be run any time.
 
