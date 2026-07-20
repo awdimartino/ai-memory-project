@@ -693,9 +693,34 @@ Verified in place: **864 chars reasoning, 6.7s, `bat_ball` 6/6** (matches the 83
   them.** Tool-calling especially: §7 blamed thinking-off for under-calling tools, so this may have
   *fixed* that for free. Worth `tool_eval.py`.
 
-**The budget sweep is UNFINISHED.** Measured: 256 -> 833c/6.5s/6-6, 512 -> 1500c/10.0s/6-6 (so the
-dial is causal, ~2x budget = ~1.8x reasoning). **512 buys nothing; 96-192 is untested and is where
-chat latency gets bought back.** If ~128 holds 6/6 that is ~4-5s chat with reasoning intact.
+**Budget sweep — now at 384.** Measured on `bat_ball`: 256 -> 833c/6.5s, 384 -> 1120c/8.1s,
+512 -> 1500c/10.0s, all 6/6. The dial is causal (~2x budget = ~1.8x reasoning).
+
+⚠️ **`bat_ball` OVERSTATES the latency cost of raising the budget, and the first analysis of this
+was wrong because of it.** It is a puzzle that maxes the budget on every single run. Real
+conversation does not: measured over 12 live generations at budget 256, **only 3/12 (25%) hit the
+cap** — the other 9 finished naturally at 390-680 chars and would be *completely unaffected* by a
+raise, because a turn cannot spend budget it does not use. So raising costs far less than the
+bat_ball numbers imply; it buys headroom for the quarter of turns that need it and changes nothing
+for the rest. **Truncation is directly measurable** — `LLAMA_ARG_THINK_BUDGET_MESSAGE` is a literal
+string appended on cutoff, so grep the inspector's reasoning for "thinking budget exceeded" rather
+than guessing.
+
+**⚠️ NEW TIC AT THINKING-ON: 47% of her replies open with "haha"** (era 1: 0%, era 2: 1%, era 3
+thinking-on: **17/36**). Two things make this interesting:
+- **The rule already exists and names the word.** `prompts.py` "How you talk" says *don't lean on
+  the same reactions ("haha", "honestly", the same opener)*. She breaks it every other message.
+  **Adding another rule will not work** — this is position-beats-volume: that rule sits near the top
+  of a 5285-char persona, while the two rules that ARE obeyed (one-sentence 0% violation, q-end 0%
+  violation) live in the closing reminder. The reminder is the only channel that holds, and it is a
+  scarce resource that already carries identity + format.
+- **It is not mood.** Amusement measured **0.001** while she says "haha" half the time — formulaic,
+  not felt. (Warmth is pegged at 0.907 = "overwhelming", which may contribute, but era 2 had 0.812
+  with 1% haha, so warmth alone does not explain it.)
+
+**✅ Good news at thinking-on: the §7 format rules SURVIVED.** Era 3 scored **0% multi-sentence and
+0% question-ending** across 36 messages. The worry that thinking would wreck personality did not
+materialise; it added one specific tic instead.
 
 **To revert to old production exactly:** put `{% set enable_thinking = false %}` back in the qwen
 template. Env vars can stay — they bound nothing when thinking is off.
