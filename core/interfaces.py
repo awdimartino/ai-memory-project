@@ -95,7 +95,7 @@ class MemoryStore(Protocol):
         """Replace a memory's text + embedding (the inspector's edit)."""
         ...
 
-    def deactivate(self, memory_id: int, superseded_by: int | None) -> None:
+    def deactivate(self, memory_id: int, superseded_by: int | None = None) -> None:
         """Soft-delete a memory, optionally linking the memory that replaced it."""
         ...
 
@@ -115,6 +115,14 @@ class MemoryStore(Protocol):
         """Number of active core memories."""
         ...
 
+    def count_superseded(self) -> int:
+        """Number of retired (soft-deleted) memories — the status panel's history count."""
+        ...
+
+    def superseded(self, limit: int) -> list[dict]:
+        """Up to `limit` most recently retired memories, for the inspector's history view."""
+        ...
+
 
 class ThoughtStore(Protocol):
     """Persistence for Mari's private thought journal (self-reflections)."""
@@ -125,6 +133,10 @@ class ThoughtStore(Protocol):
 
     def recent(self, limit: int) -> list[dict]:
         """Return up to `limit` most recent thoughts (newest first) as {content, mood, created_at}."""
+        ...
+
+    def count(self) -> int:
+        """Total number of thoughts written (surfaced in the status panel)."""
         ...
 
     def clear(self) -> None:
@@ -155,6 +167,14 @@ class IntentionStore(Protocol):
 
     def drop_older_than(self, cutoff_iso: str) -> int:
         """Retire active intentions created before `cutoff_iso`; return how many."""
+        ...
+
+    def all(self) -> list[dict]:
+        """Every intention (open + retired), for the status panel's agenda history."""
+        ...
+
+    def count_active(self) -> int:
+        """Number of open intentions (against which INTENTION_MAX_ACTIVE is enforced)."""
         ...
 
     def clear(self) -> None:

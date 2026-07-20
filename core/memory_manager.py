@@ -8,6 +8,7 @@ context window. Each extracted fact goes through a lifecycle decision against
 related existing memories: duplicate (skip), update (soft-delete the old, keep
 history), or new (insert).
 """
+import asyncio
 import logging
 
 import numpy as np
@@ -61,24 +62,42 @@ class MemoryManager:
         self.store.update_content(memory_id, content, vec.tobytes())
         logger.info("edited memory %d", memory_id)
 
-    def _search(self, vec: np.ndarray, top_k: int, min_sim: float) -> list[tuple[dict, float]]:
-        """Cosine KNN over active memories. Returns (memory, similarity), best first."""
-        mems = self.store.active()
+    async def _corpus(self) -> tuple[list[dict], np.ndarray | None]:
+        """Load active memories once as `(rows, L2-normalized matrix)`.
+
+        This is the expensive part of a search — a full table read pulling every
+        embedding blob, plus a stack and a normalize. Split out so a caller scoring
+        MANY vectors (consolidation) pays it once instead of per vector, and run off
+        the event loop since it's the one store read that isn't small.
+        """
+        mems = await asyncio.to_thread(self.store.active)
         if not mems:
-            return []
+            return [], None
         matrix = np.stack([_to_vec(m["embedding"]) for m in mems])
+        return mems, matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9)
+
+    @staticmethod
+    def _rank(vec: np.ndarray, mems: list[dict], mn: np.ndarray | None,
+              top_k: int, min_sim: float) -> list[tuple[dict, float]]:
+        """Cosine KNN of `vec` against a preloaded corpus. Returns (memory, sim), best first."""
+        if mn is None:
+            return []
         qn = vec / (np.linalg.norm(vec) + 1e-9)
-        mn = matrix / (np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9)
         sims = mn @ qn
         order = np.argsort(-sims)[:top_k]
         return [(mems[i], float(sims[i])) for i in order if sims[i] >= min_sim]
 
+    async def _search(self, vec: np.ndarray, top_k: int, min_sim: float) -> list[tuple[dict, float]]:
+        """Cosine KNN over active memories, loading the corpus for this one query."""
+        mems, mn = await self._corpus()
+        return self._rank(vec, mems, mn, top_k, min_sim)
+
     async def recall(self, text: str) -> list[tuple[str, float]]:
         """Return up to top_k relevant memories as (content, similarity), best first."""
-        if self.store.count() == 0:
-            return []
+        # No count() pre-check: _corpus already short-circuits on an empty store, and
+        # that guard cost an extra query on every single turn to learn nothing.
         qvec = np.asarray(await self.embedder.embed_query(text), dtype=np.float32)
-        hits = self._search(qvec, self.top_k, self.min_sim)
+        hits = await self._search(qvec, self.top_k, self.min_sim)
         if hits:
             logger.info("recall: %d hit(s), top sim %.3f", len(hits), hits[0][1])
         return [(m["content"], s) for m, s in hits]
@@ -131,8 +150,11 @@ class MemoryManager:
 
         # Relate each survivor to EXISTING memories (pre-batch state). Those with a related
         # memory need a lifecycle decision; the rest are straight inserts.
+        # ONE corpus load for all candidates — this used to re-read the whole memories
+        # table and rebuild the matrix once per candidate.
+        mems, mn = await self._corpus()
         for c in kept:
-            c["related"] = self._search(c["vec"], self.relate_top_k, self.relate_sim)
+            c["related"] = self._rank(c["vec"], mems, mn, self.relate_top_k, self.relate_sim)
         need = [c for c in kept if c["related"]]
         direct = [c for c in kept if not c["related"]]
 

@@ -20,9 +20,13 @@ def _chunk(content=None, tokens=None):
     if tokens is not None:
         return types.SimpleNamespace(usage=types.SimpleNamespace(completion_tokens=tokens),
                                      choices=[])
+    # `tool_calls` is always present on a real SDK delta (None when the model isn't
+    # calling a tool), so the fake carries it too — stream() shares one code path with
+    # the tool loop, and a fake without it models a contract the SDK doesn't have.
     return types.SimpleNamespace(usage=None,
                                  choices=[types.SimpleNamespace(
-                                     delta=types.SimpleNamespace(content=content))])
+                                     delta=types.SimpleNamespace(content=content,
+                                                                 tool_calls=None))])
 
 
 class FakeCompletions:

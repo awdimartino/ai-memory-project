@@ -161,8 +161,14 @@ def classify(fact: str, category: str) -> str:
 
 
 async def main() -> int:
+    # Must mirror bootstrap.build() exactly — this eval's whole job is to score the
+    # client production actually uses. It previously omitted the penalties and the
+    # retry count, so a green run said nothing about the real extraction path.
     llm = LLMClient(config.BASE_URL, config.API_KEY, config.MODEL, config.TEMPERATURE,
-                    no_think=config.NO_THINK)
+                    no_think=config.NO_THINK,
+                    frequency_penalty=config.FREQUENCY_PENALTY,
+                    presence_penalty=config.PRESENCE_PENALTY,
+                    max_retries=config.LLM_MAX_RETRIES)
     model = await llm.resolve_model()
     brain = config.BRAIN_MODEL or model
     print(f"extraction eval on {brain}\n" + "=" * 70)

@@ -74,99 +74,20 @@ class LLMClient:
     async def stream(self, messages, on_token: Callable[[str], Awaitable]):
         """Stream a reply, awaiting on_token(text) for each visible chunk.
 
-        Returns (full_text, stats) with ttft, tok_per_s, tokens, estimated. Retries
+        Returns (full_text, stats) with ttft, tok_per_s, tokens, estimated (plus an
+        always-empty `tools`, for one stats shape across both entry points). Retries
         transient failures, but only while nothing has been emitted yet.
+
+        This is `stream_with_tools`' single round with no tools attached — the same
+        call `stream_with_tools` already makes to force a plain answer when the tool
+        loop hits `max_iters`. Sharing it keeps the <think>-stripping state machine
+        and the retry-before-first-emit guard as ONE implementation; they were
+        previously duplicated here and in `_tool_step_once`, free to drift apart.
         """
-        prepped = self._prep(messages)
-        emitted = {"any": False}
-
-        async def guarded(t: str) -> None:
-            emitted["any"] = True
-            await on_token(t)
-
-        for attempt in range(self.max_retries + 1):
-            emitted["any"] = False
-            try:
-                return await self._stream_once(prepped, guarded)
-            except Exception as e:  # noqa: BLE001
-                if emitted["any"] or attempt >= self.max_retries or not _is_retryable(e):
-                    raise
-                logger.warning("chat generation failed (%s); retry %d/%d",
-                               e, attempt + 1, self.max_retries)
-                await asyncio.sleep(0.5 * (attempt + 1))
-
-    async def _stream_once(self, messages, on_token: Callable[[str], Awaitable]):
-        raw = ""
-        visible_started = False
-        first_token_at = None
-        completion_tokens = None
-
-        async with self._model_lock:
-            start = time.perf_counter()
-            stream = await self.client.chat.completions.create(
-                model=self.model,
-                temperature=self.temperature,
-                frequency_penalty=self.frequency_penalty,
-                presence_penalty=self.presence_penalty,
-                messages=messages,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
-
-            async for chunk in stream:
-                if getattr(chunk, "usage", None):
-                    completion_tokens = chunk.usage.completion_tokens
-                if not (chunk.choices and chunk.choices[0].delta.content is not None):
-                    continue
-
-                delta = chunk.choices[0].delta.content
-                raw += delta
-
-                if visible_started:
-                    await on_token(delta)
-                    continue
-
-                stripped = raw.lstrip()
-                if not stripped:
-                    continue
-                if stripped.startswith(_THINK_OPEN):
-                    # Inside a reasoning block; wait for it to close, then emit the rest.
-                    if "</think>" in raw:
-                        visible_started = True
-                        first_token_at = time.perf_counter()
-                        rest = raw.split("</think>", 1)[1].lstrip()
-                        if rest:
-                            await on_token(rest)
-                elif _THINK_OPEN.startswith(stripped):
-                    # Still could become "<think>" (e.g. "<", "<th"); keep buffering.
-                    continue
-                else:
-                    # Definitely not a reasoning block; flush what we have.
-                    visible_started = True
-                    first_token_at = time.perf_counter()
-                    await on_token(raw)
-
-            end = time.perf_counter()
-
-        text = _THINK_BLOCK.sub("", raw).strip()
-
-        # Flush anything still buffered (short replies that never tripped the checks
-        # above, or a reply that ended while still ambiguous).
-        if not visible_started and text:
-            first_token_at = first_token_at or end
-            await on_token(text)
-
-        ft = first_token_at or end
-        gen_time = max(end - ft, 1e-6)
-        estimated = completion_tokens is None
-        tokens = completion_tokens if completion_tokens else max(1, round(len(text) / 4))
-        stats = {
-            "ttft": ft - start,
-            "tok_per_s": tokens / gen_time,
-            "tokens": tokens,
-            "estimated": estimated,
-        }
-        return text, stats
+        start = time.perf_counter()
+        text, _calls, tokens, first_at = await self._tool_step(
+            self._prep(messages), on_token, None)
+        return text, self._tool_stats(start, first_at, tokens or 0, text, [])
 
     # ---- native tool-calling (pillar 4) --------------------------------------
     # LM Studio streams tool calls as deltas (finish_reason="tool_calls", empty
@@ -289,7 +210,9 @@ class LLMClient:
                     continue
                 delta = chunk.choices[0].delta
 
-                for tc in (delta.tool_calls or []):  # names arrive whole, arguments streamed
+                # getattr: LM Studio is the server and its delta shape has varied;
+                # a missing key must not crash a plain no-tool reply.
+                for tc in (getattr(delta, "tool_calls", None) or []):  # names whole, args streamed
                     slot = tool_frags.setdefault(tc.index, {"id": None, "name": "", "args": ""})
                     if tc.id:
                         slot["id"] = tc.id
