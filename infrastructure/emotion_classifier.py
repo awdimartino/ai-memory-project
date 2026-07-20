@@ -13,11 +13,35 @@ downloads it on first use), so build it once at startup and off the event loop.
 """
 import logging
 import os
+import threading
 
 logger = logging.getLogger(__name__)
 
 # Keep tokenizers quiet and single-threaded-friendly under the async runtime.
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+_CACHE: dict[tuple[str, int], "EmotionClassifier"] = {}
+_CACHE_LOCK = threading.Lock()
+
+
+def get_classifier(model_name: str, device: int = -1) -> "EmotionClassifier":
+    """A process-wide shared classifier, loading it at most once per (model, device).
+
+    Construction is the expensive part (~seconds of torch/transformers work); inference
+    is milliseconds. The app builds one companion and never noticed, but the gold-set
+    runner builds a fresh companion PER CASE and so reloaded RoBERTa 138 times per run,
+    for no behavioural difference — the pipeline is stateless across `classify` calls.
+
+    Sharing one instance across threads is what makes that safe to do concurrently, so
+    `classify` takes a lock (see below). Call the class directly if you genuinely want
+    an isolated instance.
+    """
+    key = (model_name, device)
+    with _CACHE_LOCK:                      # so two builds can't both pay the load
+        hit = _CACHE.get(key)
+        if hit is None:
+            hit = _CACHE[key] = EmotionClassifier(model_name, device)
+        return hit
 
 
 class EmotionClassifier:
@@ -36,6 +60,12 @@ class EmotionClassifier:
             top_k=None,          # return all 28 labels with scores
             device=device,
         )
+        # One instance may now be shared (see get_classifier), and callers reach
+        # `classify` through `asyncio.to_thread`, so two threads can land in the HF
+        # pipeline at once. Inference is ~10ms against LLM calls measured in seconds,
+        # so serializing it costs nothing measurable and removes the question of
+        # whether a given transformers version is re-entrant.
+        self._lock = threading.Lock()
 
     def classify(self, text: str) -> list[tuple[str, float]]:
         """Score `text`; return (label_lowercased, score) pairs, best first.
@@ -45,7 +75,8 @@ class EmotionClassifier:
         text = (text or "").strip()
         if not text:
             return []
-        results = self._pipe(text)
+        with self._lock:
+            results = self._pipe(text)
         # pipeline returns [[{label, score}, ...]] for a single input.
         row = results[0] if results and isinstance(results[0], list) else results
         pairs = [(r["label"].lower(), float(r["score"])) for r in row]

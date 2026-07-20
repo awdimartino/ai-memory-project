@@ -49,9 +49,16 @@ def configure_logging() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-async def build() -> tuple[Companion, str]:
-    """Wire up storage + LLM + memory + companion. Returns (companion, resolved_model_id)."""
-    conn = connect(config.DB_PATH)
+async def build(db_path: str | None = None) -> tuple[Companion, str]:
+    """Wire up storage + LLM + memory + companion. Returns (companion, resolved_model_id).
+
+    `db_path` overrides `config.DB_PATH` for this build only. The gold-set runner needs
+    a different database per case and used to get one by ASSIGNING `config.DB_PATH`
+    before each build — a process-global mutation, which is fine serially and a race
+    the moment two cases build concurrently. Passing it in makes concurrency safe
+    without changing anything for the two real entry points, which pass nothing.
+    """
+    conn = connect(db_path or config.DB_PATH)
     conv_store = SqliteConversationStore(conn)
     mem_store = SqliteMemoryStore(conn)
     meta_store = SqliteMetaStore(conn)
@@ -169,8 +176,11 @@ async def _build_emotion(meta_store) -> EmotionManager | None:
         return None
     try:
         # Import here so a disabled build never pays the torch/transformers import.
-        from infrastructure.emotion_classifier import EmotionClassifier
-        classifier = await asyncio.to_thread(EmotionClassifier, config.EMOTION_MODEL)
+        # get_classifier (not the class) so repeated builds in one process — the gold
+        # runner makes one per case — share a single loaded model instead of reloading
+        # ~125M params each time. Identical for the entry points, which build once.
+        from infrastructure.emotion_classifier import get_classifier
+        classifier = await asyncio.to_thread(get_classifier, config.EMOTION_MODEL)
     except Exception:  # noqa: BLE001 - emotion is an enhancement, never a hard dependency
         logging.getLogger("bootstrap").warning(
             "emotion classifier failed to load; continuing without emotion", exc_info=True

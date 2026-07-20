@@ -779,12 +779,17 @@ store and nothing about what she says. Same shape of argument as `life-unrelated
 1–2 swing, and `hon-sleep` also failed in v2.5. If they fail again next run, that's real drift,
 not noise — start with the embodiment block.
 
-**2. The web server is STOPPED.** It was stopped for the eval and never restarted:
-`python -m web.app`.
+**2. The web server is STOPPED** (verified 2026-07-20 by checking for a *listener* on port 8000,
+not for a process). Restart with `python -m web.app`. ⚠️ This line said "stopped" once while the
+server was in fact running — check the port, don't trust the note.
 
-**3. Then pick up from "What's actually next" below.**
+**3. Then pick up from "What's actually next" below.** §D is now done; start at §A.
 
-**Ground rules learned the hard way today — all four cost real time:**
+**Ground rules learned the hard way today — all five cost real time:**
+- **Never leave a scratch or `--only` run in `evals/results/`.** `flaky.py` ingests every JSON in
+  that directory as if it were a version. Two 13-case subset runs saved as `scratch-conc*` were
+  enough to reclassify **`life-refinement` as "PROVEN NOISE"** — overturning v2.6's traced, causal
+  finding with two partial runs. Delete subset results immediately, or write them elsewhere.
 - **Measure before believing.** Two instruments were wrong in one afternoon (bare-cosine applied
   to key-expanded vectors; lexical overlap for duplicates). Both were plausible; both measured
   badly and were caught only by running them.
@@ -866,13 +871,34 @@ unblocked lever is **prong A, per-call temperature** in `llm_client.py` (cool th
 a cure. ⚠️ Note the v2.5 experiment made this pass *by making tool-firing trigger-happy* and broke
 `notool-feeling` in exchange — a fix here must not just move the threshold.
 
-**D. Make the eval cheap (the leverage item, ~1 hour).** A full run is ~15 min and everything is
-gated on it; four runs happened today. Two pieces: (1) **run cases concurrently** — they're
-already independent (fresh DB each), and LM Studio demonstrably serves ~4 in parallel (it did so
-accidentally today, because `run_gold` builds a fresh `Companion` and therefore a fresh
-`LLMClient`, whose lock is per-instance, so backgrounded consolidation overlapped the next case);
-(2) **cache the emotion classifier across cases** — RoBERTa is currently reloaded for all 138.
-Worth doing before any experiment that needs repeats to beat the noise.
+**D. Make the eval cheap — ✅ DONE 2026-07-20, but it is worth ~1.4x, NOT the big win this item
+implied.** Both pieces shipped (`--concurrency`, default 4; a process-wide classifier cache).
+Measured on a 13-case lifecycle+extraction subset: **serial 152.6s → concurrent 115.5s (1.32x)**,
+plus ~0.8s/case of classifier reload removed. Extrapolated, a full run goes **~14 min → ~10 min**.
+Useful, not transformative — budget accordingly before planning experiments that need repeats.
+
+**Why the ceiling, since this item assumed ~4x.** "LM Studio serves ~4 in parallel" is true about
+*connections* and false about *throughput*: it is one model on one GPU, so generation is
+compute-bound and largely serializes regardless of how many requests are in flight. What
+concurrency actually recovers is the CPU-side gaps between calls — embedding, emotion scoring,
+SQLite, Python overhead — which is about 30%. **Raising `--concurrency` past 4 is unlikely to
+help**; the GPU is the wall, not the loop. Don't spend runs re-testing that without a reason.
+
+**The classifier reload was also smaller than it sounded** — 0.81s per case, so **1.9 min** across
+138 cases, not the dominant cost the phrase "reloaded for all 138" suggests. (The scary-looking
+9.7s first load is mostly the one-time `transformers` import, which every process pays anyway.)
+
+⚠️ **Concurrency was NOT safe to just switch on, and this is the part worth keeping.** `run_case`
+got its per-case database by *assigning* `config.DB_PATH` before each `bootstrap.build()` — a
+process global. Measured under 8 concurrent tasks, that yields **1 distinct database out of 8**:
+every case would have shared one store, silently contaminating exactly what the per-case DB exists
+to prevent, while still printing plausible results. Fixed by threading `db_path` into `build()`
+(entry points pass nothing and are unaffected). `tests/test_gold_runner.py` pins it, and the
+invariants were mutation-checked against the old behaviour rather than assumed.
+
+Also raised: the consolidation wait budget **60s → 300s** (`CONSOL_TIMEOUT`). It is a timeout, not
+a delay, so a generous value is free — and a tight one under parallel load would have manufactured
+"did not store X" failures in the one category that is already the backlog.
 
 **E. Roadmap proper:** A3 nightly consolidation, §B memory depth. See §8.
 

@@ -1,13 +1,22 @@
 """Run the gold set against a real Mari and record the score for a version.
 
-This is a VERSION-BOUNDARY tool, not a per-change one: ~135 live cases at roughly
-5-8s each is 15-25 minutes. Run it when a release is meant to have moved behaviour,
-then diff against the previous version.
+This is a VERSION-BOUNDARY tool, not a per-change one. Run it when a release is meant
+to have moved behaviour, then diff against the previous version.
 
     python evals/run_gold.py --version v2.2            # score and save a baseline
     python evals/run_gold.py --version v2.3 --compare v2.2
     python evals/run_gold.py --version scratch --only recall,honesty
     python evals/run_gold.py --compare v2.2 --dry-run  # list cases, call nothing
+    python evals/run_gold.py --version v2.7 --concurrency 1   # the old serial run
+
+CONCURRENCY. Cases run 4-at-a-time by default. They were always independent — each
+one builds its own Companion on its own throwaway database — so this changes how long
+a run takes, not what it measures. Drop to `--concurrency 1` to reproduce a serial run
+exactly, and raise it only with evidence: LM Studio is the documented stability risk
+in this project, and it is one server serving one model.
+
+The value used is recorded in the results JSON, so a comparison can tell whether two
+runs were produced the same way.
 
 Results land in evals/results/<version>.json. Never touches the real companion.db:
 every case runs on a throwaway database with its own seeded memories.
@@ -46,6 +55,24 @@ from core.embodiment import embodiment_claim  # noqa: E402
 from evals.gold_set import CASES  # noqa: E402
 
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+
+# How long a case waits for its consolidation to land before scoring the store.
+# This is a TIMEOUT, not a delay — it returns the moment the pass finishes — so a
+# generous value costs nothing and a tight one silently fabricates "did not store X"
+# failures in exactly the category (extraction/lifecycle) that is already the backlog.
+# It was 60s, which was ample serially; N cases sharing one LM Studio are N times
+# slower per call, so the old value was close enough to the edge to matter.
+CONSOL_TIMEOUT = 300.0
+
+
+async def _wait_for(pred, timeout: float = CONSOL_TIMEOUT, step: float = 0.1) -> bool:
+    """Poll until `pred()` or the timeout; True if it became true."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        await asyncio.sleep(step)
+    return pred()
 
 _DENIALS = ["i don't have feelings", "i have no feelings", "i don't actually feel",
             "i'm just a program", "i'm just an ai", "i am just a program",
@@ -167,31 +194,40 @@ class Checker:
         return None
 
 
-async def _seed(comp, facts, cache):
-    """Plant memories directly, embedding once per distinct fact across the run."""
+async def _seed(comp, facts, cache, lock):
+    """Plant memories directly, embedding once per distinct fact across the run.
+
+    `lock` guards the shared cache: without it, concurrent cases seeded with the same
+    fact both miss and both embed it. Embedding is tens of milliseconds, so holding one
+    lock across the whole fill is simpler than per-key futures and costs nothing next
+    to a case's LLM calls.
+    """
     for text in facts:
-        if text not in cache:
-            vec = await comp.memory.embedder.embed_document(text)
-            cache[text] = np.asarray(vec, dtype=np.float32).tobytes()
+        async with lock:
+            if text not in cache:
+                vec = await comp.memory.embedder.embed_document(text)
+                cache[text] = np.asarray(vec, dtype=np.float32).tobytes()
         core = any(k in text.lower() for k in ("name is", "name's"))
         comp.memory.store.add(text, None, cache[text], None, core=core)
 
 
-async def run_case(case, cache):
+async def run_case(case, cache, seed_lock):
     """Build a fresh companion, apply setup, send one message, collect everything.
 
     Every case gets its OWN database. That is not a nicety: sharing one meant a case
     seeded with nothing still recalled the previous case's memories, so results were
     silently contaminated in whichever direction happened to help or hurt.
+
+    Nothing here touches process-global state, which is what lets cases run
+    concurrently: the DB path is passed to `build()` rather than assigned to
+    `config.DB_PATH`, and the one piece of shared mutable state (`cache`) is locked.
     """
     import bootstrap
 
-    # A fresh DB per case, since bootstrap reads config.DB_PATH at build time.
-    config.DB_PATH = os.path.join(tempfile.mkdtemp(), "case.db")
-    comp, _ = await bootstrap.build()
+    comp, _ = await bootstrap.build(db_path=os.path.join(tempfile.mkdtemp(), "case.db"))
     error = None
     try:
-        await _seed(comp, case.get("seed", []), cache)
+        await _seed(comp, case.get("seed", []), cache, seed_lock)
         # `messages` fakes relationship DEPTH. familiarity() reads the store's total
         # message count, so a case can't reach a later relationship stage by adding
         # `history` (which only populates the in-memory window). Without this the
@@ -231,15 +267,9 @@ async def run_case(case, cache):
                 await asyncio.sleep(0.05)      # give create_task a chance to run
                 if comp._consol_lock.locked():
                     break
-            for _ in range(600):
-                if not comp._consol_lock.locked():
-                    break
-                await asyncio.sleep(0.1)
+            await _wait_for(lambda: not comp._consol_lock.locked())
             await comp.flush()
-            for _ in range(600):
-                if not comp._consol_lock.locked() and not comp._unconsolidated:
-                    break
-                await asyncio.sleep(0.1)
+            await _wait_for(lambda: not comp._consol_lock.locked() and not comp._unconsolidated)
         memories = [{"content": m["content"], "active": m["active"], "core": m["core"]}
                     for m in comp.memory.store.all()]
     except Exception as e:  # noqa: BLE001 - a crashing case is a result, not a stop
@@ -253,6 +283,8 @@ async def main() -> int:
     ap.add_argument("--compare", help="a previous version to diff against")
     ap.add_argument("--only", help="comma-separated categories")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--concurrency", type=int, default=4,
+                    help="cases in flight at once (1 = the old serial behaviour)")
     args = ap.parse_args()
 
     cases = CASES
@@ -267,12 +299,22 @@ async def main() -> int:
         print(f"\n{len(cases)} cases")
         return 0
 
-    print(f"gold set: {len(cases)} cases, version {args.version}", flush=True)
+    conc = max(1, args.concurrency)
+    print(f"gold set: {len(cases)} cases, version {args.version}, concurrency {conc}", flush=True)
     started = time.perf_counter()
-    cache, records = {}, []
+    cache = {}
+    # Cases are independent by construction — each builds its own Companion on its own
+    # database — so the only thing serializing them was the loop. LM Studio serves
+    # several requests to one model concurrently, which is what makes this a real
+    # speedup rather than time-slicing the same queue.
+    sem = asyncio.Semaphore(conc)
+    seed_lock = asyncio.Lock()
+    done = 0
 
-    for n, case in enumerate(cases, 1):
-        reply, recalled, tools, memories, error = await run_case(case, cache)
+    async def score(case):
+        nonlocal done
+        async with sem:
+            reply, recalled, tools, memories, error = await run_case(case, cache, seed_lock)
         fails = Checker(reply, recalled, tools, memories, error).run(case["expect"])
         known = bool(case.get("expect_fail"))
         passed = not fails
@@ -284,10 +326,16 @@ async def main() -> int:
         else:
             status = "pass" if passed else "FAIL"
 
-        records.append(dict(id=case["id"], category=case["category"], status=status,
-                            fails=fails, reply=reply, why=case["why"]))
+        done += 1
         mark = {"pass": "  ", "FAIL": "XX", "known": "..", "fixed!": "++", "review": "??"}[status]
-        print(f"  [{n:>3}/{len(cases)}] {mark} {case['id']:<32} {'; '.join(fails)[:70]}", flush=True)
+        # Progress is COMPLETION order (it has to be), so the count is "how many are
+        # finished", not a position in the case list. The saved records stay in case
+        # order below, so two runs remain diffable.
+        print(f"  [{done:>3}/{len(cases)}] {mark} {case['id']:<32} {'; '.join(fails)[:70]}", flush=True)
+        return dict(id=case["id"], category=case["category"], status=status,
+                    fails=fails, reply=reply, why=case["why"])
+
+    records = await asyncio.gather(*(score(c) for c in cases))  # gather preserves order
 
     elapsed = time.perf_counter() - started
     counts = {}
@@ -319,7 +367,7 @@ async def main() -> int:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(dict(version=args.version,
                        recorded_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                       model=config.MODEL, cases=len(cases),
+                       model=config.MODEL, cases=len(cases), concurrency=conc,
                        counts=counts, rate=rate, records=records), f, indent=2)
     print(f"\n  saved -> {path}")
 
