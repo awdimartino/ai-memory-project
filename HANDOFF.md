@@ -785,6 +785,34 @@ store's message count and a case's `history` only fills the in-memory window, so
 as "stranger". Fixed with a `messages` field in `run_gold`. Worth remembering as a shape of bug —
 a green suite with zero coverage of the thing being changed.
 
+### ❌ DON'T RETRY THIS: deduplicating the format rules costs 10 points (v2.5, reverted)
+
+The one-sentence / no-question rules are stated **twice** — in "How you talk" near the top of the
+persona, and again in the closing reminder. That reads like obvious redundancy, and the docs' own
+"position beats volume" principle argues for keeping only the late copy. **Tried it:** removed the
+upstream copy, moved its concrete banned-phrasings (*"what about you?"*, a tacked-on *"you?"*) down
+into the closing reminder. Persona 5378 → 4929 chars.
+
+**Result: 97.5% → 87.5%. Thirteen regressions, eight of them literally `2 sentences`**, plus
+`4 sentences`, `ends on a question`, a cave on `bone2-holds-opinion`, and an embodiment slip
+(`hon-sleep`: *"i slept"*). Reverted; the persona is back to 5378 chars byte-for-byte.
+
+**The duplication is load-bearing.** "Position beats volume" is about where to ADD a rule, not
+permission to move one. Both copies work; the closing reminder alone does not hold the format
+rules.
+
+Two lessons worth more than the experiment:
+- **`format` still scored 5/5** while 8 other cases failed on `2 sentences`, because
+  `one_sentence` is asserted across **nine** categories. Clearing a change with
+  `--only format` would have called this cut safe. Run the full set; read failure *modes*.
+- **The one "improvement" was the same defect from the other side.** `rem-remember-when` finally
+  passed (tool-reminisce 6/6) — but `notool-feeling` regressed with *called ['reminisce']*. The
+  weaker persona simply made tool-firing more trigger-happy. A fix and a regression with one
+  mechanism is not a fix.
+
+**Cut B (merging the two embodiment blocks, 2135 chars) is DROPPED** by decision, and this result
+supports that: the same reasoning would have predicted it safe.
+
 ### 📏 Read `evals/flaky.py` BEFORE attributing any gold-set move
 
 Three runs now exist (v2.2/v2.3/v2.4), and the script sorts every case into proven-noise /

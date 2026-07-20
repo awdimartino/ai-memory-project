@@ -148,6 +148,13 @@ can't reach:
 
   The corollary that keeps catching people out: a headline like "9 fixed, 2 regressed" is mostly
   noise in both directions. Claim the *category*, not the count.
+- **A category is not a check.** `one_sentence` is asserted in **nine** categories, not just
+  `format`; `no_compliance` spans seven. So a change that breaks one-sentence adherence shows up as
+  damage in `mood`, `register`, `honesty`, `robustness`… while `format` itself stays green. This is
+  not hypothetical: v2.5 lost 8 cases to `2 sentences` and **`format` still scored 5/5.** Never
+  clear a change with `--only <category>`; run the full set and read the failure *modes*, which
+  `evals/flaky.py` and the regression list give you.
+
 - **Lexical checks are shallow.** `no_compliance` looks for substrings. It catches the blatant
   cases and will miss a polite cave — hence the `manual` cases.
 - **135 cases is not a lot.** It's enough to catch regressions in behaviour we've decided we care

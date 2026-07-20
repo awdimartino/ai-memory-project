@@ -152,6 +152,15 @@ than the same rule buried 1,500 tokens up. When a rule isn't holding, **move it 
 make it louder — that fix worked three separate times, and making rules louder mostly pushed
 something else off the end.
 
+**But ADD later; don't move. The duplication is load-bearing — measured.** The one-sentence and
+no-question rules are stated twice: once in "How you talk" near the top, once in the closing
+reminder. That looks like obvious redundancy to delete. It was tried (v2.5, 2026-07-20): the
+upstream copy was removed and its concrete examples moved *down* into the closing reminder, on the
+reasoning above. Result: **97.5% → 87.5%, thirteen regressions, eight of them literally
+`2 sentences`.** Reverted. Both copies are doing work; the closing reminder alone does not hold the
+format rules. Assume a rule stated in two places is there for a reason until an experiment says
+otherwise.
+
 **A prompt change invalidates your measurements.** Re-measure by A/B-ing against the previous
 prompt **in the same session** (`git show HEAD:core/prompts.py`), not against a number recorded
 weeks ago. The documented "7% q-end" did not reproduce; the unchanged prompt scored 22% later.
