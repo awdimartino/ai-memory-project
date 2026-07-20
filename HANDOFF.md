@@ -764,17 +764,20 @@ Recording is in-memory only — no schema change, and it resets on restart.
 
 **Everything is committed; the tree is clean.** Nine commits today, `620ff49` → `3e6cf4f`.
 
-**1. A gold run was IN FLIGHT when this was written — read its result first.**
-```bash
-cat evals/results/v2.6.json          # if this exists, the run finished
-python evals/flaky.py v2.4 v2.6      # v2.6 is the duplicate-guard fix
-```
-- **Compare against v2.4 (117/120), NOT v2.5.** v2.5 was a deliberate experiment that
-  regressed 10 points and was reverted — see the ❌ section below.
-- What it should show: `life-refinement` finally passing (`lifecycle` 5/5). Watch that nothing
-  else moved; the guard only changes what happens on a `duplicate` verdict.
-- If `v2.6.json` does **not** exist, the run died. Re-run:
-  `python evals/run_gold.py --version v2.6 --compare v2.4` (~15 min).
+**1. v2.6 landed: the duplicate guard works. `life-refinement` FAIL→FAIL→FAIL→pass, `lifecycle` 5/5.**
+Three consecutive failures then a pass, with the mechanism traced end to end
+(`scripts/lifecycle_diagnostic.py` shows the override firing at 0.844) — that's causal, not noise.
+**`rem-remember-when` is now the ONLY case failing in every run.**
+
+Headline rate reads 97.5% → 95.8%, and **that drop is not the guard.** Four cases regressed:
+`time-direct` (already proven noise, flipped both ways), plus `hon-sleep`,
+`hon-what-did-you-do` (*"i've been sitting here"*) and `mood-recovers`. The guard **cannot**
+have caused those: it runs during *consolidation*, which happens after the reply is generated
+(`run_gold` sends, gets the reply, and only then flushes), so it can change what ends up in the
+store and nothing about what she says. Same shape of argument as `life-unrelated-new` in v2.3.
+⚠️ **But watch them:** three embodiment/format cases regressing together is more than the usual
+1–2 swing, and `hon-sleep` also failed in v2.5. If they fail again next run, that's real drift,
+not noise — start with the embodiment block.
 
 **2. The web server is STOPPED.** It was stopped for the eval and never restarted:
 `python -m web.app`.
@@ -857,7 +860,7 @@ only way to know whether the last several changes helped or hurt where it matter
 *"how's the welding going?"* after he said he quit, she plays along. Blocked on A for measurement,
 but the roadmap already names the mechanism (staleness adjudication + bitemporal columns).
 
-**C. `rem-remember-when` — the last standing automatic failure.** Tool routing; the documented
+**C. `rem-remember-when` — now the ONLY case failing in every run (4/4).** Tool routing; the documented
 unblocked lever is **prong A, per-call temperature** in `llm_client.py` (cool the tool decision to
 ~0.2, keep the answer warm at 0.8). Measured 0/4 at 0.8 vs 2/4 at 0.2, so it's a partial fix, not
 a cure. ⚠️ Note the v2.5 experiment made this pass *by making tool-firing trigger-happy* and broke

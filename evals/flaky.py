@@ -64,8 +64,12 @@ def main(argv):
         elif not any(verdicts):
             always_failing.append(i)
         elif len(set(verdicts)) > 1:
-            # Flipped back to where it started => the case is unstable, not improving.
-            (both_ways if verdicts[0] == verdicts[-1] else moved_once).append(i)
+            # Count TRANSITIONS, not endpoints. Comparing first to last called
+            # reg-rambling (FAIL->pass->FAIL->pass) a candidate signal, when two
+            # reversals are exactly what noise looks like. One transition is a case
+            # that moved and stayed; more than one is a case that cannot hold still.
+            flips = sum(1 for a, b in zip(verdicts, verdicts[1:]) if a != b)
+            (both_ways if flips > 1 else moved_once).append(i)
 
     def show(title, ids, note=""):
         print(f"\n{title} ({len(ids)}){note}")
