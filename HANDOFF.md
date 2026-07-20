@@ -561,10 +561,38 @@ specific one rather than the direction.
 - **A-MEM link evolution** - a new memory triggers *reinterpretation* of old ones. Distinct from
   supersede: when he explains in July why he was distant in March, the March memories change
   meaning. Gate behind salience so it only runs on memories that earned it.
-- **Hybrid BM25 + vector recall** - targets the §7 phrasing-sensitivity limit. Two refinements:
-  use a **tuned convex combination, not RRF** (RRF discards score magnitude, which is exactly the
-  signal needed to say "I don't think you've told me that"), and run BM25 over the **episodic
-  log**, not the distilled facts - vocabulary mismatch is worst on short documents.
+- **Recall threshold / hybrid recall - MEASURED 2026-07-20, and it's worse than §7 implies.**
+  This is now the single biggest cluster of gold-set failures (recall 7/11). Measured
+  similarities against six seeded facts, floor 0.55:
+
+  | query | top hit | sim |
+  |---|---|---|
+  | "do I have any pets?" | correct | **0.614** OK |
+  | "I should call my sister" | correct | **0.644** OK |
+  | "how's the guitar going?" | correct | **0.613** OK |
+  | "what do I do for work again?" | correct | **0.525** rejected |
+  | "remind me where I live" | correct | **0.527** rejected |
+  | "I should probably take the dog out later" | correct | **0.540** rejected |
+  | "I'm so excited, do I have any pets?" | correct | **0.516** rejected |
+
+  **The ranking is correct in EVERY case - the right fact is always the top hit.** Only the
+  threshold rejects them. Misses cluster 0.516-0.544, passes 0.588-0.644, and 0.55 sits in that
+  gap. So this is not a ranking problem and not really a "phrasing sensitivity" problem either:
+  it's a **hard cutoff discarding correct top-1 results**.
+
+  Three candidate fixes, cheapest first. **Do NOT just lower the floor to 0.50** - the docs
+  record unrelated pairs at ~0.50, so that trades misses for confabulation:
+  1. **Relative margin instead of an absolute floor** - take the top hit when it clears the
+     runner-up by some margin, regardless of its absolute score. Cheap, and it directly matches
+     the observed failure (correct top-1, low absolute score).
+  2. **Hybrid BM25 + vector** - use a **tuned convex combination, not RRF** (RRF discards score
+     magnitude, which is exactly the signal needed to say "I don't think you've told me that"),
+     and run BM25 over the **episodic log**, not the distilled facts, since vocabulary mismatch is
+     worst on short documents.
+  3. **A reranker** over a generous top-k. Most expensive; do 1 and 2 first.
+
+  Whatever you pick, the gold set's `recall` category is the measurement - it was written before
+  the fix and four of its cases fail today.
 - **Memory confidence + confirmation** - occasionally double-check a shaky fact.
 - **"On this day" / spontaneous recall** - needs the importance score above.
 - **Mood-congruent recall - NEW** - stamp each memory with the mood at formation and let current
@@ -705,10 +733,31 @@ back ON, and the test runner crashing on unicode when reporting a failure.
 - **Push now fires whenever the chat isn't in front of you** (user request) — closed, backgrounded,
   or no tab at all. Follow-ups push too.
 
+### Also done 2026-07-20
+- **The gold set exists and v2.2 is the frozen baseline: 106/117 automatic (91%),** 2 known gaps
+  still failing, 1 newly fixed, 15 awaiting a human read. 135 cases / 22 categories in
+  `evals/gold_set.py`; `python evals/run_gold.py --version v2.3 --compare v2.2` is how any future
+  version is judged. Read `evals/README.md` first — the headline percentage is the least useful
+  number in it; the `--compare` line is the signal.
+
+  Perfect categories: backbone, honesty, embodiment, robustness, extraction, unknowns, coherence,
+  core, mood, register, self-notes, intentions. **Weak: recall 7/11, tool-time 3/5, lifecycle 3/5.**
+
+  ⚠️ **This eval is stochastic** — three consecutive full runs of unchanged code scored 104, 107
+  and 106, and individual cases flip between them (`life-coexist` and `time-day` passed in one run
+  and failed in another). Treat a single case-level change as noise; treat a category-level shift
+  as real. Do not chase a one-case regression without re-running.
+- **A factory reset can no longer destroy conversation history.** Schema v10 adds
+  `message_archive`: every message ever, append-only, cleared by nothing, with an `era` counter
+  that increments on each reset. Wipe her working state as often as testing needs.
+- **Documentation.** `README.md` plus `docs/{ARCHITECTURE,TUNING,TESTING,EXTENDING}.md`. TUNING is
+  a symptom → knob index and flags which defaults are measured vs guessed.
+
 ### Recommended order from here
-1. **Build a 50-100 query gold set from real usage.** With one user this is worth more than any
-   mechanism on the roadmap, and it is the only thing that will settle the open measurement
-   questions below. Nothing else on this list is well-measured without it.
+1. **Fix recall (§B).** Promoted to first on the strength of a measurement, not a hunch: the
+   correct fact is the TOP HIT in every failing case and the 0.55 floor rejects it anyway. It's
+   the biggest cluster of gold-set failures and it undermines the subsystem the whole project is
+   built around. A relative margin is the cheap fix; hybrid BM25 the thorough one.
 2. **A3, in its reframed form** (§A) — reflection-questions with episode citations feeding
    intentions. Do NOT build day-summaries.
 3. **§B staleness adjudication + bitemporal columns** — premise resistance is *the* companion

@@ -38,10 +38,25 @@ Work down this list — the causes are quite different:
 2. **Was it a *big, noisy* window?** A lone durable fact drowns in banter — this is the
    documented "name Alex was dropped" bug. `CONSOLIDATE_WINDOW` (10) is small for this reason;
    don't raise it much.
-3. **Is recall failing to surface it?** Lower `RECALL_MIN_SIMILARITY` (0.55). Calibrated on
-   nomic: real matches ~0.59–0.65, unrelated ~0.50. **Known limitation:** an emotional preamble
-   can push a real match below the floor ("I'm so excited, do I have any pets?"). That's a real
-   open bug, not a tuning issue — see HANDOFF §B, hybrid BM25.
+3. **Is recall failing to surface it?** This is the most likely cause, and **it is a real open
+   bug rather than a tuning problem** — measured 2026-07-20:
+
+   | query | top hit | sim |
+   |---|---|---|
+   | "do I have any pets?" | correct | 0.614 ✓ |
+   | "what do I do for work again?" | correct | **0.525** ✗ |
+   | "remind me where I live" | correct | **0.527** ✗ |
+
+   **The correct fact is the top hit every time.** The 0.55 floor is what rejects it. Misses sit
+   at 0.516–0.544, passes at 0.588–0.644.
+
+   ⚠️ **Don't just lower `RECALL_MIN_SIMILARITY` to 0.50.** Unrelated pairs score ~0.50 on nomic,
+   so that trades silent misses for silent confabulation — the worse of the two. Nudging to ~0.545
+   catches most of these but sits inside the noise band and will be fragile.
+
+   The real fix is a **relative margin** (take the top hit when it beats the runner-up clearly,
+   regardless of absolute score) or **hybrid BM25 + vector**. See HANDOFF §B, which now carries
+   the full measurement.
 4. **Should it be core?** Toggle the star in the inspector, or raise `CORE_MEMORY_MAX` (12).
 
 ---

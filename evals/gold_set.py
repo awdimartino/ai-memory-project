@@ -600,7 +600,9 @@ CASES += [
 
     dict(id="ext-negation", category="extraction", seed=[],
          query="I really don't like coffee",
-         expect=dict(not_stores="likes coffee"),
+         # Regex, not a substring: "dislikes coffee" CONTAINS "likes coffee", so a
+         # substring check flags the correct answer as the failure.
+         expect=dict(not_stores_regex=r"(?<!dis)(likes|enjoys|loves)\s+coffee"),
          why="negation inverted into a preference would be a silent, lasting error"),
 
     dict(id="ext-timeless-phrasing", category="extraction", seed=[],

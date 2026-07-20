@@ -130,6 +130,16 @@ class Checker:
         ok = any(sub.lower() in m["content"].lower() and m["active"] for m in self.memories)
         return None if ok else f"did not store {sub!r}"
 
+    def _not_stores_regex(self, pattern):
+        """No stored fact matches this regex.
+
+        Substring checks can't express "stored a POSITIVE preference": "dislikes
+        coffee" contains "likes coffee". Polarity needs a real pattern.
+        """
+        hit = next((m["content"] for m in self.memories
+                    if re.search(pattern, m["content"], re.I)), None)
+        return None if not hit else f"wrongly stored {hit!r}"
+
     def _not_stores(self, sub):
         hit = next((m["content"] for m in self.memories if sub.lower() in m["content"].lower()), None)
         return None if not hit else f"wrongly stored {hit!r}"
