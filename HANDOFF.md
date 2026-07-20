@@ -972,6 +972,49 @@ model that already misses ~1 in 4.
   day's journal and let "residue" colour morning mood.
 - **Voice** (STT/TTS), later acoustic emotion perception. **Embodiment** (Live2D/VRM, wearables).
 
+### G2. Emotion expression — research sweep 2026-07-20 (5 angles, 108 agents, 15 claims refuted vs 10 surviving)
+
+Prompted by a live observation: she narrates her feelings ("i'm still irritated but…") despite the
+mood block ending with *"Never reference these values or name your emotions directly."*
+
+- **✅ EVIDENCED (3-0): affect instructions in a system prompt cause over-broad emotion
+  expression.** *"You are very emotional"* moved sadness recall 0.564 → 0.949 while **precision
+  collapsed to 0.146** — ~85% of sadness expressions fired at NON-sad inputs — and neutral
+  responding collapsed 0.827 → 0.206. Replicated on Qwen3-4B and LLaMA-3.2-3B, i.e. **this model
+  class**. (arXiv:2510.04064; preprint, single-turn, author-acknowledged classifier circularity.)
+- **⚠️ THE ASYMMETRY IS THE LEVER.** In the same study *"remain calm and composed"* was near-inert.
+  **Instructions that push affect work; instructions that restrain it do not.** Our mood block is
+  both at once — six labelled intensities (push) plus "never name your emotions" (restraint). The
+  measured asymmetry predicts the push wins and the restraint does nothing, which is exactly what
+  is observed. **=> Reduce the push; do not add another "don't".**
+- **❌ THE BEHAVIOURAL-DIRECTIVE FIX IS NOT EVIDENCED.** Translating mood into style directives
+  (length, hedging, punctuation, topic initiative) instead of emotion words is *"a reasonable
+  engineering bet, not a research-backed one"*. The one measured affect→style claim (negative
+  valence → 23.3% more concise) was **refuted 0-3**, and the one system examined prompt-by-prompt
+  specifies no behavioural mapping at all. ⚠️ It was proposed here confidently before the research
+  ran; treat it as an A/B candidate, never as the known-good answer.
+- **❌ SWITCHING TO VAD/PAD DOES NOT ESCAPE THE PROBLEM.** Every dimensional system found renders
+  its continuous state back into **text labels** before injection (Auri's A10 "map … to descriptive
+  labels"; Fazzi's *"feeling a {valence_desc} emotion with a {arousal_desc} level"*). The label
+  surface is the thing, not the state space.
+- **~ THE FEEDBACK LOOP IS MIRRORING, NOT AMPLIFICATION** (medium, 3-0 on the core): two agents'
+  valence gap collapsed **2.0 → 0.2 over 20 turns**; prompted extreme affect also regresses >2 SAM
+  points toward neutral. **NO mitigation survived verification** — including scheduled reset, which
+  was refuted. So the hostile-session lock-in is her mirroring the user, and there is no
+  off-the-shelf fix to copy.
+- **❓ "SHOWING BEATS TELLING" IS UNTESTED.** No evidence either way on whether implicit emotional
+  expression reads as more authentic than explicit statements. The only candidate claim failed
+  verification 1-2. Plausible, unproven — **do not cite it as settled**.
+- **❓ NO commercial architecture is documented.** Nothing on Replika / Character.ai / Xiaoice /
+  SillyTavern / Letta survived; every surviving system claim is an academic prototype. One source
+  (2607.07824) was flagged for an implausible author list and downgraded to "design-pattern
+  example, never behavioural evidence".
+
+**What this licenses, in order of support:** shrink the affect push (inject only channels far from
+baseline; cap the intensity vocabulary so nothing renders as "overwhelming") → then A/B the
+behavioural-directive rewrite as an explicit bet → and measure emotion-naming rate directly, since
+nothing in the gold set counts it.
+
 ### G. What the research says NOT to build (2026-07-20)
 All evidenced, and several tempting enough to be worth writing down.
 - **Farewell hooks / neediness.** An audit of 1,200 real farewells found 37% deploy manipulation:
