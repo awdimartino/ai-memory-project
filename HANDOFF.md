@@ -904,6 +904,69 @@ server was in fact running — check the port, don't trust the note.
 
 **3. Then pick up from "What's actually next" below.** §D is now done; start at §A.
 
+### 🔴 LIVE-SESSION FINDINGS 2026-07-20 (user manual trials) — read before touching prompts
+
+Four issues, all diagnosed against the running server's **prompt inspector** (its first real use —
+it works, and it answered two of these outright). **None is fixed yet**; a live data-collection
+session was in progress and prompt edits would have contaminated it.
+
+**Prompt budget, measured:** base persona 5285 · **tools 2204** · self-notes 220 · core memory 91 ·
+mood 295 · closing reminder 233 = **8,328 chars (~2,080 tokens)**. The tools block is 26% of it.
+
+1. **She gets overly sad — the mood system TELLS her to.** Live mood read `melancholy: intense`
+   (0.809, up from 0.1 pre-session) with `amusement: absent`, and the block ends *"Let this shape
+   how you come across and how you act right now."* Any model complies. **The real defect is
+   positive feedback with no counterweight:** she acts sad → the user answers a sad companion → the
+   classifier scores that sad → melancholy climbs. §7 already flags drift as untuned *and*
+   calibrated for per-message decay while running per-tick. ⚠️ `mood-recovers` regressed in v2.6 and
+   START HERE said to watch it — this is the second, independent signal. **Fix candidates:** faster
+   melancholy decay, a cap on any single channel, or damping the update when her *own* recent
+   replies drove the user's affect.
+
+2. **She forgot her own name — it appears ONCE, in the weakest position.** `"You are Mari"` occurs
+   **1×** in 8,328 chars, in the opening clause, while `core memory` asserts *"The user's name is
+   Alex."* explicitly. This project's own measured principle is **position beats volume — small
+   models follow the rules closest to the end** (§ prefix-cache probe), and the closing reminder
+   never restates who she is. A competing, explicitly-stated name-fact is right there. **Fix:** name
+   her in the closing reminder. Cheap, and it costs no cached-prefix reprocessing (the reminder is
+   already the non-cached tail).
+
+3. **She hallucinated a shared restaurant — almost certainly a manufactured intention.** Verbatim:
+   *"i was actually thinking about that restaurant you mentioned before, but i can't quite remember
+   what dish you liked best there."* No restaurant appears in the log or the store, and `intentions`
+   reads empty **because reach-out fulfils and clears one when it sends** — the evidence deletes
+   itself. **This is the barren-window failure for the THIRD time:** memory extraction returned `[]`
+   wrongly, self-notes manufactured filler lessons 3/3 → 1/3, and now intentions invent a topic when
+   a philosophical window offers no real ones. Both prior fixes were prompt rebalancing toward a
+   correct empty default. ⚠️ **Also note the opener** — *"i was actually thinking about"* — is the
+   §7 formulaic-reach-out pattern; same subsystem, and intentions are implicated in both.
+
+4. **Only 1 memory across 173 messages** ("The user's name is Alex"), watermark 548, so
+   consolidation IS running and extracting almost nothing. Partly correct — the session was
+   meta-heavy and `ext-skip-meta` / `ext-skip-about-mari` are gold cases — but **1 fact from 173
+   messages fails the project's actual purpose**, and it starves everything downstream: recall has
+   nothing to find, intentions have nothing real to form (see 3), and any memory-seeded topic
+   feature has an empty well. **Measure this before building on top of it.**
+
+**User's proposal: a topic tool** seeded from a random subject list + random memories.
+- ✅ The *memory-seeded* half attacks the reach-out sameness problem the same way a subject fixes
+  journal repetition (§7). But the well is currently empty — see 4.
+- ⚠️ The *random-subject-list* half is close to the mechanism that produced the restaurant. Hand a
+  confabulating model "restaurants" and it invents having discussed one. If built, frame every
+  topic as **"ask him about X"**, never "talk about X", and ground it in stored facts.
+- Prefer an **injected seed over a tool**: §E puts routing at ~23/30 and it would compete with
+  reminisce; an injection bypasses routing entirely.
+
+**Is this qwen3.5-9b's ceiling? Not demonstrated — 2 of 3 have non-model causes** (a mood value the
+prompt orders her to obey; a name stated once in the weakest slot), and the third repeats a
+barren-window bug fixed twice already by prompt rebalancing. ⚠️ §H: swapping models is a **one-way
+door** — identity discontinuity is the single best-documented way to destroy a companion
+relationship — and §0 records qwen3.5-9b as *current-gen* (March 2026), not old. **Fix these three
+first; they are cheap and independently testable.** If the problems survive, the next lever is the
+**prompt budget** (~2,080 tokens, 85% static, tools 26%), not the weights — a 9B tracking that many
+layered rules is a real constraint, and this project already found that some things cannot be
+prompted away at 8B.
+
 **Ground rules learned the hard way today — all five cost real time:**
 - **Never leave a scratch or `--only` run in `evals/results/`.** `flaky.py` ingests every JSON in
   that directory as if it were a version. Two 13-case subset runs saved as `scratch-conc*` were
