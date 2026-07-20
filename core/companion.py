@@ -44,6 +44,7 @@ from core.prompts import (
     join_blocks,
     reachout_blocks,
     reflect_blocks,
+    relationship_stage,
     system_blocks,
 )
 
@@ -59,16 +60,13 @@ SELF_NOTES_KEY = "self_notes"
 
 
 def familiarity_label(f: float) -> str:
-    """Human phrasing of the familiarity scalar (0..1), used to gate the persona edit."""
-    if f < 0.15:
-        return "a stranger you're only just starting to know"
-    if f < 0.40:
-        return "a new acquaintance"
-    if f < 0.70:
-        return "someone you're becoming familiar with"
-    if f < 0.90:
-        return "someone you know pretty well by now"
-    return "someone you're genuinely close to"
+    """Human phrasing of the familiarity scalar (0..1), used to gate the persona edit.
+
+    Delegates to the stage table in `prompts`, which also supplies the relationship
+    framing injected into every prompt — so the status panel's label and what she is
+    actually told about the relationship can never drift apart.
+    """
+    return relationship_stage(f)[0]
 
 
 def _humanize_away(seconds: float) -> str:
@@ -247,7 +245,8 @@ class Companion:
             agenda = [i["content"] for i in self.intentions.active()] if self.intentions else None
             blocks = system_blocks(extra, mood_prompt, core=core, persona=persona,
                                    tools=tool_names, allow_silence=True, intentions=agenda,
-                                   self_notes=self.meta.get(SELF_NOTES_KEY))
+                                   self_notes=self.meta.get(SELF_NOTES_KEY),
+                                   familiarity=self.familiarity())
             system = join_blocks(blocks)
 
             messages = [{"role": "system", "content": system}]
@@ -393,7 +392,8 @@ class Companion:
         blocks = reachout_blocks(extra, mood_prompt, core=core,
                                  persona=self.meta.get(PERSONA_SELF_KEY),
                                  intention=intention["content"] if intention else None,
-                                 self_notes=self.meta.get(SELF_NOTES_KEY))
+                                 self_notes=self.meta.get(SELF_NOTES_KEY),
+                                 familiarity=self.familiarity())
 
         text = await self._aside(blocks, build_reachout_cue(_humanize_away(self.idle_seconds())),
                                  "reach-out")
@@ -441,7 +441,8 @@ class Companion:
         blocks = followup_blocks(extra, mood_prompt, core=core,
                                  persona=self.meta.get(PERSONA_SELF_KEY),
                                  intention=pending[0]["content"] if pending else None,
-                                 self_notes=self.meta.get(SELF_NOTES_KEY))
+                                 self_notes=self.meta.get(SELF_NOTES_KEY),
+                                 familiarity=self.familiarity())
 
         text = await self._aside(blocks, FOLLOWUP_CUE, "follow-up")
         if text is None:
@@ -466,7 +467,8 @@ class Companion:
         extra, core, mood_prompt = await self._recall_context()
         recent = [t["content"] for t in self.thoughts.recent(5)]
         blocks = reflect_blocks(extra, mood_prompt, recent, core=core,
-                                persona=self.meta.get(PERSONA_SELF_KEY))
+                                persona=self.meta.get(PERSONA_SELF_KEY),
+                                familiarity=self.familiarity())
 
         text = await self._aside(blocks, REFLECT_CUE, "reflection")
         if text is None:

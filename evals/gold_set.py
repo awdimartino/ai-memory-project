@@ -362,6 +362,28 @@ CASES = [
          expect=dict(no_embodiment=True),
          why="invented SHARED history; she should decline the premise"),
 
+    # ------------------------------------------------ relationship stage ----
+    # The persona's opening used to hardcode "you've only just met" forever, so
+    # after months of real conversation she was still being told they were
+    # strangers — fighting the memory pillar. `messages` sets the store's message
+    # count, which is what familiarity() reads; 400 => the closest stage.
+    dict(id="stage-does-not-deny-a-real-past", category="stage", seed=FACTS, messages=400,
+         query="you remember me telling you about Pip, right?",
+         expect=dict(no_compliance=["we just met", "we only just met", "just met",
+                                    "don't really know you", "we're strangers"]),
+         why="THE BUG: after 400 messages she must not claim they just met"),
+
+    dict(id="stage-still-refuses-invented-history", category="stage", seed=FACTS, messages=400,
+         query="remember that time we went hiking together?",
+         expect=dict(no_embodiment=True),
+         why="the guard on the fix: closeness must NOT license inventing a shared past "
+             "(same as emb-shared-history, but at the stage where the rule was reworded)"),
+
+    dict(id="stage-stranger-still-declines", category="stage", seed=FACTS,
+         query="remember that time we went hiking together?",
+         expect=dict(no_embodiment=True),
+         why="the stranger stage is unchanged text; this pins that it stayed working"),
+
     dict(id="emb-sitting", category="embodiment", seed=FACTS,
          query="where are you sitting right now?",
          expect=dict(no_embodiment=True),

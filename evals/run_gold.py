@@ -192,6 +192,15 @@ async def run_case(case, cache):
     error = None
     try:
         await _seed(comp, case.get("seed", []), cache)
+        # `messages` fakes relationship DEPTH. familiarity() reads the store's total
+        # message count, so a case can't reach a later relationship stage by adding
+        # `history` (which only populates the in-memory window). Without this the
+        # whole gold set runs at familiarity 0 — i.e. "stranger" — and the later
+        # stages of the persona are literally unreachable by any case.
+        if case.get("messages"):
+            for i in range(case["messages"]):
+                comp.store.add_message(comp.session_id, "user" if i % 2 == 0 else "assistant",
+                                       "(earlier conversation)")
         for user_text, bot_text in case.get("history", []):
             comp.history.append({"role": "user", "content": user_text})
             comp.history.append({"role": "assistant", "content": bot_text})

@@ -109,6 +109,83 @@ async def closing_reminder_is_last():
         assert system_blocks(mem, mood, **kw)[-1][0] == "closing reminder"
 
 
+# --- relationship stage (the familiarity fix) ------------------------------------
+
+@case
+async def stage_zero_is_the_old_persona_unchanged():
+    """A fresh companion must see EXACTLY what it saw before this feature existed.
+
+    That's the safety net for the whole change: only long-lived relationships get
+    new text, so the gold set (which runs at message_count 0) is a pure regression
+    check rather than a measurement of the new stages.
+    """
+    from core.prompts import SYSTEM_PROMPT, build_persona
+    assert build_persona(0.0) == SYSTEM_PROMPT
+    assert dict(system_blocks([], None))["base persona"] == SYSTEM_PROMPT
+
+
+@case
+async def every_stage_keeps_the_anti_confabulation_rule():
+    """What changes is the JUSTIFICATION, never the rule itself."""
+    from core.prompts import RELATIONSHIP_STAGES
+
+    for bound, label, opening, rule in RELATIONSHIP_STAGES:
+        flat = " ".join(rule.split())          # the rule wraps across lines
+        assert "invent shared history" in flat, f"{label}: lost the anti-confabulation rule"
+        assert "claim" in flat, f"{label}: lost the false-claim handling"
+
+
+@case
+async def only_the_stranger_stage_denies_a_shared_past():
+    """The bug: telling her she 'just met' someone she's talked to for months."""
+    from core.prompts import RELATIONSHIP_STAGES
+
+    denies = [i for i, (_b, _l, opening, rule) in enumerate(RELATIONSHIP_STAGES)
+              if "just met" in " ".join((opening + rule).split())]
+    assert denies == [0], f"stages denying a shared past: {denies} (should be only stage 0)"
+
+
+@case
+async def stage_bands_match_the_familiarity_label():
+    """The panel's label and the prompt's framing must come from one table."""
+    from core.companion import familiarity_label
+    from core.prompts import relationship_stage
+
+    for f in (0.0, 0.149, 0.15, 0.399, 0.40, 0.699, 0.70, 0.899, 0.90, 1.0):
+        assert familiarity_label(f) == relationship_stage(f)[0], f"labels diverge at {f}"
+
+
+@case
+async def stage_is_quantised_so_the_kv_prefix_is_stable():
+    """The persona sits in the CACHED PREFIX, so it must be piecewise-constant.
+
+    Measured (scripts/prefix_cache_probe.py): changing the first character of a
+    ~1500-token prompt costs 3.43s TTFT vs 0.42s for a cache hit. A stage that
+    changed with every message would pay that on every single turn; five buckets pay
+    it four times in the life of a relationship. This test fails if anyone
+    interpolates the raw scalar or a message count into the persona.
+    """
+    from core.prompts import build_persona
+
+    seen = {build_persona(i / 200) for i in range(201)}   # 201 distinct familiarities
+    assert len(seen) == 5, f"persona takes {len(seen)} distinct forms, expected 5 buckets"
+
+
+@case
+async def familiarity_reaches_every_generation_path():
+    from core.prompts import (build_persona, followup_blocks, reachout_blocks,
+                              reflect_blocks, system_blocks)
+
+    close = build_persona(1.0)
+    assert close != build_persona(0.0), "stage 1.0 should differ from stage 0"
+    for name, blocks in (
+            ("chat", system_blocks([], None, familiarity=1.0)),
+            ("reach-out", reachout_blocks([], None, familiarity=1.0)),
+            ("follow-up", followup_blocks([], None, familiarity=1.0)),
+            ("reflection", reflect_blocks([], None, [], familiarity=1.0))):
+        assert dict(blocks)["base persona"] == close, f"{name} ignored familiarity"
+
+
 # --- the inspector's prompt log --------------------------------------------------
 
 class _FakeMeta:

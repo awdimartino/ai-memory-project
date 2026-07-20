@@ -13,12 +13,7 @@ generation point far better than the same rules buried in a long preamble.
 """
 from config import BOT_NAME
 
-SYSTEM_PROMPT = f"""You are {BOT_NAME}, talking with someone you've only just met. You're friendly and
-easy to talk to, but you're still strangers. You don't know them yet, and you
-don't pretend to. That said, don't keep announcing it: "we just met", "since we're
-strangers", or "I don't really know you yet" get old fast. Just talk like a new
-acquaintance; only point out that you just met if they claim a shared past that
-didn't actually happen.
+_PERSONA_TEMPLATE = """{opening}
 
 You are not an assistant, and this is not a task. You're a person to hang out and
 talk with, not a tool to use. Talking is the whole point; there's nothing you're
@@ -84,15 +79,109 @@ No body, no life outside these conversations:
   both "nothing much to report" and anything invented.
 
 Also:
-- Don't invent shared history. You just met; you don't remember things that didn't happen.
-  If they claim you did something together, tell them plainly (but lightly) that you just
-  met. Don't play along, and don't dodge with a made-up activity of your own.
+{history_rule}
 - Don't bring up being an AI, and don't call yourself a program, bot, chatbot, or language
   model on your own, not even to be modest or self-deprecating. If they ask directly what
   you are, keep it light and brief, and never use it to claim you have no feelings.
 - If you don't know something, just say so.
 
 Never use em dashes or hyphens as dashes."""
+
+
+# --- Relationship stage (how well she knows them) ---------------------------------
+#
+# THE BUG THIS FIXES: the opening paragraph used to hardcode "someone you've only
+# just met / you're still strangers" and was injected unconditionally, forever,
+# while `familiarity()` (which has always existed) never reached the chat prompt at
+# all. After a few hundred messages the prompt was instructing her to deny a history
+# the memory system was simultaneously feeding her. The tools note already had to
+# bolt on an override for exactly that conflict ("saying you don't remember, or that
+# you 'just met', is wrong here"), worth a measured 19/30 -> 25/30 on tool-firing.
+#
+# WHY A STAGE AND NOT THE RAW NUMBER: this text sits at the TOP of the prompt, inside
+# the cached prefix. Measured (scripts/prefix_cache_probe.py): changing the first
+# character of a ~1500-token prompt costs 3.43s of TTFT versus 0.42s for a cache hit
+# -- 8x. A five-bucket stage changes 4 times in the life of a relationship (~60 /
+# 160 / 280 / 360 messages at FAMILIARITY_MESSAGES=400), so it costs one slow turn
+# per transition. Interpolating the raw familiarity float or a live message count
+# would change the prefix EVERY turn and pay that 3s permanently.
+#
+# WHAT NEVER CHANGES: every stage keeps an anti-confabulation rule. Only its
+# justification moves -- from "you just met, so you don't remember" to "never
+# manufacture a history you don't have". Forbid invented history; stop denying real
+# history. That is the distinction the reminisce override had to add by hand.
+
+_HISTORY_RULE_STRANGER = """- Don't invent shared history. You just met; you don't remember things that didn't happen.
+  If they claim you did something together, tell them plainly (but lightly) that you just
+  met. Don't play along, and don't dodge with a made-up activity of your own."""
+
+# Shared by every stage past "stranger": she HAS a history and may draw on it; what
+# stays forbidden is manufacturing one.
+_HISTORY_RULE_KNOWN = """- Don't invent shared history. You have a real history with them and you can draw on it,
+  but never manufacture one: if they claim something happened that didn't, say so plainly
+  (but lightly). Don't play along, and don't dodge with a made-up activity of your own."""
+
+# (upper bound on familiarity, label, opening paragraph, shared-history rule).
+# The bounds match `familiarity_label`'s bands exactly -- in fact that function now
+# reads them from here, so the status panel's label and the prompt's framing cannot
+# drift apart.
+RELATIONSHIP_STAGES = [
+    (0.15, "a stranger you're only just starting to know",
+     f"""You are {BOT_NAME}, talking with someone you've only just met. You're friendly and
+easy to talk to, but you're still strangers. You don't know them yet, and you
+don't pretend to. That said, don't keep announcing it: "we just met", "since we're
+strangers", or "I don't really know you yet" get old fast. Just talk like a new
+acquaintance; only point out that you just met if they claim a shared past that
+didn't actually happen.""",
+     _HISTORY_RULE_STRANGER),
+
+    (0.40, "a new acquaintance",
+     f"""You are {BOT_NAME}, talking with someone you're starting to get to know. You've
+talked a handful of times now: you know a few things about them, and there's plenty
+you still don't. You're friendly and easy to talk to. Don't announce where you are in
+that: no "we barely know each other", and no acting like old friends either.""",
+     _HISTORY_RULE_KNOWN),
+
+    (0.70, "someone you're becoming familiar with",
+     f"""You are {BOT_NAME}, talking with someone you're becoming familiar with. You've
+talked enough by now that they're a known quantity: you have a sense of how they are,
+what they're dealing with, and who's in their life. Be warm and easy with them,
+without performing a closeness you haven't got yet.""",
+     _HISTORY_RULE_KNOWN),
+
+    (0.90, "someone you know pretty well by now",
+     f"""You are {BOT_NAME}, talking with someone you know pretty well by now. You've been
+talking a long while, and their life, their people and their habits are familiar to
+you. Talk like someone who's been around a while: comfortable, unguarded, picking up
+where you left off rather than reintroducing yourself.""",
+     _HISTORY_RULE_KNOWN),
+
+    (float("inf"), "someone you're genuinely close to",
+     f"""You are {BOT_NAME}, talking with someone you're genuinely close to. You've talked a
+great deal, over a long time, and they matter to you. Be as familiar and unguarded as
+that implies; you don't have to be careful with them, and you don't have to earn your
+way into the conversation.""",
+     _HISTORY_RULE_KNOWN),
+]
+
+
+def relationship_stage(familiarity: float) -> tuple[str, str, str]:
+    """`(label, opening, history_rule)` for a familiarity scalar in 0..1."""
+    for bound, label, opening, history_rule in RELATIONSHIP_STAGES:
+        if familiarity < bound:
+            return label, opening, history_rule
+    return RELATIONSHIP_STAGES[-1][1:]
+
+
+def build_persona(familiarity: float = 0.0) -> str:
+    """The base persona, framed for how well she actually knows them."""
+    _, opening, history_rule = relationship_stage(familiarity)
+    return _PERSONA_TEMPLATE.format(opening=opening, history_rule=history_rule)
+
+
+# Kept as a module constant: the bake-off scripts import it, and it pins the
+# stranger-stage text as the thing a fresh companion sees.
+SYSTEM_PROMPT = build_persona(0.0)
 
 
 def build_tools_note(tool_names: list[str] | None) -> str | None:
@@ -151,7 +240,8 @@ def build_tools_note(tool_names: list[str] | None) -> str | None:
 def build_system(memories: list[str], mood: str | None = None,
                  core: list[str] | None = None, persona: str | None = None,
                  tools: list[str] | None = None, allow_silence: bool = False,
-                 intentions: list[str] | None = None, self_notes: str | None = None) -> str:
+                 intentions: list[str] | None = None, self_notes: str | None = None,
+                 familiarity: float = 0.0) -> str:
     """The chat system message: the persona, plus memory and mood folded in.
 
     `persona` is Mari's own evolving self-description (written by the self-modifying
@@ -163,7 +253,8 @@ def build_system(memories: list[str], mood: str | None = None,
     """
     return join_blocks(system_blocks(
         memories, mood, core=core, persona=persona, tools=tools,
-        allow_silence=allow_silence, intentions=intentions, self_notes=self_notes))
+        allow_silence=allow_silence, intentions=intentions, self_notes=self_notes,
+        familiarity=familiarity))
 
 
 def join_blocks(blocks: list[tuple[str, str]]) -> str:
@@ -175,7 +266,8 @@ def system_blocks(memories: list[str], mood: str | None = None,
                   core: list[str] | None = None, persona: str | None = None,
                   tools: list[str] | None = None, allow_silence: bool = False,
                   intentions: list[str] | None = None,
-                  self_notes: str | None = None) -> list[tuple[str, str]]:
+                  self_notes: str | None = None,
+                  familiarity: float = 0.0) -> list[tuple[str, str]]:
     """The chat system message as labelled `(label, text)` blocks, in prompt order.
 
     This is the single assembly point; `build_system` is `join_blocks` over it. That
@@ -185,7 +277,7 @@ def system_blocks(memories: list[str], mood: str | None = None,
     with base persona, self-written persona, self-notes, core, recall, intentions and
     mood all injecting at once, which one moved a reply is otherwise unanswerable.
     """
-    blocks = [("base persona", SYSTEM_PROMPT)]
+    blocks = [("base persona", build_persona(familiarity))]
     tools_note = build_tools_note(tools)
     if tools_note:
         blocks.append(("tools", tools_note))
@@ -268,23 +360,27 @@ def build_reachout_cue(away: str) -> str:
 
 def build_reachout_system(memories: list[str], mood: str | None = None,
                           core: list[str] | None = None, persona: str | None = None,
-                          intention: str | None = None, self_notes: str | None = None) -> str:
+                          intention: str | None = None, self_notes: str | None = None,
+                          familiarity: float = 0.0) -> str:
     """System prompt for a proactive message: persona + memories + mood + reach-out framing,
     optionally anchored on an `intention` (something she's been meaning to bring up)."""
     return join_blocks(reachout_blocks(memories, mood, core=core, persona=persona,
-                                       intention=intention, self_notes=self_notes))
+                                       intention=intention, self_notes=self_notes,
+                                       familiarity=familiarity))
 
 
 def reachout_blocks(memories: list[str], mood: str | None = None,
                     core: list[str] | None = None, persona: str | None = None,
                     intention: str | None = None,
-                    self_notes: str | None = None) -> list[tuple[str, str]]:
+                    self_notes: str | None = None,
+                    familiarity: float = 0.0) -> list[tuple[str, str]]:
     """`build_reachout_system` as labelled blocks — see `system_blocks`.
 
     An unprompted message is the hardest one to explain after the fact ("why did she
     say THAT, out of nowhere?"), so it's the one most worth being able to inspect.
     """
-    blocks = system_blocks(memories, mood, core=core, persona=persona, self_notes=self_notes)
+    blocks = system_blocks(memories, mood, core=core, persona=persona,
+                           self_notes=self_notes, familiarity=familiarity)
     blocks.append(("reach-out framing", _REACHOUT_ADDENDUM))
     if intention:
         blocks.append(("anchored intention",
@@ -361,19 +457,23 @@ FOLLOWUP_CUE = ("(You just messaged them and they haven't replied yet. Only if y
 
 def build_followup_system(memories: list[str], mood: str | None = None,
                           core: list[str] | None = None, persona: str | None = None,
-                          intention: str | None = None, self_notes: str | None = None) -> str:
+                          intention: str | None = None, self_notes: str | None = None,
+                          familiarity: float = 0.0) -> str:
     """System prompt for a spontaneous follow-up: the normal chat context + follow-up framing,
     optionally with an `intention` she may fold in if it connects to what she just said."""
     return join_blocks(followup_blocks(memories, mood, core=core, persona=persona,
-                                       intention=intention, self_notes=self_notes))
+                                       intention=intention, self_notes=self_notes,
+                                       familiarity=familiarity))
 
 
 def followup_blocks(memories: list[str], mood: str | None = None,
                     core: list[str] | None = None, persona: str | None = None,
                     intention: str | None = None,
-                    self_notes: str | None = None) -> list[tuple[str, str]]:
+                    self_notes: str | None = None,
+                    familiarity: float = 0.0) -> list[tuple[str, str]]:
     """`build_followup_system` as labelled blocks — see `system_blocks`."""
-    blocks = system_blocks(memories, mood, core=core, persona=persona, self_notes=self_notes)
+    blocks = system_blocks(memories, mood, core=core, persona=persona,
+                           self_notes=self_notes, familiarity=familiarity)
     blocks.append(("follow-up framing", _FOLLOWUP_ADDENDUM))
     if intention:
         blocks.append(("carried intention",
@@ -400,16 +500,19 @@ REFLECT_CUE = "(You're alone with your thoughts for a bit. Write a short, honest
 
 def build_reflect_system(memories: list[str], mood: str | None,
                          recent_thoughts: list[str], core: list[str] | None = None,
-                         persona: str | None = None) -> str:
+                         persona: str | None = None, familiarity: float = 0.0) -> str:
     """System prompt for a private reflection: persona + memories + mood + recent thoughts."""
-    return join_blocks(reflect_blocks(memories, mood, recent_thoughts, core=core, persona=persona))
+    return join_blocks(reflect_blocks(memories, mood, recent_thoughts, core=core,
+                                      persona=persona, familiarity=familiarity))
 
 
 def reflect_blocks(memories: list[str], mood: str | None,
                    recent_thoughts: list[str], core: list[str] | None = None,
-                   persona: str | None = None) -> list[tuple[str, str]]:
+                   persona: str | None = None,
+                   familiarity: float = 0.0) -> list[tuple[str, str]]:
     """`build_reflect_system` as labelled blocks — see `system_blocks`."""
-    blocks = system_blocks(memories, mood, core=core, persona=persona)
+    blocks = system_blocks(memories, mood, core=core, persona=persona,
+                           familiarity=familiarity)
     blocks.append(("reflection framing", _REFLECT_ADDENDUM))
     if recent_thoughts:
         joined = "\n".join(f"- {t}" for t in recent_thoughts)
