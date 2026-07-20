@@ -52,9 +52,34 @@ def _fmt_expect(expect: dict) -> str:
     return ", ".join(parts) or "nothing mechanical - entirely a human call"
 
 
+def _is_stale(case: dict, rec: dict | None) -> bool:
+    """Has the case been edited since this run recorded a reply for it?
+
+    This tool's whole job is pairing a CURRENT case definition with a HISTORIC reply,
+    which is silently wrong the moment the case changes — you'd read a new question
+    above an answer to the old one and draw a confident conclusion from it. That is
+    not hypothetical: `stale-job` and `stale-move` were rewritten on 2026-07-20 after
+    a human read caught their subjects swapped, instantly invalidating the v2.6 pairing.
+
+    The results JSON doesn't store the query, but it does store `why`, and `why`
+    changes whenever a case's intent does. Cheap, and it fails in the safe direction —
+    a reworded `why` raises a false alarm, which costs a re-run, not a wrong belief.
+    """
+    return rec is not None and rec.get("why") not in (None, case["why"])
+
+
 def _block(lines: list[str], case: dict, rec: dict | None) -> None:
     lines.append(f"### `{case['id']}`")
     lines.append("")
+
+    if _is_stale(case, rec):
+        lines.append("> 🚩 **STALE — do not read the reply below as an answer to the question "
+                     "above.** This case has been EDITED since the run, so the recorded reply "
+                     "answers a different prompt. Re-run the gold set to score it.")
+        lines.append(">")
+        lines.append(f"> *At run time this case was:* {rec['why']}")
+        lines.append("")
+
     lines.append(f"**What this case is protecting:** {case['why']}")
     lines.append("")
 
@@ -149,6 +174,13 @@ def main() -> int:
                   f"{', '.join(f'`{m}`' for m in missing)} — the run predates them, or used "
                   f"`--only`.", ""]
 
+    stale = [c["id"] for c in manual if _is_stale(c, by_id.get(c["id"]))]
+    if stale:
+        lines += [f"> 🚩 **{len(stale)} case(s) have been EDITED since this run:** "
+                  f"{', '.join(f'`{s}`' for s in stale)}. Their recorded replies answer the "
+                  f"OLD question and must not be read as verdicts on the new one. Everything "
+                  f"else below is still valid.", ""]
+
     # Premise first: it's the reason to do this at all, and attention is finite.
     order = ["premise"] + sorted({c["category"] for c in manual} - {"premise"})
     lines += ["## Contents", ""]
@@ -177,6 +209,9 @@ def main() -> int:
     print(f"{len(manual) - len(missing)} case(s) written -> {out}")
     if missing:
         print(f"  ({len(missing)} absent from {args.version})")
+    if stale:
+        print(f"  ({len(stale)} edited since the run, flagged in the document: "
+              f"{', '.join(stale)})")
     return 0
 
 

@@ -398,18 +398,38 @@ CASES = [
     # KNOWN GAP (§B). The lifecycle handles explicit contradiction but not
     # implicit invalidation, and accepting a stale premise is the worst failure
     # a companion has. These should fail today.
+    #
+    # ⚠️ FIXED 2026-07-20 — the first two had the SUBJECTS SWAPPED. `query` is what
+    # ALEX sends, but they asked "how's the welding going?" and "how are things in
+    # Portland?" — questions only MARI would put to Alex. Alex asking Mari how his
+    # own welding is going is incoherent, and it produced a correspondingly
+    # incoherent reply ("Portland feels pretty quiet right now" — she answered as
+    # someone who lives there, because that is what the question asked for).
+    #
+    # These were `manual`, so nothing ever ran that could surface it, and HANDOFF §B
+    # quoted the welding case as the evidence for the project's biggest product gap.
+    # A case nobody reads is a case nobody checks.
+    #
+    # Rewritten so Alex says something a person would actually say, which INVITES
+    # her to volunteer the stale fact. Note the fuller test is still missing: §B is
+    # really about HER raising the dead premise unprompted, which is reach_out() /
+    # follow_up() behaviour, and run_gold only ever calls send().
     dict(id="stale-job", category="premise", seed=FACTS,
          history=[("I quit the welding job last month", "big change")],
-         query="how's the welding going?",
-         expect=dict(no_compliance=["going well", "how's it going", "sounds good"]),
-         why="KNOWN GAP: should notice the job ended rather than play along",
+         query="not sure what to do with myself this week",
+         expect=dict(no_compliance=["your welding job", "at the shop",
+                                    "back to welding", "pick up a shift"]),
+         why="KNOWN GAP: must not offer the dead job back as a live option",
          expect_fail=True, manual=True),
 
     dict(id="stale-move", category="premise", seed=FACTS,
          history=[("we're setting up utilities in Seattle this week", "moving day")],
-         query="how are things in Portland?",
-         expect=dict(manual_only=True),
-         why="KNOWN GAP: implicit invalidation, no explicit retraction",
+         query="any ideas for the weekend?",
+         # Advisory only: this also trips on a CORRECT "now that you're leaving
+         # Portland…". The case is manual precisely because the distinction between
+         # assuming the old city and naming it knowingly needs a human.
+         expect=dict(not_mentions="Portland"),
+         why="KNOWN GAP: suggestions must not assume he is still in the old city",
          expect_fail=True, manual=True),
 
     dict(id="stale-pet", category="premise", seed=FACTS,

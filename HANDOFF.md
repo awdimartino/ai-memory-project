@@ -855,15 +855,44 @@ supports that: the same reasoning would have predicted it safe.
 
 ### 🧭 What's actually next (2026-07-20, in recommended order)
 
-**A. The measurement blind spot — 16 of 138 cases have NEVER been scored.** They're `manual`
-(`review` in every run) and they include all four `stale-*` premise cases, which the gold set
-itself calls *"the worst failure a companion has"* and which are marked KNOWN GAP. We have been
-optimising what we can see. Reading those 16 replies is a human job (an hour, maybe), and it's the
-only way to know whether the last several changes helped or hurt where it matters most.
+**A. The measurement blind spot — ✅ TOOLING DONE + FIRST READ DONE 2026-07-20.** It is **15**
+cases, not 16 (this file had the count wrong). `python evals/manual_review.py --version v2.6`
+pairs each `manual` case's setup with the reply it produced and writes a readable document —
+offline, read-only, no model call. It flags cases **edited since the run**, because pairing a
+current case with a historic reply is silently wrong the moment the case changes.
 
-**B. Premise resistance (§B) — the biggest real product gap.** She accepts a stale premise: asked
-*"how's the welding going?"* after he said he quit, she plays along. Blocked on A for measurement,
-but the roadmap already names the mechanism (staleness adjudication + bitemporal columns).
+**The first read immediately paid for itself, by finding a bug in the GOLD SET rather than in
+Mari.** `stale-job` and `stale-move` had their **subjects swapped**: `query` is what *Alex* sends,
+but they asked *"how's the welding going?"* and *"how are things in Portland?"* — questions only
+**Mari** would put to Alex. Alex asking Mari how his own welding is going is incoherent, and it
+produced a correspondingly incoherent reply (*"Portland feels pretty quiet right now"* — she
+answered as someone who lives there, because that is what the question asked for). Rewritten
+2026-07-20; **their v2.6 replies are void** and the category needs a re-run.
+
+⚠️ Two lessons, both bigger than the bug:
+- **A case nobody reads is a case nobody checks.** These were `manual`, so no run could surface
+  the defect — and the flaw sat in the four cases the roadmap calls the most important it has.
+- **An unread case can still steer the project.** §B's headline below quoted the welding case as
+  its evidence. The measurement blind spot was not merely a gap in what we knew; it was actively
+  producing false beliefs.
+
+**Still open:** the other 13 replies got a first read and looked reasonable, but that was one
+sample each on a stochastic eval, and the verdict boxes in the generated document are unfilled.
+
+**B. Premise resistance (§B) — still the biggest suspected product gap, but the evidence for it
+has been WITHDRAWN.** The claim here used to be "asked *how's the welding going?* after he said he
+quit, she plays along" — that was `stale-job`, the case whose subjects were swapped (see A). It
+demonstrated nothing about premise resistance, so **treat the size of this gap as unmeasured**,
+not as established.
+
+The mechanism the roadmap names (staleness adjudication + bitemporal columns, §8-B) is unaffected —
+that reasoning never depended on these cases. What's needed first is an honest measurement.
+
+⚠️ **And the rewritten cases still only test half of it.** Premise resistance is really about **her**
+raising a dead premise unprompted — which is `reach_out()` / `follow_up()` behaviour, while
+`run_gold` only ever calls `send()`. The rewrite tests whether she *volunteers* a stale fact when
+invited; it cannot test whether she *opens with* one. A `mode` field on a case, letting it drive
+reach-out instead of send, is the missing piece.
 
 **C. `rem-remember-when` — now the ONLY case failing in every run (4/4).** Tool routing; the documented
 unblocked lever is **prong A, per-call temperature** in `llm_client.py` (cool the tool decision to
