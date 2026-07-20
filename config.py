@@ -164,6 +164,30 @@ SALIENCE_MIN_MESSAGES = _i("SALIENCE_MIN_MESSAGES", 4)   # never fire below this
 # Lifecycle: when consolidating, compare a new fact against existing memories this
 # similar (higher than recall — only genuinely related facts get an LLM decision).
 MEMORY_RELATE_SIMILARITY = _f("MEMORY_RELATE_SIMILARITY", 0.6)
+
+# Guard on the model's "duplicate" verdict: honour it only when the two texts really
+# are near-identical. A "duplicate" decision DELETES information (the candidate is
+# dropped and never stored), and the model over-applies it to NARROWING facts —
+# measured 3 of 8 refinements called duplicates, e.g. "The user is a nurse" against
+# "The user works in healthcare" (scripts/duplicate_guard_probe.py). Each one is a
+# fact silently lost, in the subsystem the project exists for.
+#
+# The geometry separates the two classes cleanly where the model doesn't:
+#   refinements (must store)  0.808 - 0.906
+#   duplicates  (must skip)   0.924 - 0.986
+# 0.92 sits in that gap. Set toward the TOP of the gap on purpose: too high only
+# costs a redundant row, too low loses a fact, and those are not equal errors.
+# Calibrated on 8 pairs per class — re-run the probe before moving it.
+#
+# ⚠️ This is cosine between the BARE fact texts, which is why the guard re-embeds
+# them (MemoryManager._bare_duplicate_sims) instead of reusing the stored vectors:
+# those carry KEY EXPANSION (fact + originating transcript), and the context dilutes
+# the score unevenly — nurse/healthcare is 0.844 bare but 0.735 expanded, welder/
+# welder 0.943 bare but 0.835 expanded. Applying this threshold to expanded vectors
+# lets real duplicates through. Lexical overlap (core/textsim) does NOT work here
+# either: measured, the two classes overlap completely ("The user is called Alex"
+# vs "The user's name is Alex" is a true duplicate scoring only 0.200).
+MEMORY_DUPLICATE_MIN_SIMILARITY = _f("MEMORY_DUPLICATE_MIN_SIMILARITY", 0.92)
 MEMORY_RELATE_TOP_K = _i("MEMORY_RELATE_TOP_K", 5)
 # Consolidation batches all lifecycle decisions into ONE model call (speed). Two facts in the
 # SAME window this cosine-similar are treated as the same fact and collapsed without a model

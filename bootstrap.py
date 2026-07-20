@@ -72,6 +72,7 @@ async def build() -> tuple[Companion, str]:
         config.RECALL_TOP_K, config.RECALL_MIN_SIMILARITY,
         config.MEMORY_RELATE_TOP_K, config.MEMORY_RELATE_SIMILARITY,
         core_max=config.CORE_MEMORY_MAX, dup_sim=config.MEMORY_DUP_SIMILARITY,
+        dup_verdict_sim=config.MEMORY_DUPLICATE_MIN_SIMILARITY,
         contrast_gap=config.RECALL_CONTRAST_GAP,
         contrast_floor=config.RECALL_CONTRAST_FLOOR,
         contrast_min_corpus=config.RECALL_CONTRAST_MIN_CORPUS,

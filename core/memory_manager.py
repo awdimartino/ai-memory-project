@@ -52,6 +52,7 @@ class MemoryManager:
                  top_k: int, min_sim: float,
                  relate_top_k: int, relate_sim: float,
                  core_max: int = 12, dup_sim: float = 0.97,
+                 dup_verdict_sim: float = 0.92,
                  contrast_gap: float = 0.0, contrast_floor: float = 0.0,
                  contrast_min_corpus: int = 3):
         self.embedder = embedder
@@ -64,6 +65,10 @@ class MemoryManager:
         self.relate_sim = relate_sim
         self.core_max = core_max
         self.dup_sim = dup_sim  # within-window near-verbatim collapse threshold
+        # Minimum similarity for the model's "duplicate" verdict to be believed. Below
+        # it the candidate is stored anyway: dropping a narrowing fact loses data, and
+        # keeping a redundant row does not. See config.MEMORY_DUPLICATE_MIN_SIMILARITY.
+        self.dup_verdict_sim = dup_verdict_sim
         # Recall's contrast gate (see _rank). Defaults are off, so a MemoryManager
         # built without them behaves exactly as it did before the gate existed.
         self.contrast_gap = contrast_gap
@@ -141,6 +146,38 @@ class MemoryManager:
             "superseded_count": counts["superseded"],
             "superseded": self.store.superseded(recent_superseded),
         }
+
+    async def _bare_duplicate_sims(self, need: list[dict], decisions: dict) -> dict[int, float]:
+        """Max BARE-TEXT cosine between each "duplicate"-verdict candidate and its
+        related memories, for the guard in `consolidate`.
+
+        Deliberately re-embeds the raw contents rather than reusing the vectors already
+        computed. Those were built with KEY EXPANSION (the fact plus the transcript it
+        came from), so they carry conversational context that dilutes the comparison by
+        an amount that varies per pair: the nurse/healthcare pair measures 0.844 bare
+        and 0.735 expanded, while welder/welder measures 0.943 bare and 0.835 expanded.
+        A threshold calibrated on bare text (as this one is) applied to expanded vectors
+        put a genuine duplicate on the wrong side of the line — caught on the first live
+        run, and the reason this method exists at all.
+
+        One extra embeddings call, and only when the model actually returned a
+        "duplicate" for something with a related memory.
+        """
+        targets = {i: c for i, c in enumerate(need, start=1)
+                   if decisions.get(i, {}).get("action") == "duplicate" and c["related"]}
+        if not targets:
+            return {}
+        texts: list[str] = []
+        spans: dict[int, tuple[int, int]] = {}
+        for i, c in targets.items():
+            start = len(texts)
+            texts.append(c["content"])
+            texts.extend(m["content"] for m, _ in c["related"])
+            spans[i] = (start, len(texts))
+        vecs = [np.asarray(v, dtype=np.float32)
+                for v in await self.embedder.embed_documents(texts)]
+        return {i: max((_cosine(vecs[start], r) for r in vecs[start + 1:end]), default=0.0)
+                for i, (start, end) in spans.items()}
 
     async def _corpus(self) -> tuple[list[dict], np.ndarray | None]:
         """Load active memories once as `(rows, L2-normalized matrix)`.
@@ -275,8 +312,9 @@ class MemoryManager:
         direct = [c for c in kept if not c["related"]]
 
         decisions = await self._batch_decisions(need)
+        bare_sims = await self._bare_duplicate_sims(need, decisions)
 
-        new = updated = duplicate = 0
+        new = updated = duplicate = overridden = 0
         superseded: set[int] = set()
         for i, c in enumerate(need, start=1):  # candidate numbers are 1-based
             d = decisions.get(i, {})
@@ -284,8 +322,20 @@ class MemoryManager:
             target = d.get("target", 0)
             blob = c["vec"].tobytes()
             if action == "duplicate":
-                duplicate += 1
-                continue
+                # A "duplicate" verdict is the only decision that DISCARDS information,
+                # so it's the one worth checking. The model over-applies it to narrowing
+                # facts ("is a nurse" vs "works in healthcare" — measured 3/8), and each
+                # one is a fact silently lost. Honour it only when the texts really are
+                # near-identical; the embedding separates refinements (<=0.906) from real
+                # restatements (>=0.924) cleanly where the model doesn't.
+                best = bare_sims.get(i, 0.0)
+                if best >= self.dup_verdict_sim:
+                    duplicate += 1
+                    continue
+                logger.info("duplicate verdict overridden (best related sim %.3f < %.3f): %r",
+                            best, self.dup_verdict_sim, c["content"][:60])
+                overridden += 1
+                # falls through and is inserted below, as if the decision were "new"
             if (action == "update" and isinstance(target, int)
                     and 1 <= target <= len(c["related"])):
                 old_id = c["related"][target - 1][0]["id"]
@@ -304,8 +354,9 @@ class MemoryManager:
             new += 1
 
         logger.info(
-            "consolidated %d msg(s): %d new, %d updated, %d duplicate (%d decided in 1 call)",
-            len(messages), new, updated, duplicate, len(need),
+            "consolidated %d msg(s): %d new, %d updated, %d duplicate, "
+            "%d duplicate-verdict overridden (%d decided in 1 call)",
+            len(messages), new, updated, duplicate, overridden, len(need),
         )
         if new or updated:
             await self._enforce_core_cap()
