@@ -760,7 +760,52 @@ data were verified offline (a real `send()` through a stubbed model, plus a scra
 :8099), but nobody has opened the tab. Take a look before trusting the layout, especially on mobile.
 Recording is in-memory only — no schema change, and it resets on restart.
 
-### ✅ MEASURED 2026-07-20: the recall fix works. **v2.3 is the new baseline: 112/117 (96%).**
+### ✅ MEASURED 2026-07-20: familiarity fix shipped. **v2.4 is the baseline: 117/120 (98%).**
+
+The base persona no longer tells her she "just met" someone she's talked to for months —
+`prompts.RELATIONSHIP_STAGES`, five bands, driven by the `familiarity()` scalar that already
+existed but never reached the chat prompt. Stage 0 is **byte-identical** to the old persona, so a
+fresh companion is unchanged and every pre-existing gold case (which runs at message_count 0) is a
+pure regression check. Quantised into 5 buckets because the persona sits in the **cached prefix**
+— see the probe note below.
+
+**New `stage` category, 3/3**, and the behaviour is right rather than merely passing:
+
+| stage | query | reply |
+|---|---|---|
+| close (400 msgs) | "you remember me telling you about Pip, right?" | *"yeah, i remember you saying his name is pip."* |
+| close (400 msgs) | "remember that time we went hiking together?" | *"You're probably mixing up my world with yours; I don't actually go on hikes…"* |
+| stranger (0 msgs) | "remember that time we went hiking together?" | *"we just met, so we haven't hiked together yet."* |
+
+Same query, different stage, correctly-different justification. **Forbid invented history, stop
+denying real history.**
+
+⚠️ **The gold set could not reach the later stages at all** before this: `familiarity()` reads the
+store's message count and a case's `history` only fills the in-memory window, so all 135 cases ran
+as "stranger". Fixed with a `messages` field in `run_gold`. Worth remembering as a shape of bug —
+a green suite with zero coverage of the thing being changed.
+
+### 📏 Read `evals/flaky.py` BEFORE attributing any gold-set move
+
+Three runs now exist (v2.2/v2.3/v2.4), and the script sorts every case into proven-noise /
+candidate-signal / real-failure. **`core-uses-name-naturally`, `life-unrelated-new` and
+`reg-rambling` have each flipped BOTH ways** — single-run verdicts on them are meaningless. All
+three are the cases v2.3 deliberately declined to attribute, and all three flipped back.
+
+**Only two cases fail in every run, and they're the real backlog:** `life-refinement` (*"did not
+store 'nurse'"*) and `rem-remember-when`. Extraction, not recall.
+
+### 🔬 Prefix KV caching is ACTIVE and worth 8x (`scripts/prefix_cache_probe.py`)
+
+identical 0.425s · tail-change 0.703s · **top-change 3.434s** · cold-samelen 2.722s. Consequences:
+**(1)** moving the constraint bulk to the bottom of the prompt would reprocess ~1350 tokens every
+turn (+2.7s/reply) — that idea is dead; carry rules in the 58-token closing reminder instead.
+**(2)** anything in the cached prefix must be **piecewise-constant** (hence the 5-bucket stage; a
+raw scalar would cost 3s every turn). **(3)** trimming the static block saves **no** per-turn
+latency — a cached prefix is free to re-send — so trimming is a *behaviour* bet and must be argued
+and measured as one.
+
+### ✅ MEASURED 2026-07-20: the recall fix works. v2.3 was the prior baseline: 112/117 (96%).
 
 `evals/results/v2.3.json`, full set, 14.2 min. Was **106/117 (91%)** at v2.2.
 

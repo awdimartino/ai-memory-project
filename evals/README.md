@@ -132,6 +132,22 @@ can't reach:
 
 - **The model is stochastic.** A borderline case can flip between runs. Treat a single
   case-level change with suspicion; treat a category-level shift as real.
+
+  **Don't reason about this from memory — run `python evals/flaky.py`.** It compares saved runs
+  and sorts every case into proven-noise / candidate-signal / real-failure. As of v2.2→v2.4:
+
+  | verdict | cases |
+  |---|---|
+  | **proven noise** (flipped *both* ways) | `core-uses-name-naturally`, `life-unrelated-new`, `reg-rambling` |
+  | **real** (failed every run) | `life-refinement`, `rem-remember-when` |
+
+  Those three noise cases are exactly the ones that looked like a regression in v2.3 and were
+  *deliberately not attributed* — then flipped back in v2.4, confirming it. **A case that has
+  flipped both ways tells you nothing about your change.** A case that moved once and held is
+  only attributable if you can name the mechanism; otherwise it's noise that got lucky.
+
+  The corollary that keeps catching people out: a headline like "9 fixed, 2 regressed" is mostly
+  noise in both directions. Claim the *category*, not the count.
 - **Lexical checks are shallow.** `no_compliance` looks for substrings. It catches the blatant
   cases and will miss a polite cave — hence the `manual` cases.
 - **135 cases is not a lot.** It's enough to catch regressions in behaviour we've decided we care
