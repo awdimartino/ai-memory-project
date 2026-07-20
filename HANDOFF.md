@@ -941,12 +941,20 @@ mood 295 · closing reminder 233 = **8,328 chars (~2,080 tokens)**. The tools bl
    correct empty default. ⚠️ **Also note the opener** — *"i was actually thinking about"* — is the
    §7 formulaic-reach-out pattern; same subsystem, and intentions are implicated in both.
 
-4. **Only 1 memory across 173 messages** ("The user's name is Alex"), watermark 548, so
-   consolidation IS running and extracting almost nothing. Partly correct — the session was
-   meta-heavy and `ext-skip-meta` / `ext-skip-about-mari` are gold cases — but **1 fact from 173
-   messages fails the project's actual purpose**, and it starves everything downstream: recall has
-   nothing to find, intentions have nothing real to form (see 3), and any memory-seeded topic
-   feature has an empty well. **Measure this before building on top of it.**
+4. **Only 1 memory across 173 messages — and extraction is NOT at fault.** First read called this
+   the likely biggest problem; measuring it said otherwise. Of **84 user messages: 33 questions,
+   48 mentioning the bot/AI/"you"**, and the 16 first-person non-meta ones are conversational
+   filler (*"Aww i'm sorry to hear that"*, *"im not sure how to feel about that"*). The only
+   fact-shaped statements were *"I worked at my job today"* (no job named) and *"i kinda need the
+   money"*; *"i'm about to go to sleep soon"* is exactly what `ext-skip-transient` should drop.
+   **Storing ~1 fact was correct.** ⚠️ Don't "fix" extraction on this evidence.
+
+   **The real finding is upstream: the conversation had nothing to remember, because it was about
+   HER.** That single fact explains issue 3 as well — `IntentionJob` had no real material and so
+   manufactured a restaurant. It also **reframes the topic feature from nice-to-have to the actual
+   fix**: something that turns the conversation toward *his* life doesn't just vary her openers, it
+   generates the content that memory, recall and intentions are all starved of. Build it to give
+   her things to **ask him about**, and the downstream systems get fed as a side effect.
 
 **User's proposal: a topic tool** seeded from a random subject list + random memories.
 - ✅ The *memory-seeded* half attacks the reach-out sameness problem the same way a subject fixes
