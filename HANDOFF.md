@@ -534,7 +534,45 @@ have to live somewhere. The clean fix is llama.cpp's `--cpu-moe`, the same class
 was already found to strip. Treat 2026 "best local LLM" guides with suspicion: one claims Llama 4
 Scout (109B total) "fits on a 12GB card at Q4", which is off by ~5×.
 
-**Still-fitting untested candidate:** Qwen3 14B @ Q4_K_M (~9 GB).
+**✅ RESEARCHED 2026-07-20: what actually fits, and what has working reasoning control.**
+
+*Nothing was downloaded for this — `lms get <model>@__probe__ -y` prints the resolution plan and
+then errors on the bad quant, so a size can be checked for free.*
+
+| model | size | fits 16GB? | reasoning control |
+|---|---|---|---|
+| qwen3.5-9b (production) | 6.55 GB | ✅ | on/off only (template) |
+| gemma-4-12b-qat | 7.15 GB | ✅ | on/off only (template) |
+| **gpt-oss-20b** (on disk) | **12.11 GB** | ✅ | **`reasoning_effort` GENUINELY WORKS** |
+| qwen3.5-27b | 17.47 GB (Q4_K_M only) | ❌ | — |
+| qwen3.5-35B-A3B / 30b-a3b | ~18.6 GB (Q4_K_M only) | ❌ | — |
+| **seed-oss-36b** | **21 GB** | ❌ | **native thinking BUDGET in LM Studio** |
+
+- **LM Studio still has not shipped a reasoning budget.** #1974 and #1838 (filed 2026-04-22) are
+  still *open feature requests*. The §0 park stands.
+- **Seed-OSS 36B is the one model that solves it** — the budget is native to the model and
+  configurable in LM Studio's UI, so there is no server flag to strip. **It is 21 GB. It does not
+  fit.** Note it for a future GPU; it is the single best argument for more VRAM.
+- ⚠️ **LM Studio bug #2147**: a 2.24.0 / 2.25.0-beta regression makes reasoning models leak
+  thinking and waste tokens. Don't update casually.
+- **The Qwen3.5 lineup** is small 0.8/2/4/9B, medium **27B dense + 35B-A3B MoE**, then 122B-A10B
+  and 397B-A17B. ⚠️ Do **not** reach for "Qwen3-14B" as the bigger option — it is a generation
+  OLDER than the production 9B and would likely be a downgrade.
+
+**⚠️ SIZE IS NOT THE LEVER ON THIS CARD — measured:** 9B → **2.7s**, 12B → **6.0s**. That is 1.33×
+the parameters for 2.2× the time, i.e. **memory-bandwidth bound**, so a 27B extrapolates to ~15-20s
+even if it fitted. **The practical ceiling for conversational latency here is ~12B, and production
+is already near it.** Combined with "both 9B and 12B fail `bat_ball`", the conclusion is that
+neither more parameters nor a different model of this class is the answer.
+
+**↗ IDEA worth considering: gpt-oss-20b as `BRAIN_MODEL`, not as chat.** It fits (12.11 GB), it is
+already downloaded, and its `reasoning_effort` dial demonstrably works — and the **brain path is
+structured output (extraction / lifecycle / intentions / self-notes) where its fatal flaw, 88%
+question-ending personality, does not apply at all.** `BRAIN_MODEL` already exists as a config knob
+and is currently empty. ⚠️ **The blocker is VRAM, not principle:** 12.11 + 6.55 = 18.7 GB, so it
+cannot co-reside with the chat model, and a swap costs ~10s each way (measured loading Gemma).
+The only shape that might work is batching brain work into the **sleep** window, when the chat model
+is unloaded anyway — a real design change, not a config edit. Recorded, not attempted.
 
 **Tool-calling reliability — plan still valid, unstarted.** `tool_eval.py` noisy (22/23/25, run ×3). **TIME
 inconsistency = temperature** (0.8 too hot for routing; 0.2 → TIME 7/8) → **prong A: per-call temperature** in
