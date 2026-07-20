@@ -524,6 +524,56 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
   **time-of-day / do-not-disturb gating** so she doesn't wake at 3am. Build that first, then a `WakeJob`
   (web-registered like reach-out) that checks energy + connection + a cooldown. `wake()` is already a public seam.
 
+- **★ A4 — she can make herself UNAVAILABLE (user-requested 2026-07-20). NOT STARTED.**
+  *"You wouldn't expect a real person to be available 24/7."* Today she is: she sleeps only when
+  **you** are away (`SleepJob` fires on your idleness or her energy), so she has never once been
+  unreachable while you wanted to talk. Availability is the last thing about her that is purely a
+  function of your behaviour rather than hers, and that asymmetry is what reads as a service.
+
+  **The seams already exist** — `Companion.sleep()`/`wake()` are public, `model_manager` unloads
+  from VRAM, `PASS`/silent turns handle "she didn't reply", drives supply motivation, and the web
+  UI already renders an asleep state. Little of this is new machinery; it's a new *trigger* and an
+  honest surface.
+
+  Four constraints, and the first is the hard one:
+
+  1. **⚠️ It collides head-on with the embodiment work.** *"I'm going out for a walk"* is precisely
+     the invented experience `core/embodiment.py` exists to block, and the exact failure the
+     follow-up rewrite fixed (*"I found a good spot to sit"*). Building this the obvious way would
+     re-open the project's most-tuned wound. **The honest version is better and already built:**
+     she has *real* internal activities — reflection, journaling, forming intentions,
+     consolidation, persona editing. *"I want to sit with something for a bit"* is **true**. Let
+     her step away to do a thing she genuinely does, and the feature stops fighting the persona and
+     starts expressing it. (The "no body" honesty was kept deliberately — user's call, §0.)
+  2. **Never leave on a heavy disclosure.** Vanishing right after *"I've been really depressed and
+     haven't told anyone"* is the single worst version of this feature. Gate hard on emotional
+     salience — the `disclosure` gold cases already encode those moments, and `emotion.arousal()`
+     already measures the signal `CONSOLIDATE_SALIENCE` uses.
+  3. **Legible, not silent.** Silent turns needed a *"· Mari stayed quiet"* marker or they read as
+     a crash; this needs the same and more — *what* she's doing and *roughly when she's back*.
+     Unexplained unavailability on a local app reads as a bug, and the user will (correctly) go
+     looking for one.
+  4. **Bounded, and never a wall.** Minutes, not hours, with a kill-switch env var. On her daily
+     driver, a companion that can't be reached is an outage.
+
+  **Routing decision (do not skip).** The ask is a *tool*, and the framework is ready — but §E is
+  explicit that the constraint is routing, not the framework: tool-calling sits at ~23/30, so a
+  mis-fire means she vanishes at random and an under-fire means the feature never runs. The
+  alternative is a **drive-gated tick job** (like reach-out), which **bypasses routing entirely** —
+  the same argument that makes the Navidrome idea interesting. Recommend prototyping the tick-job
+  form first and adding the tool only if she should be able to leave *mid-conversation*, which is
+  the one thing a tick job can't express.
+
+  **⚠️ Check this against §G before building.** Artificial scarcity is a documented
+  engagement-manipulation pattern, and §G already records that the farewell tactics work through
+  **anger and curiosity, not enjoyment**. The dividing line is legibility and independence:
+  unavailability that is *predictable, explained, and uncorrelated with how much you want her*
+  is authenticity; unavailability that is opaque, variable-ratio, or that shows up more when you're
+  most engaged is the manipulative version wearing the same clothes. **Build the first; measure that
+  you didn't build the second** — if session count rises while the conversations get shorter or
+  more anxious, that's the bad one, and §G's Xiaoice finding says engagement metrics will look
+  *good* while it happens.
+
 **★ Completing the Generative Agents cognitive loop (idea pass 2026-07-19).** Arc A gave Mari drives + energy; the
 triad from Park et al.'s "Smallville" agents is **memory (§B) + reflection (her journal) + planning — the one she's
 missing.** Adding planning makes the inner life *goal-directed*:
@@ -1152,6 +1202,11 @@ the measured distributions, including the two false-positive guards.)*
 ### User-requested, still deferred
 - ~~**Prompt-inspector tab** (§C)~~ **DONE 2026-07-20** — header → "prompt". See the entry above.
 - **Follow-up decay** — 2-3 chained messages with tapering probability instead of the hard cap of 1.
+- **★ She can make herself unavailable (2026-07-20)** — *"you wouldn't expect a real person to be
+  available 24/7."* Full design in **§8-A4**; read it before starting, because the obvious
+  implementation re-opens the embodiment problem and the feature sits close to a §G line. Most of
+  the machinery already exists (`sleep()`/`wake()`, drives, the asleep UI state) — what's new is a
+  trigger she owns and an honest surface for it.
 
 ### Parked
 §0 bounded thinking, blocked on LM Studio #1838/#1974. Production stays thinking-OFF on
