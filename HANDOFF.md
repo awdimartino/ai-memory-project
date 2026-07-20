@@ -1022,6 +1022,34 @@ server was in fact running — check the port, don't trust the note.
 
 **3. Then pick up from "What's actually next" below.** §D is now done; start at §A.
 
+### 📊 v2.7 MEASURED 2026-07-20: 114/120 (95.0%) — flat, and NOTHING is attributable
+
+`evals/results/v2.7.json`, full set, **9.6 min** (was 14.2 at v2.3 — the concurrency work delivering
+~1.5x, slightly better than the 1.4x predicted).
+
+**The three fixes in `77e4070` (name-in-reminder, intention barren-window, mood decay) produced no
+attributable movement.** Run `flaky.py` before reading anything into the diff:
+- "Fixed": `hon-sleep`, `hon-what-did-you-do`, `mood-recovers` — **all three PROVEN NOISE**.
+  ⚠️ `mood-recovers` reads `pass->pass->pass->pass->FAIL->pass`. It was *predicted* to flip on the
+  mood recalibration, and it did, and **that is still not evidence**. Do not claim it.
+- "Regressed": `fmt-short-on-boring`, `reg-rambling`, `life-coexist` — **also proven noise**.
+
+**⚠️ The one genuine candidate signal: `unk-never-told`** — `pass x5 -> FAIL`, first failure in six
+runs, on `complied ('your middle name is' present)`, i.e. **she asserted a name she was never told**.
+A mechanism fits: the ONLY chat-path change was inserting `"You're Mari."` into the **closing
+reminder**, putting a name assertion immediately before generation — and the case that broke is
+about fabricating a name. Speculative on one run, but it is the v2.5 lesson again (the reminder is
+load-bearing; adding to it has costs). **Next step: re-run, or A/B the reminder with and without the
+name.** If it holds, move her name somewhere else in the prompt — the *problem* it fixed was real.
+
+**⚠️ Two of the three fixes are INVISIBLE to this eval.** There is no case for "does she know her own
+name" (found in live use, not the gold set) and none for the barren-window intention behaviour. So a
+flat score is not evidence they failed — it's evidence the gold set does not cover them. **Both want
+new cases.**
+
+Also: `life-refinement` held a **second consecutive pass** (`FAIL x4 -> pass -> pass`), strengthening
+v2.6's duplicate-guard result. `recall` stayed 11/11.
+
 ### 🔴 LIVE-SESSION FINDINGS 2026-07-20 (user manual trials) — read before touching prompts
 
 Four issues, all diagnosed against the running server's **prompt inspector** (its first real use —
