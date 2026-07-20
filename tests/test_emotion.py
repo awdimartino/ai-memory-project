@@ -30,6 +30,69 @@ def _mgr(script):
 
 
 @case
+async def a_baseline_mood_injects_no_block_at_all():
+    """The affect push is zero when there is nothing to report.
+
+    All six channels were listed every turn; the research (§G2) measured that affect
+    instructions cause over-broad emotion expression, so a flat readout on a neutral
+    turn is pure cost. Empty string => `prompts.system_blocks` omits the block.
+    """
+    mgr, meta, conn, path = _mgr([])
+    mgr.state = dict(BASELINE_STATE)
+    assert mgr.as_prompt() == "", f"baseline still pushes affect: {mgr.as_prompt()!r}"
+    conn.close(); os.remove(path)
+
+
+@case
+async def only_channels_off_baseline_are_mentioned():
+    mgr, meta, conn, path = _mgr([])
+    mgr.state = dict(BASELINE_STATE)
+    mgr.state["irritation"] = BASELINE_STATE["irritation"] + 0.3
+    out = mgr.as_prompt()
+    assert "irritation" in out, out
+    for c in ("warmth", "amusement", "melancholy", "unease", "interest"):
+        assert c not in out, f"{c} reported while at baseline:\n{out}"
+    conn.close(); os.remove(path)
+
+
+@case
+async def intensity_is_capped_below_intense():
+    """Live, warmth pegged at 0.907 rendered as 'overwhelming' — the top bands are
+    where the tic and the emotion-narration showed up."""
+    mgr, meta, conn, path = _mgr([])
+    mgr.state = dict(BASELINE_STATE)
+    mgr.state["warmth"] = 0.98            # would be "all-consuming" uncapped
+    out = mgr.as_prompt()
+    for loud in ("intense", "overwhelming", "all-consuming"):
+        assert loud not in out, f"{loud!r} survived the cap:\n{out}"
+    assert "warmth" in out, "a pegged channel must still be reported, just quieter"
+    conn.close(); os.remove(path)
+
+
+@case
+async def amusement_is_no_longer_structurally_suppressed():
+    """It was the only channel with a zero baseline AND the fastest decay, so
+    playfulness could never persist. Measured at 0.067 live: effectively absent."""
+    from core.emotion_manager import DECAY_RATES
+
+    assert BASELINE_STATE["amusement"] > 0, "amusement still decays to nothing"
+    assert DECAY_RATES["amusement"] < DECAY_RATES["interest"], \
+        "amusement should no longer be the fastest-fading channel"
+    # It should still fade faster than the deep moods: a joke is not a mood.
+    assert DECAY_RATES["amusement"] > DECAY_RATES["warmth"]
+    conn = None
+    mgr, meta, conn, path = _mgr([])
+    mgr.state = dict(BASELINE_STATE)
+    mgr.state["amusement"] = 0.6
+    turns = 0
+    while mgr.state["amusement"] > BASELINE_STATE["amusement"] + 0.1 and turns < 200:
+        await mgr.react("")
+        turns += 1
+    assert turns >= 6, f"amusement gone after {turns} turns; still too fleeting"
+    conn.close(); os.remove(path)
+
+
+@case
 async def melancholy_recovers_in_a_bounded_number_of_turns():
     """The 2026-07-20 regression: she stayed sad for a whole session.
 

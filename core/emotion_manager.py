@@ -78,7 +78,12 @@ CHANNEL_MAP = {
 DECAY_RATES = {
     "irritation": 0.15,
     "warmth":     0.05,
-    "amusement":  0.25,
+    # amusement 0.25 -> 0.12 (2026-07-20): it was the fastest-decaying channel, so even
+    # when something amused her it was gone within two turns. Paired with the zero
+    # baseline above, the trait that produces playfulness was the one the model
+    # suppressed hardest. Still faster than warmth/melancholy — a joke should fade
+    # sooner than a mood — just not instantly.
+    "amusement":  0.12,
     "melancholy": 0.08,
     "unease":     0.10,
     "interest":   0.20,
@@ -87,11 +92,24 @@ DECAY_RATES = {
 BASELINE_STATE = {
     "irritation": 0.2,
     "warmth":     0.05,
-    "amusement":  0.0,
+    # ⚠️ amusement 0.0 -> 0.12 (2026-07-20). It was the ONLY channel with a zero
+    # baseline AND the fastest decay, so playfulness always fell to nothing and stayed
+    # there — measured at 0.067 during a live session, i.e. "absent". The user's report
+    # that she is "too nice" turned out to be this: warm with no amusement is exactly
+    # nice-but-not-playful, and a probe showed banter needs amusement AND persona
+    # permission together (neither alone produced it). Set near `interest` (0.15) so a
+    # light touch is her resting state rather than a spike that immediately decays.
+    "amusement":  0.12,
     "melancholy": 0.1,
     "unease":     0.0,
     "interest":   0.15,
 }
+
+# Only mention a channel this far from its baseline; below it, she is unremarkably
+# herself and saying so is pure affect push (see `as_prompt`).
+MOOD_REPORT_MIN_DELTA = 0.10
+# Cap the rendered intensity: nothing reads as "intense" or louder.
+MOOD_WORD_CAP = 0.64
 
 
 def value_to_word(value: float) -> str:
@@ -175,8 +193,35 @@ class EmotionManager:
             self.state[c] += DECAY_RATES[c] * (BASELINE_STATE[c] - self.state[c])
 
     def as_prompt(self) -> str:
-        """Fold the current mood into the system prompt (never referenced literally)."""
-        body = "\n".join(f"- {c}: {value_to_word(self.state[c])}" for c in CHANNELS)
+        """Fold the current mood into the system prompt (never referenced literally).
+
+        ⚠️ NARROWED 2026-07-20 to reduce the AFFECT PUSH, on measured grounds (HANDOFF
+        §G2). An affect instruction in a system prompt causes over-broad emotion
+        expression: "You are very emotional" drove sadness precision to 0.146 — ~85% of
+        sadness expressions fired at non-sad inputs — and collapsed neutral responding,
+        on models of exactly this size. Crucially the same study found *restraint*
+        instructions near-inert, so the trailing "never name your emotions" is unlikely
+        to be doing any work, and adding a louder version of it is predicted to fail.
+        The lever is to push less, not to forbid harder:
+
+        1. **Only channels meaningfully off baseline are mentioned.** All six were listed
+           every turn, handing her a full emotional readout even when five were flat. On
+           a genuinely neutral turn this now returns "" and `system_blocks` omits the
+           block entirely — no affect instruction at all.
+        2. **The intensity vocabulary is capped.** Nothing renders as "intense",
+           "overwhelming" or "all-consuming". Live, warmth was pegged at 0.907
+           ("overwhelming") while she said "haha" in 63% of replies and narrated her
+           feelings; the top bands are where the trouble was.
+
+        Both are deliberately reversible knobs rather than a rewrite, and
+        `evals/style_scorer.py` measures the thing they are meant to move.
+        """
+        notable = [(c, self.state[c]) for c in CHANNELS
+                   if abs(self.state[c] - BASELINE_STATE[c]) >= MOOD_REPORT_MIN_DELTA]
+        if not notable:
+            return ""      # at baseline: say nothing rather than assert six flat labels
+        body = "\n".join(f"- {c}: {value_to_word(min(v, MOOD_WORD_CAP))}"
+                         for c, v in notable)
         return (
             f"Your current emotional state:\n{body}\n\n"
             f"Let this shape how you come across and how you act right now, not just your "
