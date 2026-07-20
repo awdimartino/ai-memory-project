@@ -209,7 +209,8 @@ class Companion:
             "at": time.time(),
             "blocks": [{"label": label, "text": text} for label, text in blocks],
             "messages": [dict(m) for m in messages],
-            "reply": None,   # filled in after generation; None => she stayed quiet
+            "reply": None,      # filled in after generation; None => she stayed quiet
+            "reasoning": "",    # her hidden thinking, filled in alongside the reply
         }
         self._prompts.append(record)
         return record
@@ -280,6 +281,9 @@ class Companion:
 
             silent = _is_pass(text)
             prompt_record["reply"] = None if silent else text
+            # Her hidden thinking, for the inspector. Especially worth seeing on a
+            # SILENT turn, where the reply explains nothing about why she passed.
+            prompt_record["reasoning"] = stats.get("reasoning") or ""
 
             uid = await asyncio.to_thread(self.store.add_message, self.session_id, "user", user_text)
             self.history.append({"role": "user", "content": user_text})
@@ -351,7 +355,8 @@ class Companion:
         messages.extend(self.history[-config.HISTORY_TURNS:])
         messages.append({"role": "user", "content": cue})
         record = self._record_prompt(kind, blocks, messages)
-        text, _ = await self.llm.stream(messages, _sink)
+        text, stats = await self.llm.stream(messages, _sink)
+        record["reasoning"] = stats.get("reasoning") or ""
         text = text.strip()
         if not text or _is_pass(text):
             return None

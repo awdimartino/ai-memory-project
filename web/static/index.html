@@ -295,6 +295,10 @@
     .pi-block pre { margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--bg); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     .pi-msg { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 12px 0 5px; }
     .pi-sec { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 7px; }
+    /* Thinking reads as her interior, not as prompt data — dimmer and italic so it's
+       visually distinct from the blocks we sent her. */
+    .pi-think > summary .lbl { color: var(--mari); }
+    .pi-think > pre { font-style: italic; opacity: .85; }
     .pi-reply { border-left: 2px solid var(--mari); padding: 6px 0 6px 11px; font-size: 13px; margin-bottom: 4px; }
     .pi-reply.quiet { border-color: var(--faint); color: var(--faint); font-style: italic; }
     @media (max-width: 760px) {
@@ -977,6 +981,23 @@
       conv.appendChild(el("pre", null,
         rest.map((m) => `[${m.role}] ${m.content}`).join("\n\n")));
       box.appendChild(conv);
+
+      // Her hidden thinking (§0 bounded reasoning). Between the prompt and the reply
+      // because that's where it happens, and open by default: unlike the persona it
+      // is different every turn, which is exactly what's worth reading. On a silent
+      // turn it's the ONLY thing that explains the decision.
+      if (p.reasoning) {
+        box.appendChild(el("div", "pi-sec",
+          `thinking · ${p.reasoning.length} chars · ~${Math.round(p.reasoning.length / 4)} tokens`));
+        const th = el("details", "pi-block pi-think");
+        th.open = true;
+        const ts = el("summary");
+        ts.appendChild(el("span", "lbl", "what she thought before answering"));
+        ts.appendChild(el("span", "n", p.reasoning.length + " chars"));
+        th.appendChild(ts);
+        th.appendChild(el("pre", null, p.reasoning));
+        box.appendChild(th);
+      }
 
       box.appendChild(el("div", "pi-sec", "reply"));
       box.appendChild(el("div", "pi-reply" + (p.reply == null ? " quiet" : ""),

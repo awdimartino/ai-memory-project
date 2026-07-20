@@ -85,9 +85,9 @@ class LLMClient:
         previously duplicated here and in `_tool_step_once`, free to drift apart.
         """
         start = time.perf_counter()
-        text, _calls, tokens, first_at = await self._tool_step(
+        text, _calls, tokens, first_at, reasoning = await self._tool_step(
             self._prep(messages), on_token, None)
-        return text, self._tool_stats(start, first_at, tokens or 0, text, [])
+        return text, self._tool_stats(start, first_at, tokens or 0, text, [], reasoning)
 
     # ---- native tool-calling (pillar 4) --------------------------------------
     # LM Studio streams tool calls as deltas (finish_reason="tool_calls", empty
@@ -111,15 +111,22 @@ class LLMClient:
         first_at = None
         total_tokens = 0
         invocations: list[dict] = []  # what ran this turn, surfaced for the UI inspector
+        # Thinking from EVERY round, not just the last: on a tool turn the interesting
+        # reasoning is usually the round that decided to call the tool.
+        thinking: list[str] = []
 
         for _ in range(max_iters):
-            text, calls, ct, ft = await self._tool_step(convo, on_token, registry.specs())
+            text, calls, ct, ft, reasoning = await self._tool_step(
+                convo, on_token, registry.specs())
             if ft is not None and first_at is None:
                 first_at = ft
             if ct:
                 total_tokens += ct
+            if reasoning:
+                thinking.append(reasoning)
             if not calls:  # no tool requested -> this was the final answer
-                return text, self._tool_stats(start, first_at, total_tokens, text, invocations)
+                return text, self._tool_stats(start, first_at, total_tokens, text,
+                                              invocations, "\n\n---\n\n".join(thinking))
 
             # Record the assistant's tool-call turn, then feed back each result.
             convo.append({
@@ -140,10 +147,13 @@ class LLMClient:
         # Safety net: the model kept calling tools past the cap. Force one final
         # answer with no tools so a turn can never hang in a tool loop.
         logger.warning("tool loop hit max_iters=%d; forcing a plain answer", max_iters)
-        text, _, ct, ft = await self._tool_step(convo, on_token, None)
+        text, _, ct, ft, reasoning = await self._tool_step(convo, on_token, None)
         if ft is not None and first_at is None:
             first_at = ft
-        return text, self._tool_stats(start, first_at, total_tokens + (ct or 0), text, invocations)
+        if reasoning:
+            thinking.append(reasoning)
+        return text, self._tool_stats(start, first_at, total_tokens + (ct or 0), text,
+                                      invocations, "\n\n---\n\n".join(thinking))
 
     async def _run_call(self, registry, call: dict) -> str:
         """Parse one call's args and execute it, turning any failure into a result string."""
@@ -180,9 +190,19 @@ class LLMClient:
 
     async def _tool_step_once(self, messages, on_token: Callable[[str], Awaitable], tools):
         """Stream one completion: emit visible content (think-stripped) AND accumulate
-        any tool_call deltas. Returns (text, calls, completion_tokens, first_token_at).
-        `calls` is [{id, name, raw_args}] — empty when the model just answered."""
+        any tool_call deltas. Returns
+        (text, calls, completion_tokens, first_token_at, reasoning).
+        `calls` is [{id, name, raw_args}] — empty when the model just answered.
+
+        `reasoning` is the model's hidden thinking, captured for the inspector. Note
+        reasoning arrives on TWO different channels and only one was ever handled:
+        an inline `<think>…</think>` block inside `content` (stripped below), and a
+        separate `reasoning_content` delta field, which LM Studio uses for qwen and
+        which this dropped on the floor. Bounded thinking (§0) made that content
+        worth seeing, so it is now kept rather than discarded.
+        """
         raw = ""
+        reasoning = ""
         visible_started = False
         first_token_at = None
         completion_tokens = None
@@ -221,6 +241,9 @@ class LLMClient:
                     if tc.function and tc.function.arguments:
                         slot["args"] += tc.function.arguments
 
+                # The separate reasoning channel (getattr: not every server sends it).
+                reasoning += getattr(delta, "reasoning_content", None) or ""
+
                 if delta.content is None:
                     continue
                 raw += delta.content
@@ -245,6 +268,12 @@ class LLMClient:
                     first_token_at = time.perf_counter()
                     await on_token(raw)
 
+        # An inline <think> block is the OTHER reasoning channel; keep it too, so the
+        # inspector shows thinking regardless of which way the server delivered it.
+        inline = _THINK_BLOCK.search(raw)
+        if inline and not reasoning:
+            reasoning = inline.group(0).strip()
+
         text = _THINK_BLOCK.sub("", raw).strip()
         # Flush a short answer that never tripped the emit checks — but only on a
         # pure answer turn (when there's a tool call, content is scaffolding, not reply).
@@ -257,10 +286,10 @@ class LLMClient:
             for i, v in sorted(tool_frags.items())
             if v["name"]  # ignore an empty fragment (never a real call)
         ]
-        return text, calls, completion_tokens, first_token_at
+        return text, calls, completion_tokens, first_token_at, reasoning.strip()
 
     def _tool_stats(self, start: float, first_at: float | None, tokens: int, text: str,
-                    invocations: list[dict]) -> dict:
+                    invocations: list[dict], reasoning: str = "") -> dict:
         """Same stats shape as stream() plus a `tools` list; ttft spans any tool
         round-trips (honest latency: a tool turn genuinely takes longer)."""
         end = time.perf_counter()
@@ -269,7 +298,8 @@ class LLMClient:
         estimated = not tokens
         tokens = tokens or max(1, round(len(text) / 4))
         return {"ttft": ft - start, "tok_per_s": tokens / gen_time,
-                "tokens": tokens, "estimated": estimated, "tools": invocations}
+                "tokens": tokens, "estimated": estimated, "tools": invocations,
+                "reasoning": reasoning}
 
     async def _create_retry(self, **kwargs):
         """Non-streaming completion with the model lock + transient-error retries."""
