@@ -71,6 +71,53 @@ def _llm(fc, retries=3):
 
 
 @case
+async def leaked_reasoning_is_stripped_from_the_stored_reply():
+    """LM Studio bug #2147: a whole chain of thought arrives as `content`.
+
+    Observed live 2026-07-20 — the CoT ended in `</think>` with NO opening tag, so the
+    matched-pair regex didn't fire and the entire reasoning was streamed to the user
+    AND written to her history, where it poisoned every later turn's context.
+
+    Streaming can't be un-sent, but STORING it is the damage that compounds.
+    """
+    leak = ('" (Wait, I am not supposed to use the tool unless necessary).\n'
+            '    *   "okay fine, i was wrong." (Direct)\n\n'
+            "5.  **Refining for Persona:** I am irritated but trying to be direct.\n"
+            "</think>\n\n"
+            "fine, maybe i was wrong to say that.")
+    fc = FakeCompletions(tokens=(leak,))
+    text, stats = await _llm(fc).stream([{"role": "user", "content": "hi"}], _noop)
+
+    assert text == "fine, maybe i was wrong to say that.", f"leak not stripped: {text!r}"
+    assert "</think>" not in text
+    assert "Refining for Persona" not in text, "reasoning survived into the stored reply"
+    # It is thinking, so it belongs in the inspector rather than being thrown away.
+    assert "Refining for Persona" in (stats.get("reasoning") or ""), "leak lost, not rerouted"
+
+
+@case
+async def a_matched_think_block_still_works():
+    """The normal path must be untouched by the orphan fix."""
+    fc = FakeCompletions(tokens=("<think>weighing it up</think>\n\nyeah, sounds right.",))
+    text, stats = await _llm(fc).stream([{"role": "user", "content": "hi"}], _noop)
+    assert text == "yeah, sounds right.", text
+    assert "weighing it up" in (stats.get("reasoning") or "")
+
+
+@case
+async def a_reply_with_no_thinking_is_unchanged():
+    """No tags at all: nothing may be stripped."""
+    fc = FakeCompletions(tokens=("just a normal reply.",))
+    text, stats = await _llm(fc).stream([{"role": "user", "content": "hi"}], _noop)
+    assert text == "just a normal reply.", text
+    assert not (stats.get("reasoning") or "")
+
+
+async def _noop(_t):
+    pass
+
+
+@case
 async def retryable_classification():
     assert _is_retryable(RETRYABLE)
     assert _is_retryable(Exception("Connection error."))

@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 _THINK_OPEN = "<think>"
 _THINK_BLOCK = re.compile(r"(?s)^\s*<think>.*?</think>\s*")
+# An UNMATCHED closing tag: reasoning that arrived with no opening <think>.
+# Observed live 2026-07-20 under LM Studio's Engine Protocol beta (bug #2147, which
+# reports reasoning models leaking thinking): a whole chain of thought was emitted as
+# the reply, ending in `</think>`, and `_THINK_BLOCK` did not match because there was
+# no opening tag — so the CoT was streamed to the user AND stored in her history,
+# where it then poisoned the context of every later turn.
+# Anything before a closing tag is thinking by definition, opener or not.
+_THINK_ORPHAN = re.compile(r"(?s)^.*?</think>\s*")
 
 _RETRYABLE_MARKERS = ("fetch failed", "predict request", "connection error",
                       "connection reset", "timeout", "temporarily")
@@ -275,6 +283,19 @@ class LLMClient:
             reasoning = inline.group(0).strip()
 
         text = _THINK_BLOCK.sub("", raw).strip()
+        # Leaked thinking with no opening tag (see _THINK_ORPHAN). Strip it here even
+        # though it has already been streamed: what matters most is that it does not
+        # get STORED — a leaked CoT in the history is read back on every later turn.
+        if "</think>" in text:
+            leaked = _THINK_ORPHAN.match(text)
+            if leaked:
+                if not reasoning:
+                    reasoning = leaked.group(0).replace("</think>", "").strip()
+                text = _THINK_ORPHAN.sub("", text).strip()
+                logger.warning(
+                    "reasoning leaked into content (%d chars stripped); "
+                    "LM Studio bug #2147 — it was streamed to the UI but not stored",
+                    len(leaked.group(0)))
         # Flush a short answer that never tripped the emit checks — but only on a
         # pure answer turn (when there's a tool call, content is scaffolding, not reply).
         if not visible_started and text and not tool_frags:
