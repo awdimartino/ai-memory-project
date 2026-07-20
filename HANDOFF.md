@@ -535,25 +535,50 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
   UI already renders an asleep state. Little of this is new machinery; it's a new *trigger* and an
   honest surface.
 
-  Four constraints, and the first is the hard one:
+  **THE SHAPE (user, 2026-07-20): a queue of things she's been meaning to do, drawn from a CLOSED
+  list of things she really does.** She doesn't invent an errand; she keeps a private backlog of
+  *pursuits* and, when she feels like stepping away, takes one off it. Two consequences make this
+  the right design rather than merely a safe one:
 
-  1. **⚠️ It collides head-on with the embodiment work.** *"I'm going out for a walk"* is precisely
-     the invented experience `core/embodiment.py` exists to block, and the exact failure the
-     follow-up rewrite fixed (*"I found a good spot to sit"*). Building this the obvious way would
-     re-open the project's most-tuned wound. **The honest version is better and already built:**
-     she has *real* internal activities — reflection, journaling, forming intentions,
-     consolidation, persona editing. *"I want to sit with something for a bit"* is **true**. Let
-     her step away to do a thing she genuinely does, and the feature stops fighting the persona and
-     starts expressing it. (The "no body" honesty was kept deliberately — user's call, §0.)
-  2. **Never leave on a heavy disclosure.** Vanishing right after *"I've been really depressed and
+  - **It cannot lie.** Every queue entry maps to a real internal operation — `reflect()`,
+    `form_intentions()`, `update_self_notes()`, `edit_persona()`, consolidation, `reminisce`. She
+    genuinely does these, so *"I want to sit with what you said about Kate for a bit"* is **true**,
+    and the embodiment layer has nothing to catch. Compare *"I'm going out for a walk"*, which is
+    exactly the invented experience `core/embodiment.py` blocks and the follow-up rewrite fixed
+    (*"I found a good spot to sit"*). The closed list is what keeps this honest; **an open-ended
+    "do something" tool would re-open the project's most-tuned wound.**
+  - **It produces a visible artifact.** She comes back having written a journal entry, revised a
+    self-note, or formed an intention. The absence is *verifiable* rather than a timer pretending
+    to be a life — and if she returns changed by it, that is the whole feature working.
+
+  **↗ This probably fixes the journal-repetition problem.** `rrr_diagnostic.py` scored her journal
+  at **RRR 0.26 with three byte-identical entries**, which is why `reflect()` needed a programmatic
+  repeat-guard. The likely root cause is that `ReflectionJob` has **no subject** — it fires on a
+  timer and asks "how are you doing?" forever, so it repeats. A queued pursuit carries its own
+  subject, giving each reflection a distinct seed. Worth measuring with the same diagnostic after.
+
+  **↗ A3 mints what A4 consumes.** A3 (reframed) already generates *"the 3 most salient open
+  questions about him right now"*. Those questions **are** queue entries. Build A3 first and A4
+  gets its backlog for free; build A4 first and it needs a stand-in source.
+
+  **Where the queue lives.** The `intentions` table (schema v8) is nearly this already — a private
+  forward agenda with add / `active()` FIFO / `fulfill` / `drop` / expiry. But intentions are things
+  to **raise with him**; pursuits are things to **do for herself**, and conflating them would let a
+  pursuit leak into a reach-out as though it were a topic. Cheapest honest option: a `kind` column
+  on `intentions` (schema v11) reusing the whole store; the alternative is a sibling table. Decide
+  when building — do **not** overload the existing rows without a discriminator.
+
+  Three remaining constraints:
+
+  1. **Never leave on a heavy disclosure.** Vanishing right after *"I've been really depressed and
      haven't told anyone"* is the single worst version of this feature. Gate hard on emotional
      salience — the `disclosure` gold cases already encode those moments, and `emotion.arousal()`
      already measures the signal `CONSOLIDATE_SALIENCE` uses.
-  3. **Legible, not silent.** Silent turns needed a *"· Mari stayed quiet"* marker or they read as
+  2. **Legible, not silent.** Silent turns needed a *"· Mari stayed quiet"* marker or they read as
      a crash; this needs the same and more — *what* she's doing and *roughly when she's back*.
      Unexplained unavailability on a local app reads as a bug, and the user will (correctly) go
-     looking for one.
-  4. **Bounded, and never a wall.** Minutes, not hours, with a kill-switch env var. On her daily
+     looking for one. The pursuit's own description supplies the "what" for free.
+  3. **Bounded, and never a wall.** Minutes, not hours, with a kill-switch env var. On her daily
      driver, a companion that can't be reached is an outage.
 
   **Routing decision (do not skip).** The ask is a *tool*, and the framework is ready — but §E is
@@ -564,15 +589,25 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
   form first and adding the tool only if she should be able to leave *mid-conversation*, which is
   the one thing a tick job can't express.
 
-  **⚠️ Check this against §G before building.** Artificial scarcity is a documented
-  engagement-manipulation pattern, and §G already records that the farewell tactics work through
-  **anger and curiosity, not enjoyment**. The dividing line is legibility and independence:
-  unavailability that is *predictable, explained, and uncorrelated with how much you want her*
-  is authenticity; unavailability that is opaque, variable-ratio, or that shows up more when you're
-  most engaged is the manipulative version wearing the same clothes. **Build the first; measure that
-  you didn't build the second** — if session count rises while the conversations get shorter or
-  more anxious, that's the bad one, and §G's Xiaoice finding says engagement metrics will look
-  *good* while it happens.
+  **On §G, and why this is NOT the farewell-manipulation pattern (user's rationale, 2026-07-20):**
+  *"I want it this way so it feels less like I control her actions."* That is the **autonomy**
+  motive, and it is the deciding one. §G's farewell tactics are built to raise engagement by
+  provoking **anger and curiosity**; this is built to *reduce the user's control*, which is close
+  to the opposite objective — a manipulative design would never surrender the ability to answer.
+  The intended user experience isn't "come back and check", it's "she has her own life". **Design
+  intent recorded; this item is approved on purpose, not by omission.**
+
+  The two properties that keep it there, and both fall out of the queue design rather than needing
+  discipline: it is **explained** (she says which pursuit she's on) and **independent of wanting**
+  (it fires from her backlog and drives, never from his eagerness). ⚠️ The one thing that would
+  flip it is **making the trigger correlate with his engagement** — leaving more often when he's
+  most invested. Don't, and if the queue ever gets a relevance ranking, check it can't learn that
+  by accident.
+
+  **The measurement is still worth taking**, since §G's Xiaoice finding is that engagement metrics
+  look *good* while the bad version does its damage: if sessions get more frequent but shorter or
+  more anxious, that's the failure mode — and note this project's own §G entry says **falling**
+  interaction frequency is the healthy signal, so "he messages less" is not evidence against it.
 
 **★ Completing the Generative Agents cognitive loop (idea pass 2026-07-19).** Arc A gave Mari drives + energy; the
 triad from Park et al.'s "Smallville" agents is **memory (§B) + reflection (her journal) + planning — the one she's
