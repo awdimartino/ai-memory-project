@@ -1,3 +1,13 @@
 openai>=1.0
 fastapi>=0.110
 uvicorn[standard]>=0.29
+# Direct imports, previously present only transitively (httpx via the openai SDK).
+# A clean install without these fails at core/memory_manager.py / notifier.py import.
+numpy>=1.24
+httpx>=0.27
+# Lazy-imported by infrastructure/emotion_classifier.py for the mood classifier.
+# torch is transformers' runtime backend; the CPU build is enough (the GPU is for
+# LM Studio, and the classifier is small) — install it from the cpu index if you
+# want to avoid pulling CUDA:  pip install torch --index-url https://download.pytorch.org/whl/cpu
+transformers>=4.40
+torch>=2.0

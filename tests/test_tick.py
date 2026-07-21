@@ -863,7 +863,29 @@ async def unavailable_fires_on_high_restlessness_and_notifies():
     await _unavailable_job(comp, drv=drv, threshold=0.8, pushes=pushes).run()
     assert comp.go_calls == 1
     assert drv.discharged == ["restlessness"]
-    assert pushes == [{"type": "unavailable", "reason": "journaling", "eta_secs": 120}]
+    assert pushes == [{"type": "unavailable", "reason": "journaling", "eta_secs": 120,
+                       "push": "stepped away — journaling (back in 2m)"}]
+
+
+@case
+async def unavailable_notice_carries_phone_wording():
+    """The UI renders this event from reason/eta and needs no `content` — but the phone
+    push body came from `content`, so stepping away fired a BLANK notification."""
+    comp = UnavailableCompanion(idle=5.0, reason="sitting with a question", eta=3600.0)
+    pushes = []
+    await _unavailable_job(comp, drv=FakeDriveState(restlessness=0.9), pushes=pushes).run()
+    body = pushes[0]["push"]
+    assert body.strip(), "an unavailable notice must carry a non-empty phone body"
+    assert "sitting with a question" in body and "1h" in body, body
+
+
+@case
+async def unavailable_notice_survives_a_missing_reason():
+    comp = UnavailableCompanion(idle=5.0, reason=None, eta=45.0)
+    pushes = []
+    await _unavailable_job(comp, drv=FakeDriveState(restlessness=0.9), pushes=pushes).run()
+    assert pushes[0]["reason"] == "taking a moment", "None reason must not reach the UI"
+    assert pushes[0]["push"] == "stepped away — taking a moment (back in 45s)"
 
 
 @case

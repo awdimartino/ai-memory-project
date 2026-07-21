@@ -27,6 +27,17 @@ import time
 logger = logging.getLogger(__name__)
 
 
+def _fmt_eta(secs: float) -> str:
+    """Human ETA for a phone push: '40s', '15m', '1h5m'. Mirrors the UI's fmtEta."""
+    secs = max(0, int(secs or 0))
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m"
+    return f"{mins // 60}h{mins % 60}m" if mins % 60 else f"{mins // 60}h"
+
+
 class Job:
     """A unit of autonomous work. Subclasses set `name` and implement `run`.
 
@@ -432,9 +443,12 @@ class UnavailableJob(DriveGatedJob):
         else:
             went = await self.companion.go_unavailable()
         if went:
-            reason = self.companion.unavailable_reason()
+            reason = self.companion.unavailable_reason() or "taking a moment"
             eta = round(self.companion.unavailable_eta_seconds() or 0)
-            await self.notify({"type": "unavailable", "reason": reason, "eta_secs": eta})
+            # `push` is the phone wording: the UI renders this as a system line from
+            # reason/eta and needs no `content`, but a push with no body is a blank buzz.
+            await self.notify({"type": "unavailable", "reason": reason, "eta_secs": eta,
+                               "push": f"stepped away — {reason} (back in {_fmt_eta(eta)})"})
 
 
 class PursuitReturnJob(Job):

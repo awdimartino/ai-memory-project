@@ -5,6 +5,8 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+# pre-migration snapshots of companion.db
+*.db.bak-*
 
 # generated bake-off transcripts (the harness itself lives in scripts/)
 /bakeoff/

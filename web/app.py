@@ -92,11 +92,21 @@ async def _notify(message: dict) -> None:
     browser closed, or simply another tab in focus. Pushing while they're looking
     right at it is just a duplicate buzz; not pushing while they're away means the
     message may as well not have been sent.
+
+    The phone text is `push` if the job supplied one, else `content`. Not every
+    unprompted event is a chat bubble: `unavailable` renders as a system line and
+    carries no `content`, which silently pushed an EMPTY notification. So jobs whose
+    phone wording differs from their UI wording set `push`, and an event with neither
+    never buzzes — a blank notification is strictly worse than no notification.
     """
     await _broadcast(message)
     if state.phone is None or state.is_present():
         return
-    await state.phone.push(message.get("content", ""))
+    body = (message.get("push") or message.get("content") or "").strip()
+    if not body:
+        logger.debug("no phone push: %s carries no body", message.get("type"))
+        return
+    await state.phone.push(body)
 
 
 @contextlib.asynccontextmanager
@@ -144,6 +154,8 @@ async def lifespan(_app: FastAPI):
     if companion.tick is not None:
         await companion.tick.stop()
     await companion.flush()  # consolidate whatever didn't fill a window
+    if state.phone is not None:
+        await state.phone.aclose()  # release the pooled httpx connection
 
 
 app = FastAPI(lifespan=lifespan)
@@ -304,8 +316,11 @@ async def test_notify() -> dict:
     phone = state.phone
     if phone is None or not phone.enabled():
         return {"ok": False, "error": "phone push not configured (set NOTIFY_URL)"}
-    await phone.push("test push from Mari 👋")
-    return {"ok": True}
+    # Report what the Bark server actually said. This used to return ok:True on any
+    # completed request, so a wrong device key (HTTP 404) verified as working — which
+    # defeats the only purpose this endpoint has.
+    delivered, detail = await phone.push("test push from Mari 👋")
+    return {"ok": delivered} if delivered else {"ok": False, "error": detail}
 
 
 async def _send_conversations(ws: WebSocket) -> None:
