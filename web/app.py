@@ -391,6 +391,7 @@ async def ws(websocket: WebSocket) -> None:
                         await websocket.send_json({
                             "type": "done", "text": result.text,
                             "stats": result.stats, "silent": result.silent,
+                            "slept": result.slept,
                             "recalled": [{"content": c2, "similarity": s} for c2, s in result.recalled],
                             "emotion": result.emotion, "core": result.core or [],
                             "tools": result.tools or [],

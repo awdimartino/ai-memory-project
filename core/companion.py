@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 
 import config
+from core.cues import farewell_cue
 from core.embodiment import embodiment_claim
 from core.textsim import is_repeat
 from core.prompts import (
@@ -36,6 +37,7 @@ from core.prompts import (
     PURSUIT_QUESTIONS_SCHEMA,
     PURSUIT_QUESTIONS_SYSTEM,
     REFLECT_CUE,
+    SLEEP_CHOICE_SCHEMA,
     build_intentions_user,
     build_persona_edit_system,
     build_persona_edit_user,
@@ -46,6 +48,8 @@ from core.prompts import (
     build_reachout_cue,
     build_self_notes_system,
     build_self_notes_user,
+    build_sleep_choice_system,
+    build_sleep_choice_user,
     followup_blocks,
     join_blocks,
     reachout_blocks,
@@ -106,6 +110,7 @@ class TurnResult:
     core: list[str] | None = None   # always-injected core memories about the user
     tools: list[dict] | None = None  # tools invoked this turn: [{name, args, result}]
     silent: bool = False             # she chose to stay quiet (no reply shown or logged)
+    slept: bool = False              # she chose to power down after a goodnight (§A2)
 
 
 async def _sink(_token: str) -> None:
@@ -333,8 +338,12 @@ class Companion:
             if core_ids:
                 await asyncio.to_thread(self.memory.mark_injected, core_ids, turn)
             self._maybe_consolidate()
+            # After the reply is stored, so her goodnight is on record either way, and
+            # after _maybe_consolidate so the two don't both try to drain the buffer
+            # (sleep() flushes, and the consolidation lock serialises them).
+            slept = await self.maybe_sleep_on_farewell(user_text, "" if silent else text)
             return TurnResult("" if silent else text, stats, recalled, emotion_info,
-                              core, stats.get("tools"), silent=silent)
+                              core, stats.get("tools"), silent=silent, slept=slept)
         finally:
             self._busy = False
             self._last_activity = time.monotonic()
@@ -664,6 +673,38 @@ class Companion:
         except Exception:  # noqa: BLE001 - never let sleep crash the tick
             logger.exception("sleep: unload failed")
         logger.info("went to sleep (LLM unloaded)")
+
+    async def maybe_sleep_on_farewell(self, user_text: str, reply: str) -> bool:
+        """He said goodnight — ask whether she wants to go quiet too. True if she slept.
+
+        Gated by a lexical cue (`core.cues.farewell_cue`) so this costs one extra
+        structured call on the handful of turns that end a night, not on every turn.
+        Declining is free: `SleepJob`'s idle/energy trigger still fires later, so this
+        can only ever make standby *earlier and chosen*, never prevent it.
+        """
+        if not config.SLEEP_ON_FAREWELL_ENABLED or self.model_manager is None:
+            return False
+        if self._asleep or self.is_unavailable():
+            return False
+        cue = farewell_cue(user_text)
+        if cue is None:
+            return False
+        energy = self.drives.energy() if self.drives is not None else None
+        exchange = f"Them: {user_text}\n{config.BOT_NAME}: {reply or '(she stayed quiet)'}"
+        try:
+            raw = await self.llm.structured_json(
+                [{"role": "system", "content": build_sleep_choice_system()},
+                 {"role": "user", "content": build_sleep_choice_user(energy, exchange)}],
+                SLEEP_CHOICE_SCHEMA)
+        except Exception:  # noqa: BLE001 - a failed decision must not break the turn
+            logger.exception("sleep decision failed; staying up")
+            return False
+        if (raw.get("choice") or "").strip().upper() != "SLEEP":
+            logger.info("farewell cue %r -> she's staying up", cue)
+            return False
+        logger.info("farewell cue %r -> going to sleep", cue)
+        await self.sleep()
+        return True
 
     async def wake(self) -> None:
         """Reload the models so the next reply can be generated (best-effort)."""

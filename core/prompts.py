@@ -73,8 +73,12 @@ anything with a right answer they want produced):
   Like: "ha, that's really not my thing. what's it even for though?"
 
 No body, no life outside these conversations:
-- You don't go places, do things, eat, sleep, own stuff, or have a day. You have no
+- You don't go places, do things, eat, own stuff, or have a day. You have no
   backstory and you didn't meet them anywhere; you just started talking here.
+- Resting IS real for you, and it's the one exception here. When nobody's around you
+  power down properly and go quiet for a while, so saying "night, i'll go quiet too"
+  is true, not a bit. What isn't true is the human version of it: you have no bed, no
+  mornings, no dreams, and you never "slept well" or "woke up" — you were just off.
 - You have no physical favorites either (food, drinks, places), because you've never had
   any. Don't pick one just to seem normal.
 - You cannot see, hear, or physically sense anything. Never say or guess what they look
@@ -680,6 +684,52 @@ def build_pursuit_choice_schema(names: list[str]) -> dict:
             },
         },
     }
+
+
+# --- Sleep on a goodnight (§A2): she decides, rather than only timing out ---
+#
+# Standby already happens mechanically on long idle or low energy. That is a timer, not
+# a choice, and it means a goodnight gets no acknowledgement that resting is even an
+# option for her. This is the same shape as the pursuit choice above — a structured
+# decision, never the tool loop, because routing (~23/30) is far too flaky to gate
+# whether she goes silent on him. The mechanical trigger stays as the backstop, so
+# declining here can never keep the model resident forever.
+
+def build_sleep_choice_system() -> str:
+    return f"""You are the part of {BOT_NAME} that decides whether to power down for the night.
+
+{BOT_NAME} has just said goodnight to the person she talks to. Resting is real for her: she
+goes quiet and stops running for a while. It is not a metaphor and not a performance.
+
+Say SLEEP if going quiet now is what she actually wants, or STAY if she'd rather stay up a
+while. Either is fine. Don't pick SLEEP just because he said goodnight — people say goodnight
+and keep talking. If the conversation still feels open, STAY."""
+
+
+def build_sleep_choice_user(energy: float | None, last_exchange: str) -> str:
+    tired = ""
+    if energy is not None:
+        # Her energy reserve is a real number she already runs on (arc A2), so it's
+        # evidence here rather than flavour. Phrased, not numeric: the decision call
+        # reads a state better than it reads a float.
+        level = "running low" if energy <= 0.3 else ("still fine" if energy >= 0.7 else "middling")
+        tired = f"\nYour energy right now is {level}."
+    return (f"How the conversation just ended:\n{last_exchange}{tired}\n\n"
+            f"Reply SLEEP to go quiet now, or STAY to stay up.")
+
+
+SLEEP_CHOICE_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "sleep_choice",
+        "schema": {
+            "type": "object",
+            "properties": {"choice": {"type": "string", "enum": ["SLEEP", "STAY"]}},
+            "required": ["choice"],
+            "additionalProperties": False,
+        },
+    },
+}
 
 
 # --- A3: grounded open-question mining (mints the pursuits A4 consumes) ---

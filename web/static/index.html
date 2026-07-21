@@ -678,6 +678,12 @@
           addStats(msg.stats);
           addDetails(msg.recalled, msg.emotion, msg.core, msg.tools);
         }
+        if (msg.slept) {
+          // She chose to power down after the goodnight, rather than timing out 30
+          // minutes later. Say so, or the model just silently unloads.
+          addSys("· went quiet for the night — a message will wake her");
+          pollStatus();
+        }
         current = null; setSending(false);
       } else if (msg.type === "error") {
         if (current) { current.classList.remove("typing"); current.textContent += `\n[error: ${msg.message}]`; }

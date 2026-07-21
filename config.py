@@ -306,6 +306,13 @@ SLEEP_ENABLED = _flag("SLEEP_ENABLED", True)
 SLEEP_AFTER_IDLE = _f("SLEEP_AFTER_IDLE", 1800)   # 30 min away -> sleep
 LMS_PATH = os.environ.get("LMS_PATH", "lms")                           # LM Studio CLI
 
+# When the user says goodnight, ask her whether she wants to go quiet too, instead of
+# only ever timing out into standby 30 minutes later. Costs ONE structured call, and
+# only on turns where core/cues.py sees a farewell — not on every turn. Declining is
+# free: SLEEP_AFTER_IDLE still fires, so this can only make standby earlier and
+# CHOSEN, never prevent it. Needs SLEEP_ENABLED (it's the same model_manager).
+SLEEP_ON_FAREWELL_ENABLED = _flag("SLEEP_ON_FAREWELL_ENABLED", True)
+
 # Internal drives (multi-drive proactivity, roadmap arc A1 — "observe first" slice).
 # Slow-integrating scalars (connection, restlessness) that rise while you're away,
 # modulated by mood, and relax on contact — a more lifelike generalization of the tick's
