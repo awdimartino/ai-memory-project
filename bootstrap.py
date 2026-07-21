@@ -13,6 +13,7 @@ from core.companion import CONSOLIDATED_WATERMARK_KEY, Companion
 from core.drives import DriveManager
 from core.emotion_manager import EmotionManager
 from core.memory_manager import MemoryManager
+from core.pursuits import build_default_registry
 from core.tools import ToolRegistry
 from core.tick import (
     DriveDriftJob,
@@ -20,6 +21,7 @@ from core.tick import (
     IntentionJob,
     MoodDriftJob,
     PersonaEditJob,
+    PursuitMiningJob,
     ReflectionJob,
     SelfNotesJob,
     SleepJob,
@@ -128,6 +130,13 @@ async def build(db_path: str | None = None) -> tuple[Companion, str]:
                           intentions=intention_store,
                           session_title=conv_store.session_title(active))
 
+    # §A4 pursuit registry: built AFTER the companion so each pursuit's handler can
+    # close over it (unlike core/builtin_tools.py's tools, which close over stores
+    # built BEFORE the companion). Kept fully inert (None) unless the feature flag is
+    # on, so the kill-switch needs no special-casing anywhere else.
+    if config.PURSUIT_UNAVAILABLE_ENABLED:
+        companion.pursuits = build_default_registry(companion)
+
     # Proactivity heartbeat. Created, not started; the entry point starts it so eval/test
     # harnesses that call build() don't tick. Internal jobs live here; surface-specific
     # jobs (reach-out, which needs the WebSocket) are registered by the entry point.
@@ -145,6 +154,10 @@ async def build(db_path: str | None = None) -> tuple[Companion, str]:
         if config.INTENTION_ENABLED:
             jobs.append(IntentionJob(companion, config.TICK_INTERVAL,
                                      config.INTENTION_MIN_IDLE, config.INTENTION_COOLDOWN))
+        if config.PURSUIT_MINING_ENABLED:
+            jobs.append(PursuitMiningJob(companion, config.TICK_INTERVAL,
+                                         config.PURSUIT_MINING_MIN_IDLE, config.PURSUIT_MINING_COOLDOWN,
+                                         salience=config.PURSUIT_SALIENCE))
         if config.SELFNOTES_ENABLED:
             jobs.append(SelfNotesJob(companion, config.TICK_INTERVAL,
                                      config.SELFNOTES_MIN_IDLE, config.SELFNOTES_COOLDOWN))

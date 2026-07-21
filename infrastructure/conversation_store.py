@@ -201,6 +201,15 @@ class SqliteConversationStore(SqliteStore):
         ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
+    def recent_messages_with_ids(self, limit: int) -> list[dict]:
+        """Like `recent_messages`, but keeps the row id — the citation surface for
+        A3's grounded open-question mining (§A4): a mined question must point back
+        to a real message here, or it's rejected."""
+        rows = self.conn.execute(
+            "SELECT id, role, content FROM messages ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [{"id": r["id"], "role": r["role"], "content": r["content"]} for r in reversed(rows)]
+
     def messages_after(self, msg_id: int) -> list[dict]:
         rows = self.conn.execute(
             "SELECT id, role, content FROM messages WHERE id > ? ORDER BY id", (msg_id,)

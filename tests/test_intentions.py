@@ -181,6 +181,40 @@ async def main():
     c = Companion(FakeLLM(), FakeConv(), FakeMemory(), InMemoryMeta(), 1, history=HIST)
     check(await c.form_intentions() == [], "no IntentionStore -> form_intentions is a no-op")
 
+    # --- 8) kind/citations (§A4: pursuits share this table) ---
+    st = _store()
+    agenda_id = st.add("ask how his jacket dye turned out")               # default kind="agenda"
+    pursuit_id = st.add("what's really going on with his job?", kind="pursuit", citations=[3, 7])
+    check(st.active() == st.active(kind="agenda"), "kind defaults to 'agenda'")
+    check([i["id"] for i in st.active(kind="agenda")] == [agenda_id], "agenda filter excludes pursuits")
+    check([i["id"] for i in st.active(kind="pursuit")] == [pursuit_id], "pursuit filter excludes agenda")
+    check(st.active(kind="pursuit")[0]["citations"] == [3, 7], "citations round-trip through add/active")
+    check(st.active(kind="agenda")[0]["citations"] == [], "an agenda item carries no citations")
+    check(st.count_active(kind="agenda") == 1 and st.count_active(kind="pursuit") == 1,
+          "count_active respects kind")
+    check(len(st.all()) == 2 and len(st.all(kind="pursuit")) == 1,
+          "all(kind=None) returns both; all(kind=X) filters")
+    n = st.drop_older_than("9999-01-01T00:00:00", kind="pursuit")
+    check(n == 1 and st.count_active(kind="pursuit") == 0 and st.count_active(kind="agenda") == 1,
+          "drop_older_than(kind=) only retires that kind")
+    st.clear()
+    check(st.all() == [], "clear() wipes both kinds")
+
+    # A pursuit must never leak into the chat agenda ride-along or reach-out's anchor,
+    # even when it's the OLDEST row in the table (FIFO would otherwise surface it).
+    st = _store()
+    old_pursuit = st.add("an old open question", kind="pursuit", citations=[1])
+    agenda_item = st.add("ask about his weekend")
+    comp = _companion(st, FakeLLM(reply="hows the weekend been"),
+                      [{"role": "user", "content": "later"}])
+    msg = await comp.reach_out()
+    check(msg is not None, "reach_out produced a message")
+    remaining = st.active(kind="pursuit")
+    check(len(remaining) == 1 and remaining[0]["id"] == old_pursuit and remaining[0]["citations"] == [1],
+          "the pursuit row must be untouched by reach_out")
+    check(all(i["id"] != old_pursuit for i in st.all() if i["fulfilled_at"]),
+          "reach_out must never fulfil a pursuit as though it were an agenda item")
+
     print(f"OK - {_checks} checks passed")
 
 

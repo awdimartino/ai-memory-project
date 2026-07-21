@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 import config
 from bootstrap import build, configure_logging
 from core.companion import Companion
-from core.tick import FollowUpJob, ReachOutJob
+from core.tick import FollowUpJob, PursuitReturnJob, ReachOutJob, UnavailableJob
 from infrastructure.notifier import PhonePush
 
 logger = logging.getLogger("web")
@@ -125,6 +125,16 @@ async def lifespan(_app: FastAPI):
             companion.tick.register(FollowUpJob(
                 companion, _notify, config.TICK_INTERVAL, config.FOLLOWUP_CHANCE,
                 config.FOLLOWUP_MIN_DELAY, config.FOLLOWUP_WINDOW))
+        if config.PURSUIT_UNAVAILABLE_ENABLED:
+            # §A4: also web-surface jobs (need the broadcaster), and lock-guarded so
+            # their completion can't race a live WebSocket turn.
+            companion.tick.register(UnavailableJob(
+                companion, _notify, config.TICK_INTERVAL,
+                config.PURSUIT_UNAVAILABLE_MIN_IDLE, config.PURSUIT_UNAVAILABLE_COOLDOWN,
+                drives=companion.drives, threshold=config.PURSUIT_UNAVAILABLE_THRESHOLD,
+                calm_ceiling=config.PURSUIT_UNAVAILABLE_CALM_CEILING, lock=state.lock))
+            companion.tick.register(PursuitReturnJob(
+                companion, _notify, config.TICK_INTERVAL, lock=state.lock))
         companion.tick.start()  # proactivity heartbeat
     logger.info("web ready at http://%s:%d (model=%s, phone push=%s)", config.WEB_HOST,
                 config.WEB_PORT, model, "on" if state.phone.enabled() else "off")
@@ -177,6 +187,12 @@ async def status(c: Live) -> dict:
         "ready": True,
         "model": state.model,
         "asleep": c.is_asleep(),
+        "unavailable": {
+            "active": c.is_unavailable(),
+            "reason": c.unavailable_reason(),
+            "eta_secs": (round(c.unavailable_eta_seconds())
+                        if c.unavailable_eta_seconds() is not None else None),
+        },
         "familiarity": {"value": round(fam, 3), "label": familiarity_label(fam)},
         "mood": ({ch: round(mood[ch], 3) for ch in CHANNELS} if mood else None),
         "drives": ({d: round(v, 3) for d, v in drives.items()} if drives else None),
@@ -185,7 +201,8 @@ async def status(c: Live) -> dict:
         "persona": c.meta.get(PERSONA_SELF_KEY) or "",
         "self_notes": c.meta.get(SELF_NOTES_KEY) or "",
         "thoughts": c.thoughts.recent(8) if c.thoughts else [],
-        "intentions": c.intentions.active() if c.intentions else [],
+        "intentions": c.intentions.active(kind="agenda") if c.intentions else [],
+        "pursuits": c.intentions.active(kind="pursuit") if c.intentions else [],
         "pending_consolidation": c.pending_count(),
         "last": {
             "reach_out_secs_ago": _ago(LAST_REACHOUT_KEY),
@@ -330,6 +347,17 @@ async def ws(websocket: WebSocket) -> None:
                 if not text:
                     continue
                 async with state.lock:
+                    if companion.is_unavailable():
+                        # §A4: it's fine to make Alex wait — hold the message and ack
+                        # WITHOUT a model call (works even with VRAM unloaded);
+                        # PursuitReturnJob delivers the real reply once she's back.
+                        companion.queue_pending_message(text)
+                        await websocket.send_json({
+                            "type": "unavailable_ack",
+                            "reason": companion.unavailable_reason(),
+                            "eta_secs": round(companion.unavailable_eta_seconds() or 0),
+                        })
+                        continue
                     if companion.is_asleep():
                         await websocket.send_json({"type": "waking"})  # cold reload coming
                     await websocket.send_json({"type": "start"})

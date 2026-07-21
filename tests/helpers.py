@@ -102,19 +102,29 @@ class FakeMemory:
 
 
 class FakeConv:
-    """Conversation store that hands out incrementing ids and forgets everything."""
+    """Conversation store that hands out incrementing ids and forgets everything.
+
+    `add_message` DOES retain each message (id/role/content only) so
+    `recent_messages_with_ids` — the citation surface for A3's open-question mining —
+    has something real to return; nothing else here is persisted.
+    """
 
     def __init__(self, message_count: int = 100):
         self._id = 0
         self._count = message_count
         self.self_notes_log: list[str] = []
+        self._messages: list[dict] = []
 
     def add_message(self, sid, role, content):
         self._id += 1
+        self._messages.append({"id": self._id, "role": role, "content": content})
         return self._id
 
     def message_count(self):
         return self._count
+
+    def recent_messages_with_ids(self, limit):
+        return self._messages[-limit:]
 
     def set_title(self, sid, title):
         pass

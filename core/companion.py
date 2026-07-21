@@ -33,10 +33,16 @@ from core.prompts import (
     FOLLOWUP_CUE,
     INTENTIONS_SCHEMA,
     INTENTIONS_SYSTEM,
+    PURSUIT_QUESTIONS_SCHEMA,
+    PURSUIT_QUESTIONS_SYSTEM,
     REFLECT_CUE,
     build_intentions_user,
     build_persona_edit_system,
     build_persona_edit_user,
+    build_pursuit_choice_schema,
+    build_pursuit_choice_system,
+    build_pursuit_choice_user,
+    build_pursuit_questions_user,
     build_reachout_cue,
     build_self_notes_system,
     build_self_notes_user,
@@ -125,14 +131,16 @@ class Companion:
                  unconsolidated: list[dict] | None = None,
                  emotion=None, thoughts=None, model_manager=None,
                  tools=None, tool_max_iters: int = 5, drives=None, intentions=None,
-                 session_title: str | None = None):
+                 session_title: str | None = None, pursuits=None,
+                 clock: Callable[[], float] = time.monotonic):
         self.llm = llm
         self.store = store
         self.memory = memory
         self.meta = meta
         self.emotion = emotion  # EmotionManager, or None when disabled
         self.thoughts = thoughts  # ThoughtStore for the private journal, or None
-        self.intentions = intentions  # IntentionStore (forward agenda / planning), or None
+        self.intentions = intentions  # IntentionStore (forward agenda / planning + pursuits), or None
+        self.pursuits = pursuits  # PursuitRegistry (§A4), or None/empty when disabled
         # DriveManager (multi-drive proactivity), or None when disabled. Updated by the
         # tick's DriveDriftJob and relieved here on each user message (contact).
         self.drives = drives
@@ -142,6 +150,15 @@ class Companion:
         self.tools = tools
         self.tool_max_iters = tool_max_iters
         self._asleep = False  # True while the LLM is unloaded from VRAM (§2.8)
+        # §A4: a state distinct from sleep (different trigger, different UI) — she can
+        # be awake-idle, asleep, or unavailable, never two at once (enforced in core/tick.py).
+        # `clock` is injectable (tests use a fake) and used ONLY for these timers; it does
+        # not touch idle_seconds()/_last_activity below.
+        self._clock = clock
+        self._unavailable_until: float | None = None
+        self._unavailable_reason: str | None = None
+        self._unavailable_model_unloaded = False
+        self._pending_message: str | None = None  # held while unavailable; one slot, overwritten
         self.session_id = session_id
         self.history: list[dict] = history or []
         # Each entry carries its message id so a successful consolidation can
@@ -221,6 +238,10 @@ class Companion:
 
     async def send(self, user_text: str, on_token: Callable[[str], Awaitable]) -> TurnResult:
         """Recall + react, stream a reply, log, and maybe consolidate. Returns a TurnResult."""
+        # A live turn always cancels any dangling "reply once the unavailable window
+        # ends" obligation — whichever path reaches send() first (this one, or
+        # PursuitReturnJob) wins cleanly; the other becomes a no-op.
+        self._pending_message = None
         self._busy = True  # the tick treats an in-progress turn as "not idle"
         try:
             if self._asleep:
@@ -243,7 +264,7 @@ class Companion:
             extra = [content for content, _ in recalled if content not in core]
             tool_names = self.tools.names() if self.tools else None
             # Her open agenda rides along softly — she may raise one if the talk gets there.
-            agenda = [i["content"] for i in self.intentions.active()] if self.intentions else None
+            agenda = [i["content"] for i in self.intentions.active(kind="agenda")] if self.intentions else None
             blocks = system_blocks(extra, mood_prompt, core=core, persona=persona,
                                    tools=tool_names, allow_silence=True, intentions=agenda,
                                    self_notes=self.meta.get(SELF_NOTES_KEY),
@@ -411,7 +432,7 @@ class Companion:
         # ("been meaning to ask...") rather than generic; fulfilled only if she actually sends it.
         intention = None
         if self.intentions is not None:
-            pending = self.intentions.active(limit=1)
+            pending = self.intentions.active(kind="agenda", limit=1)
             intention = pending[0] if pending else None
         blocks = reachout_blocks(extra, mood_prompt, core=core,
                                  persona=self.meta.get(PERSONA_SELF_KEY),
@@ -487,11 +508,15 @@ class Companion:
         logger.info("follow-up: %s", text[:80])
         return text
 
-    async def reflect(self) -> str | None:
+    async def reflect(self, seed: str | None = None) -> str | None:
         """Write a short private thought to the journal (not shown to the user).
 
         Draws on recent conversation, current mood, and recent thoughts (to avoid
         repeating itself). Stored via the ThoughtStore; returns the thought text.
+
+        `seed` gives this reflection a genuine subject (an A3-mined open question,
+        via `sit_with_open_question`) instead of the unseeded "how are you doing?" —
+        the documented cause of her journal repeating itself.
         """
         if self.thoughts is None:
             return None
@@ -499,7 +524,7 @@ class Companion:
         recent = [t["content"] for t in self.thoughts.recent(5)]
         blocks = reflect_blocks(extra, mood_prompt, recent, core=core,
                                 persona=self.meta.get(PERSONA_SELF_KEY),
-                                familiarity=self.familiarity())
+                                familiarity=self.familiarity(), seed=seed)
 
         text = await self._aside(blocks, REFLECT_CUE, "reflection")
         if text is None:
@@ -530,13 +555,13 @@ class Companion:
         if config.INTENTION_MAX_AGE_DAYS > 0:
             cutoff = (datetime.now(timezone.utc)
                       - timedelta(days=config.INTENTION_MAX_AGE_DAYS)).isoformat()
-            gone = await asyncio.to_thread(self.intentions.drop_older_than, cutoff)
+            gone = await asyncio.to_thread(self.intentions.drop_older_than, cutoff, kind="agenda")
             if gone:
                 logger.info("expired %d stale intention(s)", gone)
         recent = self.history[-config.HISTORY_TURNS:]
         if not recent:
             return []
-        existing = self.intentions.active()
+        existing = self.intentions.active(kind="agenda")
         raw = await self.llm.structured_json(
             [{"role": "system", "content": INTENTIONS_SYSTEM},
              {"role": "user", "content": build_intentions_user(
@@ -555,15 +580,63 @@ class Companion:
         added: list[str] = []
         for s in proposed:
             if s.lower() not in seen:  # cheap dedupe guard on top of the prompt's own
-                await asyncio.to_thread(self.intentions.add, s)
+                await asyncio.to_thread(self.intentions.add, s, kind="agenda")
                 seen.add(s.lower())
                 added.append(s)
         # Cap the open agenda — retire the oldest beyond the cap.
-        active = self.intentions.active()
+        active = self.intentions.active(kind="agenda")
         for old in active[:max(0, len(active) - config.INTENTION_MAX_ACTIVE)]:
             await asyncio.to_thread(self.intentions.drop, old["id"])
         if added or resolved:
             logger.info("intentions: +%d new, %d resolved", len(added), resolved)
+        return added
+
+    async def mine_open_questions(self) -> list[str]:
+        """A3: mine grounded open questions about the user from the recent window.
+
+        A reframed "nightly deep pass" — NOT day-summaries (measured worse elsewhere:
+        aggressive clustering loses retrieval accuracy), a small number of salient
+        open questions, each cited to a real message id. This project has already
+        been bitten three times by ungrounded generation on a thin window (memory
+        extraction, self-notes, intentions all previously confabulated on a barren
+        window), so citation-checking here is a structural guard, not a prompt
+        request: anything uncited, or citing an id outside the fetched window, is
+        rejected outright, no exceptions. Accepted questions become `kind="pursuit"`
+        rows — the backlog `go_unavailable()`'s "sit_with_question" consumes.
+        """
+        if self.intentions is None:
+            return []
+        window = self.store.recent_messages_with_ids(config.PURSUIT_WINDOW_MESSAGES)
+        if len(window) < config.PURSUIT_MIN_MESSAGES:
+            return []
+        core = self.memory.core_memories()
+        existing = self.intentions.active(kind="pursuit")
+        raw = await self.llm.structured_json(
+            [{"role": "system", "content": PURSUIT_QUESTIONS_SYSTEM},
+             {"role": "user", "content": build_pursuit_questions_user(
+                 window, core, [i["content"] for i in existing])}],
+            PURSUIT_QUESTIONS_SCHEMA)
+        valid_ids = {m["id"] for m in window}
+        seen = {i["content"].lower() for i in existing}
+        added: list[str] = []
+        for item in (raw.get("questions") or [])[:3]:
+            if not isinstance(item, dict):
+                continue
+            q = (item.get("question") or "").strip()
+            cites = [c for c in (item.get("citations") or []) if isinstance(c, int) and c in valid_ids]
+            if not q or not cites:  # HARD REJECT — no citation, no question, no exceptions
+                logger.info("pursuit question rejected (uncited): %r", q[:80])
+                continue
+            if q.lower() in seen:
+                continue
+            await asyncio.to_thread(self.intentions.add, q, kind="pursuit", citations=cites)
+            seen.add(q.lower())
+            added.append(q)
+        active = self.intentions.active(kind="pursuit")
+        for old in active[:max(0, len(active) - config.PURSUIT_MAX_ACTIVE)]:
+            await asyncio.to_thread(self.intentions.drop, old["id"])
+        if added:
+            logger.info("pursuits: +%d new open question(s)", len(added))
         return added
 
     def message_count(self) -> int:
@@ -604,9 +677,121 @@ class Companion:
             logger.exception("wake: reload failed; relying on JIT / retry")
         self._asleep = False
 
+    # --- §A4: she can make herself unavailable ------------------------------------
+    # A state distinct from sleep (different trigger — restlessness + a real pursuit
+    # to do, not idle/energy — and a different UI treatment), but they can't overlap:
+    # CooldownJob already refuses to fire while is_asleep(), and SleepJob refuses to
+    # fire while is_unavailable() (core/tick.py). She's awake-idle, asleep, or
+    # unavailable — never two at once.
+
+    def is_unavailable(self) -> bool:
+        return self._unavailable_until is not None and self._clock() < self._unavailable_until
+
+    def unavailable_reason(self) -> str | None:
+        return self._unavailable_reason if self.is_unavailable() else None
+
+    def unavailable_eta_seconds(self) -> float | None:
+        if not self.is_unavailable():
+            return None
+        return max(0.0, self._unavailable_until - self._clock())
+
+    def has_pending_message(self) -> bool:
+        return self._pending_message is not None
+
+    def queue_pending_message(self, text: str) -> None:
+        """A real message arrived while unavailable: hold exactly one — a later
+        message overwrites it rather than queuing alongside it."""
+        self._pending_message = text
+
+    async def sit_with_open_question(self) -> str | None:
+        """The A4 pursuit that consumes A3's mined backlog: pull the oldest open
+        question and seed reflect() with it instead of firing it unseeded — this is
+        also what fixes the documented journal-repetition bug (ReflectionJob has no
+        subject on its own). Fulfilled only on a genuine artifact; a PASS/discarded
+        attempt leaves the question open to try again later."""
+        if self.intentions is None:
+            return None
+        pending = self.intentions.active(kind="pursuit", limit=1)
+        if not pending:
+            return None
+        text = await self.reflect(seed=pending[0]["content"])
+        if text is not None:
+            await asyncio.to_thread(self.intentions.fulfill, pending[0]["id"])
+        return text
+
+    async def go_unavailable(self) -> bool:
+        """Consider stepping away: a structured-output decision picks one pursuit (or
+        PASS), the underlying real operation runs for real (model already loaded —
+        she's awake), then the model is freed for the REMAINDER of a sampled window
+        since nothing further needs it until she returns. Returns True iff she went
+        unavailable."""
+        if not self.pursuits:
+            return False
+        pending_pursuit = (self.intentions.active(kind="pursuit", limit=1)[0]
+                           if self.intentions is not None
+                           and self.intentions.active(kind="pursuit", limit=1) else None)
+        choices = self.pursuits.available(has_open_pursuit=pending_pursuit is not None)
+        if not choices:
+            return False
+        names = [t.name for t in choices]
+        raw = await self.llm.structured_json(
+            [{"role": "system", "content": build_pursuit_choice_system()},
+             {"role": "user", "content": build_pursuit_choice_user(
+                 choices, seed_question=pending_pursuit["content"] if pending_pursuit else None)}],
+            build_pursuit_choice_schema(names))
+        choice = (raw.get("choice") or "").strip()
+        if choice not in names:  # PASS, garbage, or unlisted -> stay available
+            logger.info("unavailable: declined")
+            return False
+        tool = self.pursuits.get(choice)
+        await tool.handler()  # the real op, for real, while the model is still loaded
+        duration = tool.sample_duration()
+        reason = tool.description
+        if choice == "sit_with_question" and pending_pursuit is not None:
+            reason = f"sitting with something on her mind: {pending_pursuit['content']}"
+        self._unavailable_until = self._clock() + duration
+        self._unavailable_reason = reason
+        if self.model_manager is not None:
+            self._unavailable_model_unloaded = True
+            try:
+                await self.model_manager.unload_all()  # nothing else needs it for the remainder
+            except Exception:  # noqa: BLE001 - never let this crash the tick
+                logger.exception("go_unavailable: unload failed")
+        logger.info("unavailable: %s for %.0fs", choice, duration)
+        return True
+
+    async def end_unavailable(self, on_token: Callable[[str], Awaitable] = _sink) -> "TurnResult | None":
+        """The window elapsed. Reload the model if it was unloaded (also covers her
+        having gone to sleep normally in the meantime — a redundant reload is a no-op
+        cost, not a correctness bug), then deliver any pending message as a real turn.
+        Returns None if nothing was pending."""
+        self._unavailable_until = None
+        self._unavailable_reason = None
+        if self._asleep or self._unavailable_model_unloaded:
+            try:
+                if self.model_manager is not None:
+                    await self.model_manager.load([self.llm.model, config.EMBED_MODEL])
+            except Exception:  # noqa: BLE001 - if reload fails, the LLM call will JIT-load or error+retry
+                logger.exception("end_unavailable: reload failed; relying on JIT / retry")
+            self._asleep = False
+            self._unavailable_model_unloaded = False
+        pending, self._pending_message = self._pending_message, None
+        if pending is None:
+            return None
+        return await self.send(pending, on_token)
+
     async def edit_persona(self) -> str | None:
         """Rewrite Mari's own self-description slot from her thoughts + core memories, gated by
-        familiarity. Runs during idle ticks; the new text colors later turns via build_system."""
+        familiarity. Runs during idle ticks; the new text colors later turns via build_system.
+
+        The "too early to have a developed self" gate used to live ONLY in
+        `PersonaEditJob._ready()` — fine while that job was the only caller, but a
+        pursuit (§A4) can now call this directly, bypassing that external gate. Self-
+        contained here so a stranger-stage companion can't rewrite herself prematurely
+        no matter what calls this.
+        """
+        if self.message_count() < config.PERSONA_MIN_MESSAGES:
+            return None
         current = self.meta.get(PERSONA_SELF_KEY) or ""
         thoughts = [t["content"] for t in self.thoughts.recent(8)] if self.thoughts else []
         core = self.memory.core_memories()
@@ -829,6 +1014,10 @@ class Companion:
         self.history = []
         self._unconsolidated = []
         self._session_title = None
+        self._unavailable_until = None
+        self._unavailable_reason = None
+        self._unavailable_model_unloaded = False
+        self._pending_message = None
         if self.emotion is not None:
             await self.emotion.reset()           # re-persist baseline mood
         if self.drives is not None:

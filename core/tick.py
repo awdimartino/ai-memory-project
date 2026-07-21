@@ -366,6 +366,102 @@ class PersonaEditJob(CooldownJob):
 
     async def act(self) -> None:
         await self.companion.edit_persona()
+LAST_PURSUIT_MINE_KEY = "last_pursuit_mine_at"
+
+
+class PursuitMiningJob(CooldownJob):
+    """§A3: while idle, mine grounded open questions about the user — a slow,
+    "nightly deep pass" cadence (long cooldown), gated on the same salience signal
+    consolidation uses (arousal at/above a floor — something worth asking about
+    actually happened). Internal only; no surface push."""
+    name = "pursuit_mining"
+    meta_key = LAST_PURSUIT_MINE_KEY
+
+    def __init__(self, companion, interval: float, min_idle: float, cooldown: float,
+                 salience: float = 0.0, clock=time.time):
+        super().__init__(companion, interval, min_idle, cooldown, clock)
+        self.salience = salience
+
+    def _ready(self) -> bool:
+        c = self.companion
+        if c.emotion is None or self.salience <= 0:
+            return True
+        return c.emotion.arousal() >= self.salience
+
+    async def act(self) -> None:
+        await self.companion.mine_open_questions()
+
+
+LAST_UNAVAILABLE_KEY = "last_unavailable_at"
+
+
+class UnavailableJob(DriveGatedJob):
+    """§A4: once restless enough, she may step away to do one of a closed set of
+    real pursuits. Gated on **`restlessness`**, not `connection` — restlessness rises
+    with idle time and boredom, not warmth, so this can't correlate with how invested
+    the user is in the conversation (the one thing that would make this the
+    manipulative pattern HANDOFF's research sweep warns against). Also refuses right
+    after a heavy disclosure (`calm_ceiling`, the same arousal signal A3 uses to
+    decide TO mine, applied as a ceiling instead of a floor). Web-registered (needs
+    the broadcaster) and lock-guarded so it can't race a live WebSocket turn.
+    """
+    name = "unavailable"
+    meta_key = LAST_UNAVAILABLE_KEY
+    drive = "restlessness"
+
+    def __init__(self, companion, notify, interval: float, min_idle: float, cooldown: float,
+                 drives=None, threshold: float = 0.8, calm_ceiling: float = 0.0,
+                 clock=time.time, lock=None):
+        super().__init__(companion, interval, min_idle, cooldown, drives, threshold, clock)
+        self.notify = notify
+        self.calm_ceiling = calm_ceiling
+        self.lock = lock
+
+    def _ready(self) -> bool:
+        c = self.companion
+        if c.is_unavailable() or c.has_pending_message():
+            return False
+        if self.calm_ceiling > 0 and c.emotion is not None and c.emotion.arousal() >= self.calm_ceiling:
+            return False  # never leave right after something heavy just happened
+        return True
+
+    async def act(self) -> None:
+        if self.lock is not None:
+            async with self.lock:
+                went = await self.companion.go_unavailable()
+        else:
+            went = await self.companion.go_unavailable()
+        if went:
+            reason = self.companion.unavailable_reason()
+            eta = round(self.companion.unavailable_eta_seconds() or 0)
+            await self.notify({"type": "unavailable", "reason": reason, "eta_secs": eta})
+
+
+class PursuitReturnJob(Job):
+    """§A4: once an unavailable window elapses and a message is waiting, deliver the
+    real reply (reloading the model first if it was unloaded). Lock-guarded for the
+    same reason as UnavailableJob: its completion must not race a live WS turn."""
+    name = "pursuit_return"
+
+    def __init__(self, companion, notify, interval: float, lock=None):
+        self.companion = companion
+        self.notify = notify
+        self.interval = interval
+        self.lock = lock
+
+    async def run(self) -> None:
+        c = self.companion
+        if c.is_unavailable() or c.is_busy() or not c.has_pending_message():
+            return
+        if self.lock is not None:
+            async with self.lock:
+                result = await c.end_unavailable()
+        else:
+            result = await c.end_unavailable()
+        if result is not None and not result.silent and result.text:
+            await self.notify({"type": "delayed_reply", "content": result.text})
+
+
 class SleepJob(Job):
     """Put Mari into standby: unload the LLM from VRAM to free the machine. Two triggers:
     a **long idle** (the practical VRAM-freeing one) OR **low energy** while briefly idle
@@ -384,7 +480,7 @@ class SleepJob(Job):
         self.energy_min_idle = energy_min_idle
 
     async def run(self) -> None:
-        if self.companion.is_asleep():
+        if self.companion.is_asleep() or self.companion.is_unavailable():
             return
         idle = self.companion.idle_seconds()
         tired = (self.drives is not None

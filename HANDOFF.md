@@ -18,6 +18,21 @@ The authoritative design rationale + full build log is [`V2_PLAN.md`](V2_PLAN.md
 > **2026-07-20 (latest): head is `3dd36ae`.** Three pieces of work are code-complete and
 > **unmeasured** — the reach-out/follow-up fixes (`9dbd9bd`) and the gold-set `mode` field
 > (`3dd36ae`) that exists to test them. Running those 7 cases is the obvious next move.
+>
+> **2026-07-21: §A3 + §A4 are code-complete, offline-tested, and LIVE-UNTESTED.** Built
+> together on purpose ("A3 mints what A4 consumes"): A3 mines grounded open questions about
+> the user (cited to a real message id, uncited output rejected outright — schema v11/v12 add
+> `intentions.kind`/`citations` so pursuits share the existing agenda table without leaking into
+> it); A4 lets her step away to actually do one of a closed pursuit-tool menu (journal / revise
+> self-notes / revise persona / sit with an A3 question), chosen via a structured-output decision
+> — deliberately NOT the native tool-calling loop, which measures too unreliable to gate whether
+> she goes silent on you. **Off by default** (`PURSUIT_UNAVAILABLE_ENABLED=false`) — see §8-A
+> below and `docs/TUNING.md` for the full knob set and the design decisions (restlessness-gated
+> so it can't correlate with engagement; interrupts get a canned no-model-call ack and the real
+> reply waits out the window — waiting was an explicit product choice, not a limitation).
+> `tests/test_pursuits.py` (21 cases) + additions to `test_intentions.py`/`test_tick.py`; suite
+> now 22 files / 378 checks. **Next step: turn the flag on and watch it fire for real** before
+> touching the thresholds.
 
 **Milestone: v2.1 complete; v2.2 in progress.** v2.0 built the trustworthy *brain*; v2.1 added the
 persistent-companion layer (core memory, self-modifying persona + familiarity, sleep/standby, status
@@ -767,105 +782,91 @@ with something that feels alive, and they make self-wake + autonomous sleep cohe
   timer. The `min_idle` gap means she never nods off mid-conversation (the busy guard zeroes idle during a turn).
   Offline-tested (deplete/restore/clamp/persist + the sleep triggers); default rates model a rough day/night and
   are tunable. **Still deferred: self-wake** (see below).
-- **★ A3 — nightly deep pass. REFRAMED 2026-07-20; build the reflection-question form, NOT
-  day-summaries.** The original plan ("summarize the day into a day-summary") is exactly the
-  aggressive-clustering pattern measured at **48.4% vs 78.4%** for raw retrieval — a 30-point
-  cost. The well-supported version instead generates *questions*: take the recent records, ask
-  **"what are the 3 most salient open questions about him right now?"**, use those as retrieval
-  queries, and produce insights **with citations back to episode ids**. That is a near-literal
-  implementation of thinking about someone while you're apart, it's trivial on a 9B, and its
-  output (an open question about him) is exactly what the intentions system already consumes.
-  Rules: gate on salience, cite episodes structurally (reject uncited insights), and **never
-  delete or overwrite the leaf**.
-- **Self-waking (deferred, next after A3)** — waking to reach out when rested (energy high) + missing the user
+- **★ A3 — nightly deep pass. BUILT 2026-07-21** (`core/companion.py::mine_open_questions`,
+  `core/tick.py::PursuitMiningJob`). Built as reframed 2026-07-20: NOT day-summaries (that's the
+  aggressive-clustering pattern measured at 48.4% vs 78.4% for raw retrieval) but **grounded
+  open-question mining** — read the recent window, ask for at most 3 salient open questions about
+  the user, and require **each one cited to a real message id** from the fetched window. Uncited
+  output, or a citation to an id outside the window, is **rejected before storage** — a structural
+  guard in the code, not a prompt request, because this project has already been bitten three
+  times by ungrounded generation on a thin window (extraction, self-notes, intentions). Accepted
+  questions are stored as `kind="pursuit"` rows (schema v11 `intentions.kind`, v12
+  `intentions.citations` — see below). Gated on `PURSUIT_MIN_MESSAGES` (never mine a barren
+  window) and `PURSUIT_SALIENCE` (reuses `CONSOLIDATE_SALIENCE`'s arousal floor — something worth
+  asking about actually happened). **Offline-tested** (`tests/test_pursuits.py`); **not yet
+  live-verified** that the questions it mines are actually good.
+- **Self-waking (still deferred)** — waking to reach out when rested (energy high) + missing the user
   (connection high). Energy (the gate that stops her waking exhausted) now exists; what's still missing is
   **time-of-day / do-not-disturb gating** so she doesn't wake at 3am. Build that first, then a `WakeJob`
   (web-registered like reach-out) that checks energy + connection + a cooldown. `wake()` is already a public seam.
 
-- **★ A4 — she can make herself UNAVAILABLE (user-requested 2026-07-20). NOT STARTED.**
-  *"You wouldn't expect a real person to be available 24/7."* Today she is: she sleeps only when
-  **you** are away (`SleepJob` fires on your idleness or her energy), so she has never once been
-  unreachable while you wanted to talk. Availability is the last thing about her that is purely a
-  function of your behaviour rather than hers, and that asymmetry is what reads as a service.
+- **★ A4 — she can make herself UNAVAILABLE. BUILT 2026-07-21, OFF BY DEFAULT
+  (`PURSUIT_UNAVAILABLE_ENABLED=false`), LIVE-UNTESTED.**
+  *"You wouldn't expect a real person to be available 24/7."* Today's build closes the asymmetry
+  this item opened with: `UnavailableJob` (`core/tick.py`) can now make her genuinely unreachable
+  for a bounded window on her own initiative, not just when Alex is away or her energy is low.
 
-  **The seams already exist** — `Companion.sleep()`/`wake()` are public, `model_manager` unloads
-  from VRAM, `PASS`/silent turns handle "she didn't reply", drives supply motivation, and the web
-  UI already renders an asleep state. Little of this is new machinery; it's a new *trigger* and an
-  honest surface.
+  **The shape changed from the original plan, per a design discussion before building (2026-07-20
+  → 21).** The original idea was a plain FIFO queue she drains. The user's correction: **"a
+  pursuit is like a tool call that she chooses to do herself"** — so instead of a queue she drains
+  mechanically, `go_unavailable()` runs a **structured-output decision call** (`core/prompts.py`'s
+  `build_pursuit_choice_*`) offering a small closed menu — `journal` (`reflect()`), `self_notes`
+  (`update_self_notes()`), `persona` (`edit_persona()`), `sit_with_question` (a new
+  `sit_with_open_question()` that pulls the oldest A3-mined pursuit and **seeds** `reflect()` with
+  it) — and she picks one, or PASS. Deliberately **NOT** the native tool-calling loop
+  (`core/tools.py`): that measures ~23/30 reliable, far too flaky to gate whether she goes silent
+  on Alex; this reuses the project's other established pattern (the lifecycle/intentions
+  structured-output decision), which is deterministic to parse and easy to make PASS-able.
 
-  **THE SHAPE (user, 2026-07-20): a queue of things she's been meaning to do, drawn from a CLOSED
-  list of things she really does.** She doesn't invent an errand; she keeps a private backlog of
-  *pursuits* and, when she feels like stepping away, takes one off it. Two consequences make this
-  the right design rather than merely a safe one:
+  **Still true, and still what keeps this honest:** every choice maps to a REAL `Companion`
+  method — nothing invented, and the embodiment filter has nothing to catch because none of these
+  produce a first-person experience claim. The real op runs **while the model is still loaded**
+  (she's awake), producing a genuine artifact; only THEN does the model unload for the *leftover*
+  window time, since nothing further needs it until she returns. `sit_with_question` is the fix
+  for the documented journal-repetition bug: `reflect()` gained an optional `seed` param, so a
+  pursuit gives it a real subject instead of the perpetual unseeded "how are you doing?".
 
-  - **It cannot lie.** Every queue entry maps to a real internal operation — `reflect()`,
-    `form_intentions()`, `update_self_notes()`, `edit_persona()`, consolidation, `reminisce`. She
-    genuinely does these, so *"I want to sit with what you said about Kate for a bit"* is **true**,
-    and the embodiment layer has nothing to catch. Compare *"I'm going out for a walk"*, which is
-    exactly the invented experience `core/embodiment.py` blocks and the follow-up rewrite fixed
-    (*"I found a good spot to sit"*). The closed list is what keeps this honest; **an open-ended
-    "do something" tool would re-open the project's most-tuned wound.**
-  - **It produces a visible artifact.** She comes back having written a journal entry, revised a
-    self-note, or formed an intention. The absence is *verifiable* rather than a timer pretending
-    to be a life — and if she returns changed by it, that is the whole feature working.
+  **Where the queue lives — resolved as `kind` column, not a sibling table** (schema v11:
+  `intentions.kind` `'agenda'`|`'pursuit'`, default `'agenda'` so every pre-existing row and
+  caller is unaffected; v12: `intentions.citations`, A3's grounding evidence). Every
+  `SqliteIntentionStore` method threads `kind` through; every existing call site
+  (`send()`'s agenda ride-along, `reach_out()`'s anchor, `form_intentions()`) now passes
+  `kind="agenda"` explicitly. `tests/test_intentions.py` pins that a pursuit can never leak into
+  the agenda even when it's the oldest row in the table.
 
-  **↗ This probably fixes the journal-repetition problem.** `rrr_diagnostic.py` scored her journal
-  at **RRR 0.26 with three byte-identical entries**, which is why `reflect()` needed a programmatic
-  repeat-guard. The likely root cause is that `ReflectionJob` has **no subject** — it fires on a
-  timer and asks "how are you doing?" forever, so it repeats. A queued pursuit carries its own
-  subject, giving each reflection a distinct seed. Worth measuring with the same diagnostic after.
+  **On interrupt — resolved as "waiting is fine", per explicit user instruction, NOT
+  auto-interrupt.** A message arriving during the window is held (`queue_pending_message()`, one
+  slot, a later message overwrites) and gets a **canned, no-model-call acknowledgment** (works even
+  with VRAM unloaded) — a new `"unavailable_ack"` WS message, not a real reply. `PursuitReturnJob`
+  notices once the window elapses and delivers the real reply (`"delayed_reply"`), reloading the
+  model first if it was unloaded. `send()` clears any stale pending message at its own start, so
+  whichever path reaches it first wins cleanly — no second-message queue was needed.
 
-  **↗ A3 mints what A4 consumes.** A3 (reframed) already generates *"the 3 most salient open
-  questions about him right now"*. Those questions **are** queue entries. Build A3 first and A4
-  gets its backlog for free; build A4 first and it needs a stand-in source.
+  **Legible, not silent** — `GET /status` gained an `"unavailable": {active, reason, eta_secs}`
+  field and a `"pursuits"` list (the open A3 backlog); the web UI got a third status-pill/avatar
+  state (💭) and system-log markers for stepping away / the ack / the delayed reply.
 
-  **Where the queue lives.** The `intentions` table (schema v8) is nearly this already — a private
-  forward agenda with add / `active()` FIFO / `fulfill` / `drop` / expiry. But intentions are things
-  to **raise with him**; pursuits are things to **do for herself**, and conflating them would let a
-  pursuit leak into a reach-out as though it were a topic. Cheapest honest option: a `kind` column
-  on `intentions` (schema v11) reusing the whole store; the alternative is a sibling table. Decide
-  when building — do **not** overload the existing rows without a discriminator.
+  **Never leave on a heavy disclosure** — `UnavailableJob._ready()` refuses while
+  `emotion.arousal()` is above `PURSUIT_UNAVAILABLE_CALM_CEILING` (same signal A3 uses to decide TO
+  mine, as a ceiling instead of a floor).
 
-  Three remaining constraints:
+  **Routing decision — resolved as a drive-gated tick job, not a tool**, exactly as this section
+  originally recommended: `UnavailableJob(DriveGatedJob)`, gated on **`restlessness`** (not
+  `connection`) at a **higher threshold (0.8) than `ReflectionJob`'s 0.4** — restlessness is
+  idle/boredom-driven, not warmth-driven, so the trigger structurally can't correlate with how
+  invested Alex is in the conversation, which is the one thing that would make this the
+  manipulative §G pattern instead of the autonomy feature it's meant to be. `SleepJob` gained one
+  guard so sleep and unavailable stay mutually exclusive states.
 
-  1. **Never leave on a heavy disclosure.** Vanishing right after *"I've been really depressed and
-     haven't told anyone"* is the single worst version of this feature. Gate hard on emotional
-     salience — the `disclosure` gold cases already encode those moments, and `emotion.arousal()`
-     already measures the signal `CONSOLIDATE_SALIENCE` uses.
-  2. **Legible, not silent.** Silent turns needed a *"· Mari stayed quiet"* marker or they read as
-     a crash; this needs the same and more — *what* she's doing and *roughly when she's back*.
-     Unexplained unavailability on a local app reads as a bug, and the user will (correctly) go
-     looking for one. The pursuit's own description supplies the "what" for free.
-  3. **Bounded, and never a wall.** Minutes, not hours, with a kill-switch env var. On her daily
-     driver, a companion that can't be reached is an outage.
+  **What's NOT resolved yet, honestly:** the thresholds above (0.8 restlessness, 6h cooldown, the
+  per-pursuit duration ranges) are reasoned, not measured — nobody has watched this fire for real.
+  That's why it ships **disabled**. Turn it on, watch a few real cycles, then tune from
+  `docs/TUNING.md`'s new section before trusting the defaults.
 
-  **Routing decision (do not skip).** The ask is a *tool*, and the framework is ready — but §E is
-  explicit that the constraint is routing, not the framework: tool-calling sits at ~23/30, so a
-  mis-fire means she vanishes at random and an under-fire means the feature never runs. The
-  alternative is a **drive-gated tick job** (like reach-out), which **bypasses routing entirely** —
-  the same argument that makes the Navidrome idea interesting. Recommend prototyping the tick-job
-  form first and adding the tool only if she should be able to leave *mid-conversation*, which is
-  the one thing a tick job can't express.
-
-  **On §G, and why this is NOT the farewell-manipulation pattern (user's rationale, 2026-07-20):**
-  *"I want it this way so it feels less like I control her actions."* That is the **autonomy**
-  motive, and it is the deciding one. §G's farewell tactics are built to raise engagement by
-  provoking **anger and curiosity**; this is built to *reduce the user's control*, which is close
-  to the opposite objective — a manipulative design would never surrender the ability to answer.
-  The intended user experience isn't "come back and check", it's "she has her own life". **Design
-  intent recorded; this item is approved on purpose, not by omission.**
-
-  The two properties that keep it there, and both fall out of the queue design rather than needing
-  discipline: it is **explained** (she says which pursuit she's on) and **independent of wanting**
-  (it fires from her backlog and drives, never from his eagerness). ⚠️ The one thing that would
-  flip it is **making the trigger correlate with his engagement** — leaving more often when he's
-  most invested. Don't, and if the queue ever gets a relevance ranking, check it can't learn that
-  by accident.
-
-  **The measurement is still worth taking**, since §G's Xiaoice finding is that engagement metrics
-  look *good* while the bad version does its damage: if sessions get more frequent but shorter or
-  more anxious, that's the failure mode — and note this project's own §G entry says **falling**
-  interaction frequency is the healthy signal, so "he messages less" is not evidence against it.
+  Everything the original write-up flagged as a risk still applies and is unchanged by the build:
+  don't let the trigger correlate with engagement (structurally addressed via `restlessness`, but
+  worth re-checking if a relevance-ranked pursuit pick is ever added); this is the autonomy
+  argument, not the farewell-manipulation pattern, on the same rationale recorded 2026-07-20.
 
 **★ Completing the Generative Agents cognitive loop (idea pass 2026-07-19).** Arc A gave Mari drives + energy; the
 triad from Park et al.'s "Smallville" agents is **memory (§B) + reflection (her journal) + planning — the one she's

@@ -22,10 +22,13 @@ from core.tick import (
     Job,
     MoodDriftJob,
     PersonaEditJob,
+    PursuitMiningJob,
+    PursuitReturnJob,
     ReachOutJob,
     ReflectionJob,
     SleepJob,
     TickLoop,
+    UnavailableJob,
 )
 
 
@@ -622,9 +625,10 @@ async def familiarity_scales_with_messages():
 
 
 class SleepCompanion:
-    def __init__(self, idle, asleep=False):
+    def __init__(self, idle, asleep=False, unavailable=False):
         self._idle = idle
         self._asleep = asleep
+        self._unavailable = unavailable
         self.sleep_calls = 0
 
     def idle_seconds(self):
@@ -632,6 +636,9 @@ class SleepCompanion:
 
     def is_asleep(self):
         return self._asleep
+
+    def is_unavailable(self):
+        return self._unavailable
 
     async def sleep(self):
         self.sleep_calls += 1
@@ -650,6 +657,14 @@ async def sleep_skipped_when_already_asleep():
     comp = SleepCompanion(idle=99999.0, asleep=True)
     await SleepJob(comp, interval=0.0, sleep_after=1800.0).run()
     assert comp.sleep_calls == 0
+
+
+@case
+async def sleep_skipped_when_unavailable():
+    # §A4: sleep and "stepped away" are mutually exclusive states.
+    comp = SleepCompanion(idle=99999.0, unavailable=True)
+    await SleepJob(comp, interval=0.0, sleep_after=1800.0).run()
+    assert comp.sleep_calls == 0, "must not also fall asleep while already unavailable"
 
 
 @case
@@ -705,6 +720,282 @@ async def model_jobs_skip_while_asleep():
     reach = ReachCompanion(idle=99999.0, reach_result="hi", asleep=True)
     await _reach_job(reach, WallClock(), []).run()
     assert reach.reach_calls == 0, "reach-out should skip while asleep"
+
+
+class FakeArousal:
+    def __init__(self, arousal=0.0):
+        self._arousal = arousal
+
+    def arousal(self):
+        return self._arousal
+
+
+class MiningCompanion:
+    def __init__(self, idle, asleep=False, busy=False, emotion=None):
+        self._idle = idle
+        self.meta = InMemoryMeta()
+        self.mine_calls = 0
+        self._asleep = asleep
+        self._busy = busy
+        self.emotion = emotion
+
+    def idle_seconds(self):
+        return self._idle
+
+    def is_asleep(self):
+        return self._asleep
+
+    def is_busy(self):
+        return self._busy
+
+    async def mine_open_questions(self):
+        self.mine_calls += 1
+        return ["a question"]
+
+
+def _mining_job(comp, salience=0.0):
+    return PursuitMiningJob(comp, interval=0.0, min_idle=1800.0, cooldown=86400.0,
+                            salience=salience, clock=WallClock())
+
+
+@case
+async def pursuit_mining_gated_by_idle():
+    comp = MiningCompanion(idle=100.0)   # min_idle 1800
+    await _mining_job(comp).run()
+    assert comp.mine_calls == 0
+
+
+@case
+async def pursuit_mining_no_salience_floor_fires_freely():
+    comp = MiningCompanion(idle=99999.0, emotion=FakeArousal(0.0))  # salience=0.0 -> no gate
+    await _mining_job(comp, salience=0.0).run()
+    assert comp.mine_calls == 1
+
+
+@case
+async def pursuit_mining_gated_by_salience_floor():
+    comp = MiningCompanion(idle=99999.0, emotion=FakeArousal(0.5))   # below the floor
+    await _mining_job(comp, salience=2.0).run()
+    assert comp.mine_calls == 0, "a flat window should not be mined"
+
+
+@case
+async def pursuit_mining_fires_above_salience_floor():
+    comp = MiningCompanion(idle=99999.0, emotion=FakeArousal(3.0))   # above the floor
+    await _mining_job(comp, salience=2.0).run()
+    assert comp.mine_calls == 1
+    assert comp.meta.get_json("last_pursuit_mine_at") == 1_000_000.0
+
+
+@case
+async def pursuit_mining_skips_when_asleep():
+    comp = MiningCompanion(idle=99999.0, asleep=True)
+    await _mining_job(comp).run()
+    assert comp.mine_calls == 0
+
+
+# --- §A4: UnavailableJob / PursuitReturnJob ---------------------------------------
+
+class UnavailableCompanion:
+    def __init__(self, idle, unavailable=False, pending=False, asleep=False, busy=False,
+                 go_result=True, reason="journaling", eta=120.0):
+        self._idle = idle
+        self.meta = InMemoryMeta()
+        self._unavailable = unavailable
+        self._pending = pending
+        self._asleep = asleep
+        self._busy = busy
+        self._go_result = go_result
+        self._reason = reason
+        self._eta = eta
+        self.go_calls = 0
+        self.emotion = None
+
+    def idle_seconds(self):
+        return self._idle
+
+    def is_asleep(self):
+        return self._asleep
+
+    def is_busy(self):
+        return self._busy
+
+    def is_unavailable(self):
+        return self._unavailable
+
+    def has_pending_message(self):
+        return self._pending
+
+    def unavailable_reason(self):
+        return self._reason
+
+    def unavailable_eta_seconds(self):
+        return self._eta
+
+    async def go_unavailable(self):
+        self.go_calls += 1
+        if self._go_result:
+            self._unavailable = True
+        return self._go_result
+
+
+def _unavailable_job(comp, drv=None, threshold=0.8, calm_ceiling=0.0, pushes=None):
+    async def notify(m):
+        (pushes if pushes is not None else []).append(m)
+    return UnavailableJob(comp, notify, interval=0.0, min_idle=900.0, cooldown=21600.0,
+                          drives=drv, threshold=threshold, calm_ceiling=calm_ceiling, clock=WallClock())
+
+
+@case
+async def unavailable_gated_by_low_restlessness_drive():
+    comp = UnavailableCompanion(idle=1000.0)
+    drv = FakeDriveState(restlessness=0.3)   # below the (higher-than-reflection) threshold
+    pushes = []
+    await _unavailable_job(comp, drv=drv, threshold=0.8, pushes=pushes).run()
+    assert comp.go_calls == 0 and pushes == []
+
+
+@case
+async def unavailable_fires_on_high_restlessness_and_notifies():
+    comp = UnavailableCompanion(idle=5.0)   # idle is irrelevant; the drive is the gate
+    drv = FakeDriveState(restlessness=0.9)
+    pushes = []
+    await _unavailable_job(comp, drv=drv, threshold=0.8, pushes=pushes).run()
+    assert comp.go_calls == 1
+    assert drv.discharged == ["restlessness"]
+    assert pushes == [{"type": "unavailable", "reason": "journaling", "eta_secs": 120}]
+
+
+@case
+async def unavailable_declining_sends_no_notice():
+    comp = UnavailableCompanion(idle=5.0, go_result=False)
+    drv = FakeDriveState(restlessness=0.9)
+    pushes = []
+    await _unavailable_job(comp, drv=drv, threshold=0.8, pushes=pushes).run()
+    assert comp.go_calls == 1 and pushes == [], "a decline (PASS) must not announce anything"
+
+
+@case
+async def unavailable_refuses_while_already_unavailable():
+    comp = UnavailableCompanion(idle=5.0, unavailable=True)
+    drv = FakeDriveState(restlessness=0.9)
+    await _unavailable_job(comp, drv=drv, threshold=0.8).run()
+    assert comp.go_calls == 0, "must not stack a second unavailable window on the first"
+
+
+@case
+async def unavailable_refuses_with_a_pending_message():
+    comp = UnavailableCompanion(idle=5.0, pending=True)
+    drv = FakeDriveState(restlessness=0.9)
+    await _unavailable_job(comp, drv=drv, threshold=0.8).run()
+    assert comp.go_calls == 0
+
+
+@case
+async def unavailable_refuses_right_after_a_heavy_disclosure():
+    comp = UnavailableCompanion(idle=1000.0)
+    comp.emotion = FakeArousal(3.0)   # something heavy just happened
+    drv = FakeDriveState(restlessness=0.9)
+    await _unavailable_job(comp, drv=drv, threshold=0.8, calm_ceiling=2.0).run()
+    assert comp.go_calls == 0, "never step away right after a heavy disclosure"
+
+
+@case
+async def unavailable_fires_once_calm_again():
+    comp = UnavailableCompanion(idle=1000.0)
+    comp.emotion = FakeArousal(0.1)   # calm
+    drv = FakeDriveState(restlessness=0.9)
+    await _unavailable_job(comp, drv=drv, threshold=0.8, calm_ceiling=2.0).run()
+    assert comp.go_calls == 1
+
+
+@case
+async def unavailable_skips_when_busy():
+    comp = UnavailableCompanion(idle=1000.0, busy=True)
+    drv = FakeDriveState(restlessness=0.9)
+    await _unavailable_job(comp, drv=drv, threshold=0.8).run()
+    assert comp.go_calls == 0, "must not step away mid-turn"
+
+
+class ReturnCompanion:
+    def __init__(self, unavailable, busy=False, pending=False, end_result=None):
+        self._unavailable = unavailable
+        self._busy = busy
+        self._pending = pending
+        self._end_result = end_result
+        self.end_calls = 0
+
+    def is_unavailable(self):
+        return self._unavailable
+
+    def is_busy(self):
+        return self._busy
+
+    def has_pending_message(self):
+        return self._pending
+
+    async def end_unavailable(self):
+        self.end_calls += 1
+        return self._end_result
+
+
+class FakeTurnResult:
+    def __init__(self, text, silent=False):
+        self.text = text
+        self.silent = silent
+
+
+@case
+async def pursuit_return_waits_out_the_window():
+    comp = ReturnCompanion(unavailable=True, pending=True)
+    pushes = []
+    async def notify(m):
+        pushes.append(m)
+    await PursuitReturnJob(comp, notify, interval=0.0).run()
+    assert comp.end_calls == 0 and pushes == [], "must not return before the window elapses"
+
+
+@case
+async def pursuit_return_noop_without_a_pending_message():
+    comp = ReturnCompanion(unavailable=False, pending=False)
+    pushes = []
+    async def notify(m):
+        pushes.append(m)
+    await PursuitReturnJob(comp, notify, interval=0.0).run()
+    assert comp.end_calls == 0 and pushes == []
+
+
+@case
+async def pursuit_return_delivers_the_real_reply():
+    comp = ReturnCompanion(unavailable=False, pending=True,
+                          end_result=FakeTurnResult("here's my real answer"))
+    pushes = []
+    async def notify(m):
+        pushes.append(m)
+    await PursuitReturnJob(comp, notify, interval=0.0).run()
+    assert comp.end_calls == 1
+    assert pushes == [{"type": "delayed_reply", "content": "here's my real answer"}]
+
+
+@case
+async def pursuit_return_says_nothing_on_a_silent_turn():
+    comp = ReturnCompanion(unavailable=False, pending=True,
+                          end_result=FakeTurnResult("", silent=True))
+    pushes = []
+    async def notify(m):
+        pushes.append(m)
+    await PursuitReturnJob(comp, notify, interval=0.0).run()
+    assert comp.end_calls == 1 and pushes == [], "a silent return must not push an empty reply"
+
+
+@case
+async def pursuit_return_skips_while_busy():
+    comp = ReturnCompanion(unavailable=False, busy=True, pending=True)
+    pushes = []
+    async def notify(m):
+        pushes.append(m)
+    await PursuitReturnJob(comp, notify, interval=0.0).run()
+    assert comp.end_calls == 0
 
 
 @case

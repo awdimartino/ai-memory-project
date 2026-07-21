@@ -224,6 +224,7 @@
     .pill { font-size: 11px; padding: 2px 10px; border-radius: 20px; background: var(--elev); border: 1px solid var(--line); display: inline-flex; align-items: center; gap: 5px; }
     .pill.awake { color: var(--ok); } .pill.awake .pdot { background: var(--ok); }
     .pill.asleep { color: #9b8fd0; } .pill.asleep .pdot { background: #9b8fd0; }
+    .pill.unavailable { color: #c98a4b; } .pill.unavailable .pdot { background: #c98a4b; }
     .pill .pdot { width: 6px; height: 6px; border-radius: 50%; }
     .fam-track { height: 5px; background: var(--line); border-radius: 5px; overflow: hidden; margin-top: 8px; }
     .fam-track > i { display: block; height: 100%; background: linear-gradient(90deg, var(--user), var(--mari)); transition: width .4s; }
@@ -307,6 +308,7 @@
     }
 
     .avatar.asleep { background: linear-gradient(145deg, #6b5fa0, #48416e); color: #e8e6f5; box-shadow: none; }
+    .avatar.unavailable { background: linear-gradient(145deg, #c98a4b, #8a5a2e); color: #f5ece0; box-shadow: none; }
     .avatar { transition: box-shadow .5s; }
 
     /* copy-on-hover for bot messages */
@@ -445,13 +447,13 @@
 
     // --- proactive alerts: tab-title badge + browser notification + soft chime ---
     const favEl = document.getElementById("favicon");
-    let unread = 0, curAsleep = false, audioCtx = null;
+    let unread = 0, curAsleep = false, curUnavailable = false, audioCtx = null;
     function setFavicon() {
       const cv = document.createElement("canvas"); cv.width = cv.height = 64;
       const x = cv.getContext("2d");
-      x.fillStyle = curAsleep ? "#6b5fa0" : "#e0a458";
+      x.fillStyle = curAsleep ? "#6b5fa0" : curUnavailable ? "#c98a4b" : "#e0a458";
       x.beginPath(); x.arc(32, 32, 30, 0, 7); x.fill();
-      x.fillStyle = curAsleep ? "#e8e6f5" : "#1a1205";
+      x.fillStyle = curAsleep ? "#e8e6f5" : curUnavailable ? "#f5ece0" : "#1a1205";
       x.font = "bold 38px system-ui"; x.textAlign = "center"; x.textBaseline = "middle";
       x.fillText((botName[0] || "M"), 32, 35);
       if (unread > 0) { x.fillStyle = "#e5534b"; x.beginPath(); x.arc(50, 15, 13, 0, 7); x.fill(); }
@@ -637,6 +639,17 @@
         notify(msg.content);
       } else if (msg.type === "waking") {
         addSys("waking up… reloading the model");
+      } else if (msg.type === "unavailable") {
+        addSys(`· stepped away — ${msg.reason || "taking a moment"} (back in ${fmtEta(msg.eta_secs)})`);
+        pollStatus();
+      } else if (msg.type === "unavailable_ack") {
+        if (current) { const r = current.closest(".row"); if (r) r.remove(); current = null; }
+        addSys(`· can't reply just yet — ${msg.reason || "taking a moment"} (${fmtEta(msg.eta_secs)}), but I'll get to it`);
+        setSending(false);
+      } else if (msg.type === "delayed_reply") {
+        current = null; addBubble("bot", msg.content, { proactive: true, time: now() });
+        notify(msg.content);
+        pollStatus();
       } else if (msg.type === "start") {
         current = addBubble("bot", "", { time: now() });
         current.classList.add("typing");
@@ -696,6 +709,11 @@
       if (secs < 3600) return Math.round(secs / 60) + "m ago";
       return Math.round(secs / 3600) + "h ago";
     }
+    function fmtEta(secs) {
+      if (secs == null) return "a bit";
+      if (secs < 60) return `~${Math.max(1, Math.round(secs))}s`;
+      return `~${Math.round(secs / 60)}m`;
+    }
     function kvRow(k, v) { const r = el("div", "st-kv"); r.appendChild(el("span", "k", k)); r.appendChild(el("span", "v", v)); return r; }
     const COLLAPSE_KEY = "mari-collapsed";
     const collapsedSet = () => new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"));
@@ -718,14 +736,21 @@
       box.innerHTML = "";
       const topMood = s.mood ? Object.entries(s.mood).sort((a, b) => b[1] - a[1])[0] : null;
 
+      const away = s.unavailable && s.unavailable.active;
+      const mode = away ? "unavailable" : (s.asleep ? "asleep" : "awake");
+
       const ov = card("Mari");
       const state = el("div", "st-kv");
       state.appendChild(el("span", "k", "state"));
       const v = el("span", "v");
-      const pill = el("span", "pill " + (s.asleep ? "asleep" : "awake"));
+      const pill = el("span", "pill " + mode);
       pill.appendChild(el("span", "pdot"));
-      pill.appendChild(el("span", null, s.asleep ? "asleep" : "awake"));
+      pill.appendChild(el("span", null, mode));
       v.appendChild(pill); state.appendChild(v); ov.appendChild(state);
+      if (away) {
+        ov.appendChild(kvRow("doing", s.unavailable.reason || "taking a moment"));
+        ov.appendChild(kvRow("back in", fmtEta(s.unavailable.eta_secs)));
+      }
       ov.appendChild(kvRow("familiarity", `${s.familiarity.value.toFixed(2)} · ${s.familiarity.label}`));
       const track = el("div", "fam-track"); const fi = el("i");
       fi.style.width = Math.round(s.familiarity.value * 100) + "%"; track.appendChild(fi); ov.appendChild(track);
@@ -780,6 +805,12 @@
       else ic.appendChild(el("div", "st-empty", "none yet — she notes these while you're away"));
       box.appendChild(ic);
 
+      const pursuits = s.pursuits || [];
+      const pc = card("Open questions (hers)", pursuits.length ? String(pursuits.length) : null);
+      if (pursuits.length) pursuits.forEach((p) => pc.appendChild(el("div", "st-mem", p.content)));
+      else pc.appendChild(el("div", "st-empty", "none yet — mined while you're away"));
+      box.appendChild(pc);
+
       const a = card("Activity");
       a.appendChild(kvRow("model", s.model || "—"));
       a.appendChild(kvRow("pending consolidation", String(s.pending_consolidation)));
@@ -790,11 +821,14 @@
       box.appendChild(a);
 
       // reflect her state in the header avatar + favicon
-      curAsleep = !!s.asleep;
-      if (s.asleep) {
+      curAsleep = !!s.asleep; curUnavailable = !!away;
+      avatarEl.classList.remove("asleep", "unavailable");
+      if (away) {
+        avatarEl.textContent = "💭"; avatarEl.classList.add("unavailable"); avatarEl.style.boxShadow = "";
+      } else if (s.asleep) {
         avatarEl.textContent = "😴"; avatarEl.classList.add("asleep"); avatarEl.style.boxShadow = "";
       } else {
-        avatarEl.textContent = (botName[0] || "M"); avatarEl.classList.remove("asleep");
+        avatarEl.textContent = (botName[0] || "M");
         avatarEl.style.boxShadow = (topMood && topMood[1] > 0.15) ? `0 0 12px ${MOOD_COLORS[topMood[0]]}` : "";
       }
       setFavicon();

@@ -1,6 +1,6 @@
 # Tuning
 
-77 knobs live in `config.py`, all overridable from `.env`. This is the reverse index:
+97 knobs live in `config.py`, all overridable from `.env`. This is the reverse index:
 **symptom → what to change.**
 
 > ⚠️ **Most of these numbers are reasoned, not measured.** Where a value was actually
@@ -223,6 +223,61 @@ your self-hosted server, not `api.day.app`.
 
 Because the defaults are slow, energy-sleep rarely beats the 30-minute idle trigger in short
 sessions. Its real payoff is as the gate for a future self-wake.
+
+---
+
+## She mines the wrong open questions / never mines any (§A3)
+
+`PursuitMiningJob` reads the recent window and asks for at most 3 salient open questions
+about you, each cited to a real message id. An uncited question, or one citing an id outside
+the fetched window, is rejected **before storage** — not a prompt request, a hard check in
+`Companion.mine_open_questions()`.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `PURSUIT_MINING_ENABLED` | true | Off disables the job entirely |
+| `PURSUIT_MINING_MIN_IDLE` | 1800s | How long you must be away first |
+| `PURSUIT_MINING_COOLDOWN` | 86400s | The "nightly deep pass" cadence |
+| `PURSUIT_WINDOW_MESSAGES` | 40 | How far back to mine |
+| `PURSUIT_MIN_MESSAGES` | 8 | Never mine a window this thin (a barren-window guard, same shape as the extraction/self-notes/intentions bugs this project already fixed twice) |
+| `PURSUIT_MAX_ACTIVE` | 5 | Caps the open backlog (oldest dropped) |
+| `PURSUIT_SALIENCE` | = `CONSOLIDATE_SALIENCE` | Reuses the same "did something actually happen" floor |
+
+**Nothing being mined is usually correct** — most windows are small talk with no real
+open thread. Only worry if a window that clearly needed follow-up produced nothing;
+check `PURSUIT_MIN_MESSAGES` isn't being tripped first.
+
+---
+
+## She makes herself unavailable too often / not at all / at the wrong times (§A4)
+
+**Off by default** (`PURSUIT_UNAVAILABLE_ENABLED=false`) — this is a new, live-untested
+feature; turn it on deliberately.
+
+She steps away only to do one of a **closed set of real things** (journal, revise her
+self-notes/persona, or sit with an A3-mined open question) — never an invented errand.
+Gated on **`restlessness`**, not `connection`: restlessness is idle/boredom-driven, not
+warmth-driven, so the trigger can't correlate with how invested you are in the conversation
+(the property that would turn this into the manipulative pattern HANDOFF's research sweep
+warns about — see §G there before loosening this).
+
+| Knob | Default | Effect |
+|---|---|---|
+| `PURSUIT_UNAVAILABLE_ENABLED` | **false** | The kill switch |
+| `PURSUIT_UNAVAILABLE_MIN_IDLE` | 900s | Fallback idle gate (drives are the real gate) |
+| `PURSUIT_UNAVAILABLE_COOLDOWN` | 21600s (6h) | Hard floor over the drive |
+| `PURSUIT_UNAVAILABLE_THRESHOLD` | 0.8 | Higher than `DRIVE_RESTLESSNESS_THRESHOLD` (0.4, journaling's own gate) — stepping away entirely is a bigger deal than a private journal entry |
+| `PURSUIT_UNAVAILABLE_CALM_CEILING` | = `CONSOLIDATE_SALIENCE` | Refuses to fire if something heavy just happened (same signal A3 uses, as a ceiling instead of a floor) |
+| `PURSUIT_JOURNAL_MIN/MAX`, `PURSUIT_SELFNOTES_MIN/MAX`, `PURSUIT_PERSONA_MIN/MAX`, `PURSUIT_SIT_MIN/MAX` | seconds | Per-pursuit "educated random" duration range — all minutes, never hours |
+
+**On interrupt: it's fine to make you wait.** A message sent while she's away gets a canned
+acknowledgment (no model call, works even with the model unloaded) and the real reply arrives
+once the window ends — see `PursuitReturnJob`. This was a deliberate product choice, not a
+limitation: raise it with whoever owns this app before "fixing" it to auto-interrupt.
+
+Not yet measured live: whether the thresholds above actually produce a good rhythm. Start
+conservative (raise the cooldown / threshold further) and loosen only after watching it fire
+a few times for real.
 
 ---
 

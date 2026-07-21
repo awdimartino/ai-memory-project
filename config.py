@@ -325,6 +325,46 @@ DRIVE_RESTLESSNESS_THRESHOLD = _f("DRIVE_RESTLESSNESS_THRESHOLD", 0.4)
 ENERGY_SLEEP_THRESHOLD = _f("ENERGY_SLEEP_THRESHOLD", 0.15)
 ENERGY_SLEEP_MIN_IDLE = _f("ENERGY_SLEEP_MIN_IDLE", 120)
 
+# --- Pursuits (§A4: she can make herself unavailable) ---
+#
+# A3: during idle, mine grounded open questions about the user (cited to a real
+# message id; uncited output is rejected). A slow, "nightly deep pass" cadence.
+PURSUIT_MINING_ENABLED = _flag("PURSUIT_MINING_ENABLED", True)
+PURSUIT_MINING_MIN_IDLE = _f("PURSUIT_MINING_MIN_IDLE", 1800)     # 30 min away
+PURSUIT_MINING_COOLDOWN = _f("PURSUIT_MINING_COOLDOWN", 86400)    # ~once a day
+PURSUIT_WINDOW_MESSAGES = _i("PURSUIT_WINDOW_MESSAGES", 40)       # how far back to mine
+PURSUIT_MIN_MESSAGES = _i("PURSUIT_MIN_MESSAGES", 8)              # never mine a barren window
+PURSUIT_MAX_ACTIVE = _i("PURSUIT_MAX_ACTIVE", 5)                  # cap the open backlog
+# Salience floor to mine (reuses the same signal CONSOLIDATE_SALIENCE reads).
+PURSUIT_SALIENCE = _f("PURSUIT_SALIENCE", CONSOLIDATE_SALIENCE)
+
+# A4: while restless enough, she may step away to do one of a closed set of real
+# things (journal, revise self-notes/persona, sit with an A3-mined question), for an
+# "educated random" bounded duration, and won't reply until she's back or you write
+# again (she'll just acknowledge — see PursuitReturnJob). OFF by default: enable only
+# once live-tested.
+PURSUIT_UNAVAILABLE_ENABLED = _flag("PURSUIT_UNAVAILABLE_ENABLED", False)
+PURSUIT_UNAVAILABLE_MIN_IDLE = _f("PURSUIT_UNAVAILABLE_MIN_IDLE", 900)     # 15 min away
+PURSUIT_UNAVAILABLE_COOLDOWN = _f("PURSUIT_UNAVAILABLE_COOLDOWN", 21600)   # >=6h between
+# Higher than DRIVE_RESTLESSNESS_THRESHOLD (0.4, journaling's own gate) — stepping away
+# entirely is a bigger deal than a private journal entry, and restlessness (not
+# connection) is the drive because it's idle/boredom-driven, not warmth-driven, so
+# this can't correlate with how invested the user is in the conversation.
+PURSUIT_UNAVAILABLE_THRESHOLD = _f("PURSUIT_UNAVAILABLE_THRESHOLD", 0.8)
+# Never step away right after a heavy disclosure — the same signal A3 uses to decide
+# TO mine, applied as a ceiling instead of a floor.
+PURSUIT_UNAVAILABLE_CALM_CEILING = _f("PURSUIT_UNAVAILABLE_CALM_CEILING", CONSOLIDATE_SALIENCE)
+
+# Per-pursuit "educated random" duration ranges (seconds) — bounded, minutes not hours.
+PURSUIT_JOURNAL_MIN = _f("PURSUIT_JOURNAL_MIN", 60)
+PURSUIT_JOURNAL_MAX = _f("PURSUIT_JOURNAL_MAX", 240)
+PURSUIT_SELFNOTES_MIN = _f("PURSUIT_SELFNOTES_MIN", 60)
+PURSUIT_SELFNOTES_MAX = _f("PURSUIT_SELFNOTES_MAX", 180)
+PURSUIT_PERSONA_MIN = _f("PURSUIT_PERSONA_MIN", 120)
+PURSUIT_PERSONA_MAX = _f("PURSUIT_PERSONA_MAX", 360)
+PURSUIT_SIT_MIN = _f("PURSUIT_SIT_MIN", 180)
+PURSUIT_SIT_MAX = _f("PURSUIT_SIT_MAX", 600)
+
 # Tools (pillar 4): native function-calling. When enabled, the chat turn streams
 # through a tool loop so Mari can call registered tools (clock, reminisce, more
 # later). Verified 100% reliable on the chat model (scripts/tool_probe.py). The

@@ -529,20 +529,31 @@ REFLECT_CUE = "(You're alone with your thoughts for a bit. Write a short, honest
 
 def build_reflect_system(memories: list[str], mood: str | None,
                          recent_thoughts: list[str], core: list[str] | None = None,
-                         persona: str | None = None, familiarity: float = 0.0) -> str:
+                         persona: str | None = None, familiarity: float = 0.0,
+                         seed: str | None = None) -> str:
     """System prompt for a private reflection: persona + memories + mood + recent thoughts."""
     return join_blocks(reflect_blocks(memories, mood, recent_thoughts, core=core,
-                                      persona=persona, familiarity=familiarity))
+                                      persona=persona, familiarity=familiarity, seed=seed))
 
 
 def reflect_blocks(memories: list[str], mood: str | None,
                    recent_thoughts: list[str], core: list[str] | None = None,
                    persona: str | None = None,
-                   familiarity: float = 0.0) -> list[tuple[str, str]]:
-    """`build_reflect_system` as labelled blocks — see `system_blocks`."""
+                   familiarity: float = 0.0,
+                   seed: str | None = None) -> list[tuple[str, str]]:
+    """`build_reflect_system` as labelled blocks — see `system_blocks`.
+
+    `seed` gives the reflection a genuine subject (an A3-mined open question, §A4)
+    instead of the unseeded "how are you doing?" — the documented cause of her
+    journal repeating itself (ReflectionJob has no subject on its own).
+    """
     blocks = system_blocks(memories, mood, core=core, persona=persona,
                            familiarity=familiarity)
     blocks.append(("reflection framing", _REFLECT_ADDENDUM))
+    if seed:
+        blocks.append(("seeded question",
+                       f"Something you've been wondering about them, worth actually sitting with "
+                       f"right now: {seed}"))
     if recent_thoughts:
         joined = "\n".join(f"- {t}" for t in recent_thoughts)
         blocks.append(("recent thoughts",
@@ -626,6 +637,111 @@ def build_self_notes_user(current: str, recent_msgs: list[dict]) -> str:
             f"The conversation that just happened:\n{convo}\n\n"
             f"How did they react to the way you talked to them? Write your updated notes now "
             f"(second person, addressed to yourself), or PASS if nothing needs to change.")
+
+
+# --- Pursuits (§A4: she can make herself unavailable) ---
+#
+# A "pursuit" is a real thing Mari does for herself: A3 (below) mines grounded open
+# questions about the user; A4 lets her step away to actually do one of a CLOSED set
+# of real operations (journal, revise her notes/persona, sit with an open question).
+# The choice is a structured-output decision (like the lifecycle/intentions calls
+# above), never the native tool-calling loop — that measures ~23/30 reliable, far too
+# flaky to gate whether she goes silent on the user.
+
+def build_pursuit_choice_system() -> str:
+    return f"""You are the part of {BOT_NAME} that decides, once in a while, to take a little time
+for herself before replying again — the way a person might step away to think, journal, or
+sit with something, rather than being available every second.
+
+You are offered a short menu of real things you could do right now. Pick ONE if you genuinely
+want to, or PASS to stay as you are. Don't pick one just because it's offered — most of the
+time PASS is right. Only step away if something on the list actually calls to you right now."""
+
+
+def build_pursuit_choice_user(tools: list, seed_question: str | None = None) -> str:
+    lines = [f"- {t.name}: {t.description}" for t in tools]
+    menu = "\n".join(lines)
+    seed = (f"\n\nThe open question on your mind right now, if you pick \"sit_with_question\": "
+            f"{seed_question}" if seed_question else "")
+    return (f"What you could do right now:\n{menu}{seed}\n\n"
+            f"Reply with the name of the one you want, or PASS to stay available.")
+
+
+def build_pursuit_choice_schema(names: list[str]) -> dict:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "pursuit_choice",
+            "schema": {
+                "type": "object",
+                "properties": {"choice": {"type": "string", "enum": [*names, "PASS"]}},
+                "required": ["choice"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+# --- A3: grounded open-question mining (mints the pursuits A4 consumes) ---
+#
+# A reframed "nightly deep pass": NOT day-summaries (measured worse elsewhere in this
+# project — aggressive clustering loses retrieval accuracy), but a small number of
+# salient open questions about the user, each grounded in a CITED message. This
+# project has already been bitten three times by ungrounded generation on a thin
+# window (memory extraction, self-notes, intentions all previously confabulated on a
+# barren window) — citation-checking here is a structural guard in the code, not
+# just a prompt request: an uncited question is rejected outright before storage.
+
+PURSUIT_QUESTIONS_SYSTEM = f"""You are the quiet, reflective part of {BOT_NAME}, looking back over a
+stretch of recent conversation (each line tagged with its message id in [brackets]).
+
+Identify the MOST salient open questions about the user's life right now — things you're
+genuinely curious about, or a thread that was left hanging. For EACH one, you must cite the
+id of the specific message that grounds it — the actual line where this came up.
+
+Rules:
+- A question with no real message behind it must NOT be included. If you can't point to the
+  id, you don't have a question — do not invent one to fill the list.
+- About the user's own life and concerns — never about {BOT_NAME}, the app, or AI in the abstract.
+- Don't repeat a question you already have open (listed below).
+- Return at most 3. If nothing in this window rises to real salience, return an empty list —
+  that is the correct answer far more often than not, especially on a quiet or shallow window."""
+
+PURSUIT_QUESTIONS_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "pursuit_questions",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "question": {"type": "string"},
+                            "citations": {"type": "array", "items": {"type": "integer"}},
+                        },
+                        "required": ["question", "citations"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["questions"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def build_pursuit_questions_user(window: list[dict], core: list[str], existing: list[str]) -> str:
+    convo = "\n".join(
+        f"[{m['id']}] {'User' if m['role'] == 'user' else BOT_NAME}: {m['content']}" for m in window)
+    co = "\n".join(f"- {c}" for c in core) or "(none yet)"
+    have = "\n".join(f"- {q}" for q in existing) or "(none yet)"
+    return (f"Recent conversation:\n{convo}\n\nWhat you already know about them:\n{co}\n\n"
+            f"Open questions you already have:\n{have}\n\n"
+            f"List any genuinely new, cited open questions from this window, or an empty list.")
 
 
 # --- Memory consolidation (Tier-2 structured output) ---

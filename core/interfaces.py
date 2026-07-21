@@ -25,6 +25,11 @@ class ConversationStore(Protocol):
         """Return up to `limit` most recent messages (oldest first) as {role, content}."""
         ...
 
+    def recent_messages_with_ids(self, limit: int) -> list[dict]:
+        """Like `recent_messages`, but keeps each message's id — the citation
+        surface for A3's grounded open-question mining (§A4)."""
+        ...
+
     def messages_after(self, msg_id: int) -> list[dict]:
         """Return messages with id > msg_id (oldest first) as {id, role, content}.
 
@@ -182,38 +187,47 @@ class ThoughtStore(Protocol):
 class IntentionStore(Protocol):
     """Persistence for Mari's private forward agenda (the "planning" pillar): short
     notes of things she means to bring up or find out, minted during reflection and
-    consumed by reach-out."""
+    consumed by reach-out.
 
-    def add(self, content: str) -> int:
-        """Store one intention; return its id."""
+    Also holds A3-mined "pursuits" (self-directed things she may step away to do,
+    §A4) in the same table, discriminated by `kind`: 'agenda' (default, the
+    raise-with-him items above) vs 'pursuit'. Every method defaults to `kind="agenda"`
+    so every pre-existing caller is unaffected; a pursuit only ever appears where a
+    caller explicitly asks for `kind="pursuit"`.
+    """
+
+    def add(self, content: str, kind: str = "agenda", citations: list[int] | None = None) -> int:
+        """Store one intention/pursuit; return its id. `citations` are message ids
+        grounding a pursuit (ignored/None for agenda items)."""
         ...
 
-    def active(self, limit: int | None = None) -> list[dict]:
-        """Open intentions, oldest first, as {id, content, created_at}."""
+    def active(self, kind: str = "agenda", limit: int | None = None) -> list[dict]:
+        """Open items of one kind, oldest first, as {id, content, created_at, citations}."""
         ...
 
     def fulfill(self, intention_id: int) -> None:
-        """Mark an intention acted-on (retired, timestamped, kept for history)."""
+        """Mark an item acted-on (retired, timestamped, kept for history)."""
         ...
 
     def drop(self, intention_id: int) -> None:
-        """Retire an intention without acting on it (expiry / over-cap pruning)."""
+        """Retire an item without acting on it (expiry / over-cap pruning)."""
         ...
 
-    def drop_older_than(self, cutoff_iso: str) -> int:
-        """Retire active intentions created before `cutoff_iso`; return how many."""
+    def drop_older_than(self, cutoff_iso: str, kind: str = "agenda") -> int:
+        """Retire active items of one kind created before `cutoff_iso`; return how many."""
         ...
 
-    def all(self) -> list[dict]:
-        """Every intention (open + retired), for the status panel's agenda history."""
+    def all(self, kind: str | None = None) -> list[dict]:
+        """Every item (open + retired), for the status panel's agenda history.
+        `kind=None` returns both kinds; otherwise filters to one."""
         ...
 
-    def count_active(self) -> int:
-        """Number of open intentions (against which INTENTION_MAX_ACTIVE is enforced)."""
+    def count_active(self, kind: str = "agenda") -> int:
+        """Number of open items of one kind (against which *_MAX_ACTIVE is enforced)."""
         ...
 
     def clear(self) -> None:
-        """Delete every intention (the full-reset admin op)."""
+        """Delete every intention AND pursuit (the full-reset admin op)."""
         ...
 
 

@@ -188,6 +188,21 @@ MIGRATIONS = [
         FROM messages m LEFT JOIN sessions s ON s.id = m.session_id
         ORDER BY m.id;
     """,
+    # v11 — pursuits share the intentions table (§A4): `kind` discriminates existing
+    # "raise with him" agenda items (kind='agenda' — every pre-existing row, via the
+    # column default) from A3-mined self-directed pursuits (kind='pursuit'). Same
+    # store, same lifecycle; every read filters by kind so a pursuit can never leak
+    # into reach-out's agenda-anchor or the chat-turn agenda block.
+    """
+    ALTER TABLE intentions ADD COLUMN kind TEXT NOT NULL DEFAULT 'agenda';
+    CREATE INDEX idx_intentions_kind ON intentions(kind, active);
+    """,
+    # v12 — pursuit citations: A3's grounding rule (an uncited open question is
+    # rejected, never stored) needs somewhere to keep the evidence. JSON list of
+    # message ids from the episodic log; NULL for kind='agenda' rows.
+    """
+    ALTER TABLE intentions ADD COLUMN citations TEXT;
+    """,
 ]
 
 
