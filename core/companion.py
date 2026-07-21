@@ -690,7 +690,17 @@ class Companion:
         if cue is None:
             return False
         energy = self.drives.energy() if self.drives is not None else None
-        exchange = f"Them: {user_text}\n{config.BOT_NAME}: {reply or '(she stayed quiet)'}"
+        # Several turns, not one. Insisting is the signal that he means it — but with a
+        # single exchange the decision cannot SEE that he already asked twice and she
+        # deflected, so it read repeated urging as "the conversation is still open" and
+        # said STAY every time. Observed live 2026-07-21 across four turns of the user
+        # telling her to sleep.
+        recent = self.history[-config.SLEEP_CHOICE_CONTEXT_TURNS * 2:]
+        lines = [f"{'Them' if m['role'] == 'user' else config.BOT_NAME}: {m['content']}"
+                 for m in recent]
+        lines.append(f"Them: {user_text}")
+        lines.append(f"{config.BOT_NAME}: {reply or '(she stayed quiet)'}")
+        exchange = "\n".join(lines)
         try:
             raw = await self.llm.structured_json(
                 [{"role": "system", "content": build_sleep_choice_system()},

@@ -312,6 +312,10 @@ LMS_PATH = os.environ.get("LMS_PATH", "lms")                           # LM Stud
 # free: SLEEP_AFTER_IDLE still fires, so this can only make standby earlier and
 # CHOSEN, never prevent it. Needs SLEEP_ENABLED (it's the same model_manager).
 SLEEP_ON_FAREWELL_ENABLED = _flag("SLEEP_ON_FAREWELL_ENABLED", True)
+# How many recent exchanges the sleep decision sees. One was not enough: it could not
+# tell "he said goodnight then changed the subject" (stay up) from "he has now asked
+# three times and she keeps deflecting" (go to sleep) — both look like talking.
+SLEEP_CHOICE_CONTEXT_TURNS = _i("SLEEP_CHOICE_CONTEXT_TURNS", 3)
 
 # Internal drives (multi-drive proactivity, roadmap arc A1 — "observe first" slice).
 # Slow-integrating scalars (connection, restlessness) that rise while you're away,
