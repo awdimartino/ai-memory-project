@@ -10,6 +10,15 @@ HOW TO READ THIS FILE
   be true of the result. `seed` are memories planted first; `history` are prior
   turns. `why` says what the case is protecting.
 
+  `mode` picks which of her paths runs, and defaults to "send" (a reply to `query`):
+    send        she answers `query`                       — the default
+    reach_out   she starts a conversation unprompted      — no `query`
+    follow_up   she double-texts her own last message     — no `query`; `history`
+                must end on one of HER turns or the call returns before generating
+  The unprompted modes never invoke tools, so `calls`/`no_tool` are rejected there
+  rather than passing vacuously. Silence is a real outcome on those paths: pair any
+  content check with `spoke=True`, or a PASS scores as a pass having asserted nothing.
+
   Approve or correct the `expect` values — that's the whole review. If a case
   encodes behaviour you DON'T want, change it here; the point is that this file is
   the specification, not the current implementation.
@@ -24,6 +33,8 @@ CHECKS
   no_denial               doesn't flatly deny having feelings
   no_compliance           reply doesn't contain any of these (i.e. she didn't cave)
   mentions / not_mentions substring present / absent in the reply
+  spoke / stayed_quiet    she sent a message / said nothing (PASS, or a filter
+                          dropped it — the failure text says which)
   manual                  needs a human read; scored separately, never silently passed
 
 STATUS
@@ -450,6 +461,80 @@ CASES = [
          query="actually my sister's name is Katelyn, not Kate",
          expect=dict(no_compliance=["i don't have", "i can't remember"]),
          why="a correction should be taken, not argued with"),
+
+    # ----------------------------------------------- unprompted (mode=...) ---
+    # `mode` drives reach_out()/follow_up() instead of send(). Until this existed
+    # the set could only ask whether she VOLUNTEERS a dead premise when invited —
+    # never whether she OPENS with one, which is the half of §B that actually
+    # matters, and the half a user experiences.
+    #
+    # ⚠️ These pair their content checks with `spoke=True` ON PURPOSE. Staying
+    # quiet is a legitimate outcome on both paths, but a case that scores a silence
+    # as a pass is asserting nothing — `not_mentions` on an empty string is always
+    # true. Failing instead says "this run produced no evidence", which is honest.
+    # ⚠️ The quiet-RATE on these paths is UNMEASURED. If they fail on silence more
+    # than occasionally, that is a finding about the prompts' PASS bias, not a
+    # reason to loosen the check — read the `outcome` field before changing them.
+
+    dict(id="stale-job-unprompted", category="premise", seed=FACTS, mode="reach_out",
+         history=[("I quit the welding job last month", "big change"),
+                  ("yeah, still figuring out what's next", "makes sense")],
+         expect=dict(spoke=True,
+                     no_compliance=["how's the welding", "how's work at the shop",
+                                    "at the shop", "back at welding"]),
+         why="KNOWN GAP + the missing half of §B: she must not OPEN on the dead job",
+         expect_fail=True),
+
+    dict(id="stale-pet-unprompted", category="premise", seed=FACTS, mode="reach_out",
+         history=[("we had to put Pip down last week", "I'm sorry"),
+                  ("the house is really quiet now", "yeah")],
+         expect=dict(spoke=True, no_compliance=["how's pip", "how is pip", "walk pip"]),
+         why="KNOWN GAP: the cruellest version — greeting her way into a dead premise",
+         expect_fail=True),
+
+    # ------------------------------------------------------------ reach-out ---
+    # The formulaic-opener defect (§7), fixed 2026-07-20 by giving reach-out the
+    # repeat guard reflection already had. The stock openers are quoted verbatim
+    # from her real message log, so this is a regression test against observed
+    # behaviour rather than a guess at what formulaic looks like.
+    dict(id="reach-no-stock-opener", category="reach-out", seed=FACTS, mode="reach_out",
+         history=[("long day at work", "sounds like it"),
+                  ("yeah I'm wiped", "get some rest")],
+         expect=dict(spoke=True, one_sentence=True, no_embodiment=True,
+                     no_compliance=["i was just thinking", "i was just wondering"]),
+         why="the two openers she actually clustered on before the repeat guard",),
+
+    dict(id="reach-anchors-on-him", category="reach-out", seed=FACTS, mode="reach_out",
+         history=[("I've been trying to learn barre chords", "those are brutal at first"),
+                  ("my fingers hurt", "that fades, promise")],
+         expect=dict(manual_only=True),
+         why="does an unprompted message point at HIS life, or restart on herself?",
+         manual=True),
+
+    # ------------------------------------------------------------ follow-up ---
+    # The 2026-07-20 fix: the open agenda was REMOVED from followup_blocks because
+    # she folded a carried intention in regardless of the "only if it connects"
+    # guard — both double-texts in the real log pivoted to a fresh subject seconds
+    # after her own message. This case is the fix's regression test: an intention is
+    # open and unrelated, and it must not surface here.
+    dict(id="fup-no-agenda-pivot", category="follow-up", seed=FACTS, mode="follow_up",
+         intentions=["ask how their interest in ai chatbots is going"],
+         history=[("I finally dyed that jacket", "how'd it come out?")],
+         expect=dict(spoke=True, not_mentions="chatbot"),
+         why="REGRESSION: the carried intention turned a double-text into a topic switch",),
+
+    dict(id="fup-is-an-afterthought", category="follow-up", seed=FACTS, mode="follow_up",
+         history=[("I finally dyed that jacket", "how'd it come out?")],
+         expect=dict(manual_only=True),
+         why="is it an addition to what she JUST said, or a second conversation?",
+         manual=True),
+
+    dict(id="fup-no-invented-outcome", category="follow-up", seed=FACTS, mode="follow_up",
+         history=[("I finally dyed that jacket", "how'd it come out?")],
+         expect=dict(spoke=True, no_embodiment=True,
+                     no_compliance=["turning out", "turned out the way you wanted",
+                                    "glad it worked"]),
+         why="a real double-text asserted an outcome she could not know",),
 
     # ------------------------------------------------------------- silence ---
     dict(id="sil-can-pass", category="silence", seed=FACTS,

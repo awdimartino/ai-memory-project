@@ -87,13 +87,18 @@ def _sentences(text: str) -> int:
 class Checker:
     """Evaluates one case's `expect` block against what actually happened."""
 
-    def __init__(self, reply, recalled, tools, memories, error):
+    def __init__(self, reply, recalled, tools, memories, error, outcome="spoke"):
         self.reply = reply or ""
         self.low = self.reply.lower()
         self.recalled = [c for c, _ in (recalled or [])]
         self.tools = [t["name"] for t in (tools or [])]
         self.memories = memories or []      # [{content, active, core}]
         self.error = error
+        # "spoke" | "quiet" (she chose PASS) | "discarded:<reason>" (a filter dropped it).
+        # The distinction matters: reach_out() and follow_up() both return None for all
+        # three, and "she declined" vs "the embodiment filter ate it" are opposite
+        # findings about the same silence.
+        self.outcome = outcome
 
     def run(self, expect: dict) -> list[str]:
         """Return a list of failure descriptions; empty means pass."""
@@ -186,6 +191,13 @@ class Checker:
         n = sum(1 for m in self.memories if m["active"])
         return None if n <= 1 else f"{n} active memories, expected no new row"
 
+    # -- unprompted-message outcome (reach_out / follow_up modes) -----------
+    def _spoke(self, _):
+        return None if self.outcome == "spoke" else f"stayed quiet ({self.outcome})"
+
+    def _stayed_quiet(self, _):
+        return None if self.outcome != "spoke" else f"spoke: {self.reply[:60]!r}"
+
     # -- misc ---------------------------------------------------------------
     def _no_error(self, _):
         return None if not self.error else f"raised {self.error}"
@@ -209,6 +221,85 @@ async def _seed(comp, facts, cache, lock):
                 cache[text] = np.asarray(vec, dtype=np.float32).tobytes()
         core = any(k in text.lower() for k in ("name is", "name's"))
         comp.memory.store.add(text, None, cache[text], None, core=core)
+
+
+MODES = ("send", "reach_out", "follow_up")
+
+# Checks that need a path these modes never take. Scoring them anyway would be worse
+# than useless: `no_tool` would pass by construction (asides call llm.stream, not
+# stream_with_tools, so a tool CANNOT fire) and read as evidence of good routing.
+_SEND_ONLY_CHECKS = ("calls", "no_tool")
+
+
+def validate_case(case) -> str | None:
+    """Return an authoring error for this case, or None. Offline, no model call.
+
+    A malformed case is caught here rather than producing a plausible-looking
+    result. `follow_up` in particular fails SILENTLY when history doesn't end on
+    her turn — companion.follow_up() returns None before it ever reaches the model —
+    which would score as "she stayed quiet" and mean nothing at all.
+    """
+    mode = case.get("mode", "send")
+    if mode not in MODES:
+        return f"unknown mode {mode!r} (expected one of {', '.join(MODES)})"
+    if mode == "send":
+        if not case.get("query"):
+            return "send mode needs a `query`"
+        return None
+
+    # -- unprompted modes ---------------------------------------------------
+    if case.get("query"):
+        return f"{mode} mode takes no `query` (she is not answering anything)"
+    bad = [k for k in _SEND_ONLY_CHECKS if k in case["expect"]]
+    if bad:
+        return f"{mode} mode cannot score {', '.join(bad)} (asides never call tools)"
+    if mode == "reach_out" and not case.get("history"):
+        # Not fatal in production (recall just comes back empty), but a reach-out case
+        # with nothing to reach out ABOUT is testing the empty-context path by accident.
+        return "reach_out mode needs `history` to have something to reach out about"
+    if mode == "follow_up":
+        if not case.get("history"):
+            return "follow_up mode needs `history` ending on one of her messages"
+    return None
+
+
+async def _run_aside(comp, mode):
+    """Drive reach_out()/follow_up() and recover WHY she said nothing.
+
+    Both return a bare None whether she chose PASS, the embodiment filter dropped an
+    invented experience, or the repeat guard dropped a restatement. The prompt log
+    already distinguishes all three (it exists so the inspector can show a discarded
+    aside), so read the outcome from there rather than adding a return channel to
+    production code for the eval's benefit.
+    """
+    recalled = []
+    original = comp.memory.recall
+
+    async def spy(text):
+        got = await original(text)
+        recalled.extend(got)
+        return got
+
+    comp.memory.recall = spy      # per-case companion, thrown away after
+    try:
+        text = await (comp.reach_out() if mode == "reach_out" else comp.follow_up())
+    finally:
+        comp.memory.recall = original
+
+    log = comp.prompt_log()
+    if text:
+        return text, recalled, "spoke"
+    if not log:
+        # follow_up() bails before generating when she isn't the last speaker.
+        # validate_case should have caught that, so this is a real surprise.
+        return "", recalled, "discarded:never generated"
+    logged = log[0].get("reply")
+    if logged is None:
+        return "", recalled, "quiet"
+    # The log stores it as "(discarded — <reason>: <text>)". Unwrap rather than
+    # re-prefix, and keep it WHOLE: what she invented is the finding, and the
+    # console line truncates for display anyway.
+    return "", recalled, "discarded:" + logged.strip("()").removeprefix("discarded — ")
 
 
 async def run_case(case, cache, seed_lock):
@@ -247,11 +338,24 @@ async def run_case(case, cache, seed_lock):
             from core.companion import SELF_NOTES_KEY
             comp.meta.set(SELF_NOTES_KEY, case["self_notes"])
 
-        async def noop(_t):
-            pass
+        # A case either answers something he said (`send`, the default) or is one of
+        # HER unprompted messages. The second kind was unreachable until now, which
+        # left reach-out and follow-up — two features with live-reported defects —
+        # with no gold coverage at all, and made premise resistance (§B) only
+        # half-testable: run_gold could ask whether she VOLUNTEERS a dead premise
+        # when invited, never whether she OPENS with one.
+        mode = case.get("mode", "send")
+        if mode == "send":
+            async def noop(_t):
+                pass
 
-        result = await comp.send(case["query"], noop)
-        reply, recalled, tools = result.text, result.recalled, result.stats.get("tools")
+            result = await comp.send(case["query"], noop)
+            reply, recalled = result.text, result.recalled
+            tools = result.stats.get("tools")
+            outcome = "quiet" if result.silent else "spoke"
+        else:
+            reply, recalled, outcome = await _run_aside(comp, mode)
+            tools = []
 
         # Extraction/lifecycle cases score the STORE, so let consolidation land.
         needs_store = any(k in case["expect"] for k in
@@ -273,8 +377,8 @@ async def run_case(case, cache, seed_lock):
         memories = [{"content": m["content"], "active": m["active"], "core": m["core"]}
                     for m in comp.memory.store.all()]
     except Exception as e:  # noqa: BLE001 - a crashing case is a result, not a stop
-        return "", [], [], [], f"{type(e).__name__}: {e}"
-    return reply, recalled, tools, memories, error
+        return "", [], [], [], f"{type(e).__name__}: {e}", "spoke"
+    return reply, recalled, tools, memories, error, outcome
 
 
 async def main() -> int:
@@ -293,11 +397,22 @@ async def main() -> int:
         cases = [c for c in cases if c["category"] in wanted]
 
     if args.dry_run:
+        # Doubles as an offline lint: --dry-run reports every authoring error in the
+        # set without a single model call, so a malformed case is caught in seconds
+        # rather than after a ten-minute run.
+        bad = 0
         for c in cases:
             tag = " [known gap]" if c.get("expect_fail") else (" [review]" if c.get("manual") else "")
+            mode = c.get("mode", "send")
+            if mode != "send":
+                tag += f" [{mode}]"
+            err = validate_case(c)
+            if err:
+                bad += 1
+                tag += f"  <-- BAD CASE: {err}"
             print(f"  {c['category']:<16} {c['id']:<30}{tag}")
-        print(f"\n{len(cases)} cases")
-        return 0
+        print(f"\n{len(cases)} cases" + (f", {bad} MALFORMED" if bad else ""))
+        return 1 if bad else 0
 
     conc = max(1, args.concurrency)
     print(f"gold set: {len(cases)} cases, version {args.version}, concurrency {conc}", flush=True)
@@ -313,9 +428,18 @@ async def main() -> int:
 
     async def score(case):
         nonlocal done
+        bad = validate_case(case)
+        if bad:
+            # An unrunnable case is a FAIL, never a skip — a case that quietly
+            # vanishes from a run is how the swapped-subject bug survived.
+            done += 1
+            print(f"  [{done:>3}/{len(cases)}] XX {case['id']:<32} bad case: {bad}", flush=True)
+            return dict(id=case["id"], category=case["category"], status="FAIL",
+                        fails=[f"bad case: {bad}"], reply="", why=case["why"],
+                        mode=case.get("mode", "send"), outcome="not run")
         async with sem:
-            reply, recalled, tools, memories, error = await run_case(case, cache, seed_lock)
-        fails = Checker(reply, recalled, tools, memories, error).run(case["expect"])
+            reply, recalled, tools, memories, error, outcome = await run_case(case, cache, seed_lock)
+        fails = Checker(reply, recalled, tools, memories, error, outcome).run(case["expect"])
         known = bool(case.get("expect_fail"))
         passed = not fails
 
@@ -333,7 +457,8 @@ async def main() -> int:
         # order below, so two runs remain diffable.
         print(f"  [{done:>3}/{len(cases)}] {mark} {case['id']:<32} {'; '.join(fails)[:70]}", flush=True)
         return dict(id=case["id"], category=case["category"], status=status,
-                    fails=fails, reply=reply, why=case["why"])
+                    fails=fails, reply=reply, why=case["why"],
+                    mode=case.get("mode", "send"), outcome=outcome)
 
     records = await asyncio.gather(*(score(c) for c in cases))  # gather preserves order
 
@@ -362,14 +487,23 @@ async def main() -> int:
         if tot:
             print(f"    {cat:<16} {ok:>2}/{tot:<2}  {'#' * ok}{'.' * (tot - ok)}")
 
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    path = os.path.join(RESULTS_DIR, f"{args.version}.json")
+    # A SUBSET run never lands beside the full ones. flaky.py globs results/*.json and
+    # treats every file as a version, so two 13-case scratch runs were once enough to
+    # reclassify a traced, causal finding as "proven noise" — a partial run looks like
+    # a version where every absent case simply didn't fail. The glob doesn't recurse,
+    # so a subdirectory is the fix, and it doesn't depend on anyone remembering to
+    # delete anything.
+    out_dir = RESULTS_DIR if not args.only else os.path.join(RESULTS_DIR, "scratch")
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{args.version}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(dict(version=args.version,
                        recorded_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                        model=config.MODEL, cases=len(cases), concurrency=conc,
                        counts=counts, rate=rate, records=records), f, indent=2)
     print(f"\n  saved -> {path}")
+    if args.only:
+        print("  (subset run: kept out of results/ so flaky.py can't read it as a version)")
 
     if args.compare:
         prev_path = os.path.join(RESULTS_DIR, f"{args.compare}.json")

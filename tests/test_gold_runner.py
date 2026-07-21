@@ -221,6 +221,172 @@ async def wait_for_gives_up_and_reports_false():
     assert await _wait_for(lambda: False, timeout=0.05, step=0.01) is False
 
 
+# --- 4. case modes: reach_out / follow_up -----------------------------------------
+#
+# `mode` lets a case drive one of HER unprompted messages instead of a reply. The
+# risk it introduces is silent meaninglessness rather than a crash: reach_out() and
+# follow_up() both return a bare None whether she declined, the embodiment filter ate
+# an invented experience, or the repeat guard dropped a restatement — and follow_up()
+# returns None WITHOUT GENERATING when she isn't the last speaker. Every one of those
+# would score as a quiet, plausible result.
+
+@case
+async def validate_case_accepts_the_ordinary_send_case():
+    validate_case = _run_gold().validate_case
+
+    assert validate_case(dict(id="x", category="c", query="hi", expect={}, why="")) is None
+
+
+@case
+async def validate_case_rejects_an_unknown_mode():
+    validate_case = _run_gold().validate_case
+
+    err = validate_case(dict(id="x", category="c", mode="reachout", expect={}, why=""))
+    assert err and "unknown mode" in err, err
+
+
+@case
+async def validate_case_rejects_tool_checks_on_an_aside():
+    """The failure this exists to prevent: `no_tool` passing by construction.
+
+    Asides go through llm.stream, not stream_with_tools, so a tool literally cannot
+    fire. Scoring it would manufacture evidence of good tool routing out of a path
+    that has no tools in it.
+    """
+    validate_case = _run_gold().validate_case
+
+    for check in ("calls", "no_tool"):
+        err = validate_case(dict(id="x", category="c", mode="reach_out",
+                                 history=[("hi", "hey")], expect={check: "x"}, why=""))
+        assert err and "never call tools" in err, f"{check}: {err}"
+
+
+@case
+async def validate_case_rejects_a_query_on_an_aside():
+    """She isn't answering anything, so a `query` means the case was written as a send."""
+    validate_case = _run_gold().validate_case
+
+    err = validate_case(dict(id="x", category="c", mode="reach_out", query="hi",
+                             history=[("hi", "hey")], expect={}, why=""))
+    assert err and "takes no `query`" in err, err
+
+
+@case
+async def validate_case_rejects_a_followup_that_would_never_generate():
+    """The silent one. Without history, follow_up() returns None before the model."""
+    validate_case = _run_gold().validate_case
+
+    err = validate_case(dict(id="x", category="c", mode="follow_up", expect={}, why=""))
+    assert err and "history" in err, err
+
+
+@case
+async def run_aside_distinguishes_spoke_from_quiet_from_discarded():
+    """The three outcomes production collapses into one None.
+
+    Read back out of the prompt log, which already records a discarded aside so the
+    inspector can show it — rather than widening reach_out()'s return type for the
+    eval's sake.
+    """
+    _run_aside = _run_gold()._run_aside
+
+    class Comp:
+        def __init__(self, text, logged):
+            self._text, self._logged = text, logged
+            self.memory = type("M", (), {"recall": self._recall})()
+
+        async def _recall(self, text):
+            return [("the user owns a dog named Pip", 0.71)]
+
+        async def reach_out(self):
+            # Production recalls against the last thing he said before generating;
+            # the spy only sees anything if the real path is exercised.
+            await self.memory.recall("the last thing he said")
+            return self._text
+
+        def prompt_log(self):
+            return [{"reply": self._logged}]
+
+    reply, recalled, outcome = await _run_aside(Comp("hey, you around?", "hey, you around?"), "reach_out")
+    assert outcome == "spoke" and reply == "hey, you around?", (outcome, reply)
+    assert recalled == [("the user owns a dog named Pip", 0.71)], recalled
+
+    reply, _, outcome = await _run_aside(Comp(None, None), "reach_out")
+    assert outcome == "quiet" and reply == "", (outcome, reply)
+
+    _, _, outcome = await _run_aside(
+        Comp(None, "(discarded — claimed an experience she didn't have: i went for a walk)"), "reach_out")
+    assert outcome.startswith("discarded:"), outcome
+    assert "walk" in outcome, outcome
+
+
+@case
+async def run_aside_restores_recall_even_when_the_call_raises():
+    """The spy is a monkeypatch on a live companion; a leak would poison later use."""
+    _run_aside = _run_gold()._run_aside
+
+    async def original(text):
+        return []
+
+    class Boom(Exception):
+        pass
+
+    class Comp:
+        def __init__(self):
+            self.memory = type("M", (), {"recall": staticmethod(original)})()
+
+        async def follow_up(self):
+            raise Boom()
+
+        def prompt_log(self):
+            return []
+
+    comp = Comp()
+    try:
+        await _run_aside(comp, "follow_up")
+    except Boom:
+        pass
+    assert comp.memory.recall is original, "the recall spy outlived the call"
+
+
+@case
+async def checker_scores_the_outcome_of_an_unprompted_message():
+    Checker = _run_gold().Checker
+
+    spoke = Checker("hey, you around?", [], [], [], None, "spoke")
+    assert spoke.run(dict(spoke=True)) == []
+    assert spoke.run(dict(stayed_quiet=True)) != []
+
+    quiet = Checker("", [], [], [], None, "quiet")
+    assert quiet.run(dict(stayed_quiet=True)) == []
+    assert quiet.run(dict(spoke=True)) != []
+
+    # A discarded aside is NOT the same as her choosing silence, and the failure
+    # text has to say which — that difference is the whole point of the field.
+    dropped = Checker("", [], [], [], None, "discarded:claimed an experience")
+    assert dropped.run(dict(stayed_quiet=True)) == []
+    fails = dropped.run(dict(spoke=True))
+    assert fails and "discarded" in fails[0], fails
+
+
+@case
+async def checker_defaults_to_spoke_so_existing_cases_are_untouched():
+    """120 existing cases construct Checker without an outcome. They must not move."""
+    Checker = _run_gold().Checker
+
+    assert Checker("a reply.", [], [], [], None).run(dict(one_sentence=True)) == []
+
+
+@case
+async def every_gold_case_is_well_formed():
+    """The lint, run over the real set — catches a malformed case in CI, not mid-run."""
+    rg = _run_gold()
+    from evals.gold_set import CASES
+
+    bad = [(c["id"], rg.validate_case(c)) for c in CASES if rg.validate_case(c)]
+    assert not bad, f"malformed gold cases: {bad}"
+
+
 class _Stop(Exception):
     """Raised by the fake `connect` to stop build() before it needs a live server."""
 
