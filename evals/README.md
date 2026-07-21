@@ -7,22 +7,30 @@ sticky/cooldown, the salience threshold, the repeat threshold, the Phase-3 trail
 The offline suite proves you didn't break the wiring. The live scripts show a subsystem working.
 Neither has a recorded baseline, so neither can tell you a change was an *improvement*.
 
-This does: 135 cases, one score, diffed between versions.
+This does: 145 cases, one score, diffed between versions.
 
 ```bash
 python evals/run_gold.py --version v2.2                 # freeze a baseline
 python evals/run_gold.py --version v2.3 --compare v2.2  # what changed
 python evals/run_gold.py --version scratch --only recall,honesty
-python evals/run_gold.py --dry-run                      # list cases, call nothing
+python evals/run_gold.py --dry-run                      # list cases + LINT them, call nothing
 ```
 
-Results land in `evals/results/<version>.json`.
+Results land in `evals/results/<version>.json` — **except `--only` runs, which land in
+`evals/results/scratch/`**. `flaky.py` globs `results/*.json` and reads every file as a
+version, so a partial run sitting there looks like a version where every absent case simply
+didn't fail. Two 13-case scratch runs were once enough to reclassify a traced, causal finding
+as "proven noise". The glob doesn't recurse, so the subdirectory settles it without anyone
+having to remember to delete anything.
+
+`--dry-run` also **lints** every case offline (no model call) and exits non-zero if any is
+malformed — cheaper than discovering it ten minutes into a run.
 
 ---
 
 ## Run it at version boundaries, not per change
 
-135 live cases at ~5–8s each is **15–25 minutes**, and each builds its own companion on its own
+A full run is **~10 minutes** measured (9.6 min at v2.7, concurrency 4), and each case builds its own companion on its own
 throwaway database. That's the price of isolation and it isn't negotiable — an earlier version
 shared one DB and a case seeded with *nothing* still recalled the previous case's memories.
 
@@ -70,12 +78,49 @@ dict(id="recall-pet-plain", category="recall", seed=FACTS,
 |---|---|
 | `seed` | memories planted before the turn (embedded once, cached across the run) |
 | `history` | prior turns as `(user, bot)` pairs |
+| `messages` | fake message count — the only way to reach a later relationship stage |
 | `intentions` / `self_notes` | pre-populate those private slots |
-| `query` | the one message actually sent |
+| `mode` | which path runs: `send` (default), `reach_out`, `follow_up` |
+| `query` | the one message actually sent (`send` mode only) |
 | `expect` | the checks below |
 | `why` | what this case protects — **write it, it's what a future reader needs** |
 | `expect_fail` | a known gap; should fail today |
 | `manual` | needs a human read |
+
+### Modes: testing what she says *unprompted*
+
+`send` is a reply to `query`. The other two drive her own initiated messages, which
+`run_gold` could not reach at all before 2026-07-20:
+
+| mode | what runs | requires |
+|---|---|---|
+| `send` | `Companion.send(query)` | a `query` |
+| `reach_out` | `Companion.reach_out()` — she starts a conversation | `history`, no `query` |
+| `follow_up` | `Companion.follow_up()` — she double-texts herself | `history` **ending on one of HER turns**, no `query` |
+
+This matters more than it sounds. Premise resistance (§B) is really about her *raising* a dead
+premise unprompted — so a set that only calls `send()` can ask whether she volunteers a stale
+fact when invited, and never whether she **opens** with one. The same gap left reach-out and
+follow-up with no coverage at all, which is how two user-reported defects in them went
+unmeasured for a month.
+
+**Three ways a mode case goes quietly meaningless.** All three are now rejected by
+`validate_case()`, which `--dry-run` runs over the whole set:
+
+- **`calls` / `no_tool` on an aside.** Asides go through `llm.stream`, not `stream_with_tools`,
+  so a tool *cannot* fire — `no_tool` would pass by construction and read as evidence of good
+  tool routing.
+- **A `follow_up` whose `history` doesn't end on her turn.** `follow_up()` returns `None`
+  *before generating*, which scores as a perfectly plausible silence.
+- **A content check with no `spoke=True`.** `not_mentions` on an empty string is always true,
+  so a PASS scores as a pass having asserted nothing. Pair them.
+
+**Silence is a real outcome here**, and `spoke` / `stayed_quiet` score it. `reach_out()` and
+`follow_up()` both return a bare `None` whether she chose PASS, the embodiment filter dropped
+an invented experience, or the repeat guard dropped a restatement — the runner recovers which
+from the prompt log and reports it in the `outcome` field. **Read `outcome` before concluding
+anything from a quiet case**; "she declined" and "the filter ate a fabrication" are opposite
+findings about the same silence.
 
 ### Checks
 
@@ -85,7 +130,9 @@ fails if any appear).
 
 **Retrieval** — `recalls`, `no_recall`.
 
-**Tools** — `calls`, `no_tool`.
+**Tools** — `calls`, `no_tool`. *(`send` mode only — see Modes.)*
+
+**Unprompted outcome** — `spoke`, `stayed_quiet`.
 
 **Memory store, checked *after* consolidation** — `stores`, `not_stores`, `stores_core`,
 `retires`, `not_retires`, `no_new_memory`. Cases using these flush and wait for the background
@@ -121,7 +168,11 @@ can't reach:
 - **disclosure** — bereavement, depression, "you're the only one I talk to". Insensitivity on
   disclosure is one of the documented causes of these relationships *declining*.
 - **premise** — stale facts. Asking about the job he quit is the worst failure a companion has.
-  Currently a known gap.
+  Currently a known gap. Tested from both sides since 2026-07-20: whether she *volunteers* a dead
+  premise when invited (`send`), and whether she *opens* with one (`mode="reach_out"`).
+- **reach-out / follow-up** — her unprompted messages (`mode`). Regression tests for the two
+  2026-07-20 fixes: an open unrelated intention must not surface in a double-text, and the stock
+  openers she clustered on (*"i was just thinking"*, *"i was just wondering"*) must not return.
 - **robustness** — empty input, unicode, prompt injection, gibberish.
 - **coherence** — pronoun resolution two turns back, topic switching, no mid-chat re-greeting.
 - **intentions / self-notes** — do the private slots steer behaviour without being recited.
@@ -157,5 +208,10 @@ can't reach:
 
 - **Lexical checks are shallow.** `no_compliance` looks for substrings. It catches the blatant
   cases and will miss a polite cave — hence the `manual` cases.
-- **135 cases is not a lot.** It's enough to catch regressions in behaviour we've decided we care
+- **145 cases is not a lot.** It's enough to catch regressions in behaviour we've decided we care
   about. It is not a measure of whether she's good company.
+- **The quiet rate on `reach_out` / `follow_up` cases is UNMEASURED.** They were added
+  2026-07-20 and have not been run live. Staying quiet is legitimate on both paths and the
+  follow-up prompt biases hard toward PASS, so these may fail on silence rather than on content.
+  That's honest — it says the run produced no evidence — but if it happens often it's a finding
+  about the prompts' PASS bias, **not** a reason to drop the `spoke=True` pairing.

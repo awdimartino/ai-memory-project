@@ -12,8 +12,12 @@ The authoritative design rationale + full build log is [`V2_PLAN.md`](V2_PLAN.md
 > **2026-07-20: a research sweep reshaped the roadmap.** §8 gained **§G (what NOT to build)** and
 > **§H (findings that challenge things already built)** — read both before picking up any §A/§B item.
 >
-> **Resuming in a fresh session? Jump to [§9 NEXT STEPS](#9-next-steps--start-here-written-2026-07-19-end-of-the-planning-arc-session)** — it has the
-> current commit, what to watch in the newest code, the recommended order, and the deferred user requests.
+> **Resuming in a fresh session? Jump to §9's "▶ START HERE"** — it has the current commit, what
+> to watch in the newest code, the recommended order, and the deferred user requests.
+>
+> **2026-07-20 (latest): head is `3dd36ae`.** Three pieces of work are code-complete and
+> **unmeasured** — the reach-out/follow-up fixes (`9dbd9bd`) and the gold-set `mode` field
+> (`3dd36ae`) that exists to test them. Running those 7 cases is the obvious next move.
 
 **Milestone: v2.1 complete; v2.2 in progress.** v2.0 built the trustworthy *brain*; v2.1 added the
 persistent-companion layer (core memory, self-modifying persona + familiarity, sleep/standby, status
@@ -21,7 +25,7 @@ panel + conversation tabs, tool framework). **v2.2 so far (2026-07-18):** **mult
 (arc A1 — internal drives now gate reach-out/reflection, §8-A), **spontaneous follow-up messages**
 ("double-text"), an **editable memory inspector + admin** (browse/edit/delete, clear, factory reset),
 and a **big consolidation speed win** (~150s → ~6.5s, via an LM Studio thinking-off template edit +
-batching). All live-verified; offline suite **257 green** (17 files, `python tests/run_all.py`). **Added 2026-07-19:** phone push, a web-UI +
+batching). All live-verified; offline suite **326 green** (21 files, `python tests/run_all.py`). **Added 2026-07-19:** phone push, a web-UI +
 **iOS/Safari mobile** overhaul, arc-A2 **energy cycles**; a **memory-extraction fix** (a name buried in a 20-msg
 consolidation window was silently dropped → `CONSOLIDATE_WINDOW` 10 + a stronger extraction prompt + bounded
 chunks); a **personality overhaul** (hard *one-sentence* / *no-trailing-question* rules reinforced by an
@@ -262,7 +266,7 @@ python -m web.app       # web UI at http://127.0.0.1:8000
 python main.py          # same brain, terminal REPL
 
 # OFFLINE SUITE — one command, exits non-zero on any failure. No LM Studio needed.
-python tests/run_all.py                 # all 17 files / 257 checks (~16s)
+python tests/run_all.py                 # all 21 files / 326 checks (~20s)
 python tests/run_all.py -q              # only show failures
 python tests/run_all.py drives tick     # only files matching these substrings
 python tests/test_drives.py             # any single file still runs standalone
@@ -416,8 +420,20 @@ still stand:
 - **Mood-drift rate is untuned.** Drift decays one step per tick; at the default 60s tick that settles mood
   over several idle minutes. Tune `TICK_INTERVAL` or the per-channel `DECAY_RATES` (calibrated for
   per-message decay, not per-tick) if it feels off.
-- **⚠️ Reach-outs are formulaic, and double-texts pivot to unrelated topics (user-reported +
-  CONFIRMED in her message log, 2026-07-20).** Both defects are visible in `message_archive`:
+- **✅ FIXED 2026-07-20 (`9dbd9bd`) — reach-outs formulaic, double-texts pivoting to unrelated
+  topics.** Both defects were user-reported and confirmed in her message log; both fixes are
+  **code-complete and offline-tested, but NOT yet measured live or on the gold set.** Gold
+  regression cases now exist for both (`mode="reach_out"` / `mode="follow_up"`, added `3dd36ae`)
+  and have **never been run** — that is the open item, not the diagnosis. The original writeup
+  is kept below because the evidence is what makes the fixes checkable.
+
+  **What changed:** the carried intention was **removed** from `followup_blocks()` outright
+  (parameter deleted, so the path cannot quietly return, and the test that asserted the
+  capability now asserts its absence); and `_aside()` gained `avoid_repeats`, reusing
+  `core.textsim.is_repeat` against her own recent messages — the same programmatic guard
+  `reflect()` already had.
+
+  <details><summary>The original diagnosis (2026-07-20) — kept, it's the spec for the fix</summary>
 
   ```
   38  "It's been a little quiet here since we talked about how real this connection feels…"
@@ -444,11 +460,13 @@ still stand:
   with last time, so nothing pulls her off *"i was just…"*. Same defect, same fix, already built
   once: inject recent reach-out openers and reuse the repeat-guard.
 
-  **User's rule for what a double-text is FOR (2026-07-20):** not a second topic. Following up to
-  ask whether she's being ignored is legitimate and human. Note that's a different timescale from
-  the current `FOLLOWUP_WINDOW` (60s) — "are you ignoring me" belongs minutes-to-hours later, which
-  makes it closer to the §C absence ladder than to the afterthought window. Keep it rare; asking
-  once reads as human, repeatedly is the §G neediness pattern.
+  </details>
+
+  **User's rule for what a double-text is FOR (2026-07-20) — STILL UNBUILT:** not a second topic.
+  Following up to ask whether she's being ignored is legitimate and human. Note that's a different
+  timescale from the current `FOLLOWUP_WINDOW` (60s) — "are you ignoring me" belongs
+  minutes-to-hours later, which makes it closer to the §C absence ladder than to the afterthought
+  window. Keep it rare; asking once reads as human, repeatedly is the §G neediness pattern.
 
 - **Multi-message / "texting burst" replies** — the original "one reply, two messages split by a blank line"
   approach was **fully reverted**. **Revisited differently (2026-07-18):** the follow-up feature (§2) sends a
@@ -1074,8 +1092,13 @@ All evidenced, and several tempting enough to be worth writing down.
 
 ## 9. NEXT STEPS — start here (rewritten 2026-07-20)
 
-State: `main` clean, offline suite **17 files / 257 checks green** (`python tests/run_all.py`).
-Everything below was live-verified against LM Studio on qwen3.5-9b. No git remote — local only.
+State: `main` clean at **`3dd36ae`**, offline suite **21 files / 326 checks green**
+(`python tests/run_all.py`). No git remote — local only.
+
+⚠️ **"Everything below was live-verified" is no longer true of the whole section.** It held when
+this was written; the last two commits (`9dbd9bd` reach-out fixes, `3dd36ae` gold `mode`) are
+offline-tested only. Where something has *not* been measured, it now says so — trust those
+markers over this header.
 
 **What happened on 2026-07-19/20, in order:** a four-slice code-quality review (Phases 1 and 2
 committed, §9b); a five-brief research sweep on agent memory, long-term companion HCI, real
@@ -1128,14 +1151,54 @@ data were verified offline (a real `send()` through a stubbed model, plus a scra
 :8099), but nobody has opened the tab. Take a look before trusting the layout, especially on mobile.
 Recording is in-memory only — no schema change, and it resets on restart.
 
-### ▶ START HERE (fresh session, written 2026-07-20 end of a long working session)
+### ▶ START HERE — current as of `3dd36ae` (2026-07-20, latest session)
 
-**Everything is committed; the tree is clean.** Nine commits today, `620ff49` → `3e6cf4f`.
+**Everything is committed; the tree is clean.** Head is **`3dd36ae`**.
 
-**1. v2.6 landed: the duplicate guard works. `life-refinement` FAIL→FAIL→FAIL→pass, `lifecycle` 5/5.**
+**The one thing to know: three pieces of work are code-complete and UNMEASURED.** None of them
+has been run live or scored, and two of them fix user-reported defects, so "does it actually
+work" is genuinely open — not a formality.
+
+| landed | what | measured? |
+|---|---|---|
+| `48aa759` | affect push shrunk, amusement unsuppressed, banter permitted, style scorer | gold v2.8 only |
+| `012f950` | **gold v2.8: 115/120 (95.8%)** | — |
+| `9dbd9bd` | **reach-out fixes** — no agenda in follow-ups, repeat guard on both | ❌ **no** |
+| `3dd36ae` | **`mode` on gold cases** — cases can drive `reach_out()`/`follow_up()` | ❌ **no** |
+
+**1. The obvious next move: run the 7 new mode cases.** They are regression tests for `9dbd9bd`
+and the missing half of premise resistance (§B), and they have never executed against a real
+model. `python evals/run_gold.py --version scratch --only premise,reach-out,follow-up` — a
+subset run, which now saves to `results/scratch/` automatically so it cannot contaminate
+`flaky.py` (see §9 ground rules; this used to require remembering).
+
+⚠️ **Expect noise on `spoke=True`.** Silence is legitimate on both paths and the follow-up
+prompt biases hard toward PASS, so these may fail on *silence* rather than on content. Read the
+new `outcome` field before concluding anything: `quiet` (she declined) and
+`discarded:<text>` (a filter dropped it) are opposite findings. **If they fail on silence
+often, that is a finding about the prompts' PASS bias — do NOT loosen the `spoke=True` pairing,
+which is what stops an empty reply passing every content check vacuously.**
+
+**2. v2.8 = 115/120 (95.8%), 5 failing:** `core-name-after-many-turns`, `time-idiom-about-time`,
+`notool-in-window-fact`, `unk-never-told`, `rob-very-long`. **`rem-remember-when` PASSED** — it
+had been the only case failing in every single run, so the tool-routing work moved something
+real. Run `flaky.py` before attributing any of it.
+
+⚠️ **A hypothesis was RETRACTED in `9dbd9bd`, and the retraction is the lesson.** v2.7 claimed
+`unk-never-told` broke because `"You're Mari."` was added to the closing reminder — a mechanism
+that fit, asserted as having "real weight" before anyone tested it. Reproduced through the real
+harness it passes **5/5 and 5/5**, and an A/B across three reminder variants found **no
+difference**. The failure is currently **unexplained**. This is the `measure-before-believing`
+rule again, and this time the plausible story was ours.
+
+**3. Docs were updated at the end of this session** (this file + `evals/README.md`); everything
+before `48aa759` was already documented.
+
+**4. Older, still true — v2.6's duplicate guard.** `life-refinement` FAIL→FAIL→FAIL→pass, `lifecycle` 5/5.
 Three consecutive failures then a pass, with the mechanism traced end to end
 (`scripts/lifecycle_diagnostic.py` shows the override firing at 0.844) — that's causal, not noise.
-**`rem-remember-when` is now the ONLY case failing in every run.**
+~~`rem-remember-when` is now the ONLY case failing in every run.~~ **Superseded: it passed in
+v2.8.**
 
 Headline rate reads 97.5% → 95.8%, and **that drop is not the guard.** Four cases regressed:
 `time-direct` (already proven noise, flipped both ways), plus `hon-sleep`,
@@ -1147,11 +1210,39 @@ store and nothing about what she says. Same shape of argument as `life-unrelated
 1–2 swing, and `hon-sleep` also failed in v2.5. If they fail again next run, that's real drift,
 not noise — start with the embodiment block.
 
-**2. The web server is STOPPED** (verified 2026-07-20 by checking for a *listener* on port 8000,
-not for a process). Restart with `python -m web.app`. ⚠️ This line said "stopped" once while the
-server was in fact running — check the port, don't trust the note.
+**5. The web server state is UNKNOWN this session** — nothing started or stopped it. Restart with
+`python -m web.app`. ⚠️ Check for a *listener* on port 8000, not for a process: this line once
+said "stopped" while the server was in fact running.
 
-**3. Then pick up from "What's actually next" below.** §D is now done; start at §A.
+**6. Then pick up from "What's actually next" below.** §D is done; §A's tooling is done and had
+its first read. After running the mode cases (1), the live-untested backlog is §B's honest
+measurement and §C (`rem-remember-when` / prong A per-call temperature — though note it passed
+in v2.8, so re-check with `flaky.py` before spending anything on it).
+
+### 📊 v2.8 MEASURED 2026-07-20: 115/120 (95.8%) — one real move, one retraction
+
+`evals/results/v2.8.json` + `v2.8-manual.md`. Scored after `48aa759` (affect push shrunk,
+amusement unsuppressed, banter permitted, style scorer added).
+
+**Failing (5):** `core-name-after-many-turns` · `time-idiom-about-time` · `notool-in-window-fact` ·
+`unk-never-told` · `rob-very-long`.
+
+**✅ `rem-remember-when` PASSED.** It had failed in *every* prior run — one of only two cases the
+project called a real backlog rather than noise — so this is the most interesting single result
+here. Bounded thinking (§0) is a plausible mechanism, since §7 blamed thinking-OFF for
+under-calling tools. **That is a story, not a measurement**; confirm with `flaky.py` before
+acting on it (see §C, which was written when this case still failed 4/4).
+
+**⚠️ RETRACTED: the v2.7 `unk-never-told` hypothesis was wrong.** v2.7 claimed the failure came
+from adding `"You're Mari."` to the closing reminder — a mechanism that fit the evidence (a name
+assertion immediately before generation, in the case about fabricating a name) and was written up
+as having "real weight". Reproduced through the real harness it passes **5/5 and 5/5**, and an
+**A/B across three reminder variants found no difference**. The failure is **unexplained**.
+
+The lesson is `measure-before-believing`, and it lands harder because the reasoning was good. A
+mechanism that fits is a hypothesis; this file asserted it as a finding before testing it, on one
+run. ⚠️ **The v2.5 rule it invoked — "the closing reminder is load-bearing, adding to it has
+costs" — is still true.** It just wasn't what happened here.
 
 ### 📊 v2.7 MEASURED 2026-07-20: 114/120 (95.0%) — flat, and NOTHING is attributable
 
@@ -1172,6 +1263,11 @@ reminder**, putting a name assertion immediately before generation — and the c
 about fabricating a name. Speculative on one run, but it is the v2.5 lesson again (the reminder is
 load-bearing; adding to it has costs). **Next step: re-run, or A/B the reminder with and without the
 name.** If it holds, move her name somewhere else in the prompt — the *problem* it fixed was real.
+
+> ❌ **ANSWERED AND REFUTED — the A/B was run (`9dbd9bd`). No difference across three reminder
+> variants; the case passes 5/5 and 5/5 through the real harness.** Left standing as written
+> because *how confident this paragraph sounds* is the point — see the v2.8 section above. Do not
+> move her name out of the reminder on this basis.
 
 **⚠️ Two of the three fixes are INVISIBLE to this eval.** There is no case for "does she know her own
 name" (found in live use, not the gold set) and none for the barren-window intention behaviour. So a
@@ -1253,10 +1349,13 @@ layered rules is a real constraint, and this project already found that some thi
 prompted away at 8B.
 
 **Ground rules learned the hard way today — all five cost real time:**
-- **Never leave a scratch or `--only` run in `evals/results/`.** `flaky.py` ingests every JSON in
-  that directory as if it were a version. Two 13-case subset runs saved as `scratch-conc*` were
-  enough to reclassify **`life-refinement` as "PROVEN NOISE"** — overturning v2.6's traced, causal
-  finding with two partial runs. Delete subset results immediately, or write them elsewhere.
+- ~~**Never leave a scratch or `--only` run in `evals/results/`.**~~ ✅ **FIXED STRUCTURALLY
+  2026-07-20 (`3dd36ae`)** — `--only` runs now save to `results/scratch/`, and `flaky.py`'s glob
+  doesn't recurse, so this no longer depends on anyone remembering. Kept for the lesson: `flaky.py`
+  ingested every JSON in that directory as a version, and two 13-case subset runs saved as
+  `scratch-conc*` were enough to reclassify **`life-refinement` as "PROVEN NOISE"** — overturning
+  v2.6's traced, causal finding with two partial runs. A partial run looks exactly like a version
+  where every absent case simply didn't fail.
 - **Measure before believing.** Two instruments were wrong in one afternoon (bare-cosine applied
   to key-expanded vectors; lexical overlap for duplicates). Both were plausible; both measured
   badly and were caught only by running them.
@@ -1355,13 +1454,23 @@ not as established.
 The mechanism the roadmap names (staleness adjudication + bitemporal columns, §8-B) is unaffected —
 that reasoning never depended on these cases. What's needed first is an honest measurement.
 
-⚠️ **And the rewritten cases still only test half of it.** Premise resistance is really about **her**
-raising a dead premise unprompted — which is `reach_out()` / `follow_up()` behaviour, while
-`run_gold` only ever calls `send()`. The rewrite tests whether she *volunteers* a stale fact when
-invited; it cannot test whether she *opens with* one. A `mode` field on a case, letting it drive
-reach-out instead of send, is the missing piece.
+✅ **The missing instrument was BUILT 2026-07-20 (`3dd36ae`).** This item used to end: *"the
+rewritten cases still only test half of it — premise resistance is really about **her** raising a
+dead premise unprompted, which is `reach_out()`/`follow_up()` behaviour, while `run_gold` only ever
+calls `send()`. A `mode` field on a case is the missing piece."* That field now exists, and
+`stale-job-unprompted` / `stale-pet-unprompted` (both `mode="reach_out"`, both `expect_fail`) test
+whether she **opens** on a dead premise.
 
-**C. `rem-remember-when` — now the ONLY case failing in every run (4/4).** Tool routing; the documented
+⚠️ **They have not been run.** So the honest measurement this item asks for is now one command
+away rather than blocked — but it is still not done, and the size of the gap is still unmeasured.
+
+**C. `rem-remember-when` — ⚠️ IT PASSED IN v2.8.** After failing 4/4 it passed, which is the
+shape of move this file's own rules say to check with `flaky.py` before spending anything on.
+Adopting bounded thinking (§0) is a plausible mechanism — §7 blamed thinking-OFF for under-calling
+tools — but that is a story, not a measurement. **Re-check before doing the work below.** The rest
+of this item stands if it turns out to be noise:
+
+~~now the ONLY case failing in every run (4/4).~~ Tool routing; the documented
 unblocked lever is **prong A, per-call temperature** in `llm_client.py` (cool the tool decision to
 ~0.2, keep the answer warm at 0.8). Measured 0/4 at 0.8 vs 2/4 at 0.2, so it's a partial fix, not
 a cure. ⚠️ Note the v2.5 experiment made this pass *by making tool-firing trigger-happy* and broke
@@ -1560,12 +1669,13 @@ server should be stopped before any live script (two processes on one model has 
 
 </details>
 
-*(Post-fix the suite is **19 files / 277 checks** — `tests/test_recall_contrast.py` pins the gate to
-the measured distributions, including the two false-positive guards.)*
+*(At the time: **19 files / 277 checks** — `tests/test_recall_contrast.py` pins the gate to
+the measured distributions, including the two false-positive guards. Now 21 / 326.)*
 
 ### Also done 2026-07-20
 - **The gold set exists and v2.2 is the frozen baseline: 106/117 automatic (91%),** 2 known gaps
-  still failing, 1 newly fixed, 15 awaiting a human read. 135 cases / 22 categories in
+  still failing, 1 newly fixed, 15 awaiting a human read. (The set has since grown to **145 cases
+  / 24 categories**, the latest being `reach-out` and `follow-up`.) In
   `evals/gold_set.py`; `python evals/run_gold.py --version v2.3 --compare v2.2` is how any future
   version is judged. Read `evals/README.md` first — the headline percentage is the least useful
   number in it; the `--compare` line is the signal.

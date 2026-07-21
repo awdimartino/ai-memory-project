@@ -106,6 +106,11 @@ See [`evals/README.md`](../evals/README.md). Run it at **version boundaries**, n
 It's the only layer that answers "did this help?", because it's the only one with a recorded
 baseline to diff against.
 
+A case's `mode` picks which path runs — `send` (the default), `reach_out` or `follow_up`. The
+last two exist because a set that only calls `send()` can only ever score her *replies*, which
+left both of her unprompted-message paths, and half of premise resistance, untestable. Note
+`--only` runs save to `results/scratch/` so they can't be misread as versions by `flaky.py`.
+
 ---
 
 ## What to run, when
@@ -117,6 +122,7 @@ baseline to diff against.
 | Touched memory / recall / lifecycle | `tests/run_all.py` + `eval_extraction.py` |
 | Touched tools or the tool loop | `tests/run_all.py` + `tool_eval.py` **×3** |
 | Touched tick jobs, drives, sleep | `tests/run_all.py` + `stress_test.py` |
+| Touched reach-out or follow-up | `tests/run_all.py` + the gold set's `reach-out`/`follow-up` categories (`mode` cases) |
 | Shipping a version | the gold set, with `--compare` |
 
 ---
