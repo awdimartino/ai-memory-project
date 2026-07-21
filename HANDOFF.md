@@ -1093,6 +1093,11 @@ All evidenced, and several tempting enough to be worth writing down.
 
 ## 9. NEXT STEPS — start here (rewritten 2026-07-20)
 
+**2026-07-21 update: head is `d5faee4`** (A3 + A4 built — see the banner at the top of this file
+and §8-A). Offline suite **22 files / 378 checks green**. `PURSUIT_UNAVAILABLE_ENABLED=false` —
+**next step is live-testing A3/A4**, not anything below (which predates this commit and is
+otherwise unchanged).
+
 State: `main` clean at **`3dd36ae`**, offline suite **21 files / 326 checks green**
 (`python tests/run_all.py`). No git remote — local only.
 
