@@ -31,6 +31,23 @@ SIGNOFFS = [
     "catch you in the morning",
     "sleep well",
     "going to get some sleep",
+    # Added after the decision was measured to discriminate, which made a broader
+    # cue safe. All of these missed the first, tighter version.
+    "hit the hay",
+    "i'm sleeping so you should too",
+    "bedtime",
+    "gotta sleep",
+    "i should sleep",
+    "i need to go to bed",
+    "you should get some rest",
+    "you should sleep too",
+    "sweet dreams",
+    "rest up",
+    "signing off for the night",
+    "turning in",
+    "ready for bed",
+    "night",
+    "ok night",
 ]
 
 NOT_SIGNOFFS = [
@@ -48,6 +65,16 @@ NOT_SIGNOFFS = [
     "what do you like to do?",
     "i've been walking the long way home past the river",
     "",
+    # Added alongside the broadened patterns — these are what a loose cue risks.
+    "i can't sleep lately",
+    "my sleep schedule is wrecked",
+    "i've been having trouble sleeping",
+    "the kids went to bed an hour ago",
+    "i'm not going to bed yet",
+    "i don't want to sleep",
+    "if i go to bed now i'll just lie there",
+    "how was your day",
+    "she's sleeping over at a friend's",
 ]
 
 
