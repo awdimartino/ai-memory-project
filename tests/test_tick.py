@@ -58,7 +58,18 @@ class FailingJob(Job):
         raise RuntimeError("boom")
 
 
-class FakeCompanion:
+class NotAway:
+    """Default `is_unavailable()` for the job fakes: she has not stepped away.
+
+    Every CooldownJob (plus follow-up and idle consolidation) now checks this, so a
+    fake missing it raises AttributeError instead of quietly failing a check. Fakes
+    that exercise the A4 window override it; the rest inherit False.
+    """
+    def is_unavailable(self):
+        return False
+
+
+class FakeCompanion(NotAway):
     def __init__(self, idle=0.0, pending=0, asleep=False):
         self._idle = idle
         self._pending = pending
@@ -149,7 +160,7 @@ class FakeDrives:
         return {"connection": 0.1, "restlessness": 0.2, "energy": 0.9}
 
 
-class DriveCompanion:
+class DriveCompanion(NotAway):
     def __init__(self, idle, emotion=None, asleep=False):
         self._idle = idle
         self.emotion = emotion
@@ -218,7 +229,7 @@ async def busy_guard_makes_idle_zero():
     assert c.idle_seconds() == 0.0, "busy turn must read as not idle"
 
 
-class ReachCompanion:
+class ReachCompanion(NotAway):
     def __init__(self, idle, reach_result, asleep=False, busy=False):
         self._idle = idle
         self.meta = InMemoryMeta()
@@ -360,7 +371,7 @@ async def reach_out_skips_when_busy():
     assert comp.reach_calls == 0 and pushes == [], "must not reach out mid-turn"
 
 
-class FollowCompanion:
+class FollowCompanion(NotAway):
     """Fake for the follow-up job: exposes the small surface the job reads + follow_up()."""
 
     def __init__(self, left, since, asleep=False, busy=False, result="oh and one more thing"):
@@ -451,7 +462,7 @@ async def follow_up_skips_when_asleep_or_busy():
     assert busy.follow_calls == 0
 
 
-class ReflectCompanion:
+class ReflectCompanion(NotAway):
     def __init__(self, idle, asleep=False, busy=False):
         self._idle = idle
         self.meta = InMemoryMeta()
@@ -539,7 +550,7 @@ class _Store:
         return self.n
 
 
-class PersonaCompanion:
+class PersonaCompanion(NotAway):
     def __init__(self, idle, messages, asleep=False, busy=False):
         self._idle = idle
         self.meta = InMemoryMeta()
@@ -730,7 +741,7 @@ class FakeArousal:
         return self._arousal
 
 
-class MiningCompanion:
+class MiningCompanion(NotAway):
     def __init__(self, idle, asleep=False, busy=False, emotion=None):
         self._idle = idle
         self.meta = InMemoryMeta()
@@ -1029,6 +1040,80 @@ async def start_stop_lifecycle():
     await loop.stop()
     assert j.runs >= 1, j.runs
     await loop.stop()                        # idempotent
+
+
+# --- the A4 window silences model calls, but NOT her inner life -------------------
+# go_unavailable() unloads the model so the GPU is free for the window. Nothing was
+# stopping the other jobs from firing during it, so a background job JIT-reloaded the
+# model seconds later (idle consolidation, near-certain: its 180s threshold is inside
+# most windows and being unavailable requires the user to be idle), and reach-out /
+# follow-up could send an unprompted message right after she'd said she'd stepped away.
+
+@case
+async def unavailable_silences_every_model_calling_job():
+    away = {"is_unavailable": lambda: True}
+
+    reach = ReachCompanion(idle=99999.0, reach_result="hi")
+    reach.is_unavailable = away["is_unavailable"]
+    pushes = []
+    await _reach_job(reach, WallClock(), pushes).run()
+    assert reach.reach_calls == 0, "must not reach out while she's stepped away"
+    assert pushes == []
+
+    refl = ReflectCompanion(idle=99999.0)
+    refl.is_unavailable = away["is_unavailable"]
+    await ReflectionJob(refl, interval=0.0, min_idle=120.0,
+                        cooldown=600.0, clock=WallClock()).run()
+    assert refl.reflect_calls == 0, "must not reflect during the window"
+
+    foll = FollowCompanion(left=1, since=60.0)
+    foll.is_unavailable = away["is_unavailable"]
+    fpushes = []
+    await _follow_job(foll, fpushes).run()
+    assert foll.follow_calls == 0, "a double-text while away contradicts the window"
+
+    cons = FakeCompanion(idle=1000.0, pending=4)
+    cons.is_unavailable = away["is_unavailable"]
+    await IdleConsolidationJob(cons, 0.0, 180.0).run()
+    assert cons.flushed == 0, "consolidation would reload the model it just unloaded"
+
+
+@case
+async def unavailable_does_not_freeze_mood_or_drives():
+    """The counterweight to the test above: her inner state must keep moving while
+    she's away, exactly as it does while asleep. Both drift jobs are deliberately
+    plain Jobs (no model call), so the CooldownJob guard must not reach them."""
+    meta = InMemoryMeta()
+    emo = EmotionManager(FakeClassifier(), meta, pull_strength=0.4, noise_floor=0.05)
+    emo.state["melancholy"] = 0.9
+
+    comp = FakeCompanion(idle=1000.0)
+    comp.is_unavailable = lambda: True
+    await MoodDriftJob(comp, emo, interval=0.0, idle_after=90.0).run()
+    assert emo.state["melancholy"] < 0.9, "mood must still decay while she's away"
+
+    drives = FakeDrives()
+    dcomp = DriveCompanion(idle=1000.0)
+    dcomp.is_unavailable = lambda: True
+    await DriveDriftJob(dcomp, drives, interval=0.0).run()
+    assert len(drives.updates) == 1, "drives must keep integrating while she's away"
+
+
+@case
+async def pursuit_return_still_runs_while_unavailable():
+    """PursuitReturnJob is the one job that MUST survive the guard — it's what ends
+    the window. It does its own is_unavailable() check for the opposite reason."""
+    pushes = []
+
+    async def notify(m):
+        pushes.append(m)
+
+    comp = ReturnCompanion(unavailable=True, pending=True)
+    await PursuitReturnJob(comp, notify, interval=0.0).run()
+    assert comp.end_calls == 0, "still inside the window -> don't return yet"
+    comp._unavailable = False
+    await PursuitReturnJob(comp, notify, interval=0.0).run()
+    assert comp.end_calls == 1, "window over -> deliver the pending reply"
 
 
 if __name__ == "__main__":

@@ -165,6 +165,9 @@ async def main():
         def is_busy(self):
             return self._busy
 
+        def is_unavailable(self):
+            return False   # CooldownJob skips every model call during an A4 window
+
         def idle_seconds(self):
             return self._idle
 

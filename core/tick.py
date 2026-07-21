@@ -100,7 +100,19 @@ class CooldownJob(Job):
         # is_busy(): drive-gated jobs don't inherit the idle busy-guard (drives are
         # only relieved at the END of send()), so guard explicitly against firing
         # mid-turn. Harmless for the idle-gated ones, whose idle already reads 0.
-        if c.is_asleep() or c.is_busy() or not self._wants_to() or not self._ready():
+        #
+        # is_unavailable(): every CooldownJob makes a model call, and an A4 window
+        # exists precisely so that nothing does. Without this the window defeated
+        # itself — go_unavailable() unloads the model, then a background job JIT-
+        # reloads it seconds later — and worse, reach_out/reflection could send an
+        # unprompted message while she'd just announced she'd stepped away. The
+        # guard belongs here rather than in each job: "she is away, so nothing that
+        # talks to the model runs" is one rule, not six. The passive drift jobs
+        # (mood, drives) are deliberately NOT CooldownJobs and keep running — her
+        # inner state should still move while she's away, exactly as during sleep.
+        if c.is_asleep() or c.is_busy() or c.is_unavailable():
+            return
+        if not self._wants_to() or not self._ready():
             return
         now = self.clock()
         if now - (c.meta.get_json(self.meta_key, 0) or 0) < self.cooldown:
@@ -288,7 +300,10 @@ class FollowUpJob(Job):
 
     async def run(self) -> None:
         c = self.companion
-        if c.is_asleep() or c.is_busy() or c.followups_pending() <= 0:
+        # is_unavailable(): a "double-text" while she's stepped away contradicts the
+        # window outright — and costs a model reload. (Plain Job, so not covered by
+        # the CooldownJob guard above.)
+        if c.is_asleep() or c.is_busy() or c.is_unavailable() or c.followups_pending() <= 0:
             return
         elapsed = c.seconds_since_reply()
         if elapsed > self.window:
@@ -516,8 +531,14 @@ class IdleConsolidationJob(Job):
         self.idle_after = idle_after
 
     async def run(self) -> None:
-        if self.companion.is_asleep():
-            return  # a model call would defeat standby
+        if self.companion.is_asleep() or self.companion.is_unavailable():
+            return  # a model call would defeat standby / the A4 window
+            # This was the most consequential of the three: IDLE_CONSOLIDATE_AFTER is
+            # 180s and an unavailable window REQUIRES the user to be idle, so on any
+            # window longer than that (sit_with_question runs 180-600s) consolidation
+            # was all but guaranteed to fire and reload the model — including the
+            # embedder, which `lms unload --all` also drops. Deferring is free: the
+            # pending messages stay pending and consolidate when she's back.
         if self.companion.idle_seconds() < self.idle_after:
             return
         if self.companion.pending_count() == 0:
