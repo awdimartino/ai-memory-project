@@ -96,6 +96,34 @@ async def leaked_reasoning_is_stripped_from_the_stored_reply():
 
 
 @case
+async def leaked_reasoning_still_reaches_the_UI_so_done_must_carry_the_final_text():
+    """The other half of the bug above, and the reason /ws sends `text` on "done".
+
+    Stripping protects the STORE, but the tokens were already streamed — so the
+    browser bubble keeps showing the chain of thought while the stored message is
+    clean. Reported live 2026-07-21. This pins the divergence the UI fix relies on:
+    what the user saw is NOT what she said. The web layer reconciles by treating the
+    final text as authoritative on "done"; if this assertion ever flips to equal,
+    that reconciliation has become dead code and should be removed.
+    """
+    leak = ("The user seems irritated. I should be direct and brief.\n"
+            "</think>\n\n"
+            "yeah, fair.")
+    streamed = []
+
+    async def collect(tok):
+        streamed.append(tok)
+
+    fc = FakeCompletions(tokens=(leak,))
+    text, _ = await _llm(fc).stream([{"role": "user", "content": "hi"}], collect)
+    shown = "".join(streamed)
+
+    assert text == "yeah, fair.", text
+    assert "</think>" in shown, "the leak really was streamed to the UI"
+    assert shown != text, "streamed output and final text must diverge, or there'd be nothing to fix"
+
+
+@case
 async def a_matched_think_block_still_works():
     """The normal path must be untouched by the orphan fix."""
     fc = FakeCompletions(tokens=("<think>weighing it up</think>\n\nyeah, sounds right.",))

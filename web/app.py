@@ -382,8 +382,15 @@ async def ws(websocket: WebSocket) -> None:
 
                     try:
                         result = await companion.send(text, on_token)
+                        # `text` is AUTHORITATIVE and may differ from the concatenated
+                        # tokens: anything stripped after the stream (notably reasoning
+                        # that leaked into content with no opening <think> — LM Studio
+                        # bug #2147) was already sent to the UI. Without this the bubble
+                        # keeps the leaked chain-of-thought on screen forever while the
+                        # stored message is clean. The UI reconciles on receipt.
                         await websocket.send_json({
-                            "type": "done", "stats": result.stats, "silent": result.silent,
+                            "type": "done", "text": result.text,
+                            "stats": result.stats, "silent": result.silent,
                             "recalled": [{"content": c2, "similarity": s} for c2, s in result.recalled],
                             "emotion": result.emotion, "core": result.core or [],
                             "tools": result.tools or [],

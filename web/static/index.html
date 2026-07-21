@@ -663,6 +663,18 @@
           if (current) { const r = current.closest(".row"); if (r) r.remove(); }
           addSilent();
         } else {
+          // The server's final text wins over what streamed. They differ when
+          // something was stripped after the stream — chiefly reasoning that leaked
+          // into content with no opening <think> (LM Studio bug #2147), which the
+          // store already drops but the bubble would otherwise keep showing.
+          if (current && typeof msg.text === "string" && msg.text !== current.textContent) {
+            current.classList.remove("typing");
+            // Empty means the whole generation was reasoning and nothing survived the
+            // strip. Say so rather than leaving a blank bubble (which reads as a UI
+            // bug) or the leaked reasoning (which is the thing we're removing).
+            current.textContent = msg.text || "(no reply — the model returned only reasoning)";
+            scrollDown();
+          }
           addStats(msg.stats);
           addDetails(msg.recalled, msg.emotion, msg.core, msg.tools);
         }
