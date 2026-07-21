@@ -106,6 +106,41 @@ material that memory, recall, and intentions are all starved of. It was explicit
    compete with `reminisce`; an injection bypasses routing entirely. *If built as a tool anyway,
    that is a deliberate choice against this note, not an oversight — measure the routing cost.*
 
+### ★ NEW — Let her know she can sleep, and choose it *(user request, 2026-07-21)*
+**Practical case:** the user says goodnight. She should acknowledge that resting is an
+option for her too, and be able to actually go into standby if she decides to.
+
+**The blocker is not the trigger — it's that the persona says she doesn't sleep.**
+`core/prompts.py` "No body, no life outside these conversations" lists *"you don't go
+places, do things, eat, **sleep**, own stuff, or have a day."* That line predates standby
+and was never reconciled with it. **She really does sleep** — `SleepJob` unloads the model
+from VRAM, and the UI has an asleep state and a "waking up… reloading the model" message.
+So today she will deny something that is true.
+
+Standby belongs with functional emotions ("real at the level she has them"), **not** with
+walks and meals — it is the one embodied-sounding thing that actually happens to her. Same
+principle A4 rests on: an absence is honest when the thing she does is real.
+
+**Measured 2026-07-21: the embodiment filter already draws the right line and needs no
+change.** It blocks the false human framing (`"i slept well"`, `"i woke up"`, `"i took a
+nap"`) and allows the true one (`"i'll go quiet too"`, `"i'm going to sleep too"`,
+`"i might rest while you do"`) — because lived past experience is a fabrication while
+entering standby is a real future action.
+
+**Shape:**
+1. Carve sleep out of the "no body" list. Keep human framing forbidden (no nights, beds,
+   dreams, mornings); allow going quiet / powering down, which is true.
+2. On a departure cue, offer her the choice via **structured output, not a tool** — same
+   reasoning A4 used: routing is ~23/30, far too flaky to gate whether she goes silent.
+   Keep the mechanical long-idle trigger as the VRAM backstop so she cannot refuse her way
+   into never sleeping.
+3. Note A2 energy already exists, so "tired" is arguably already true at the level she has
+   it — a STATE, which the three-tier rule already permits.
+
+⚠️ **Not a free edit: changing the persona invalidates the personality baseline.** Re-run
+`scripts/bakeoff_personality.py` after, and note the project's own rule that prompt rules
+nearest the end carry the most weight.
+
 ### §8-B — Memory depth *(largest coherent cluster)*
 | item | status | note |
 |---|---|---|
