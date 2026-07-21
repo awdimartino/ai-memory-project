@@ -58,13 +58,19 @@ async def blocks_rejoin_to_the_exact_prompt():
 
 @case
 async def aside_blocks_rejoin_too():
-    """Reach-out and follow-up compose extra blocks on top; same invariant."""
+    """Reach-out and follow-up compose extra blocks on top; same invariant.
+
+    Only reach-out takes an `intention` now: the follow-up path deliberately carries no
+    agenda (2026-07-20), so the two are exercised with different keyword sets rather
+    than a shared one.
+    """
     for mem, mood, core, persona, intent, notes in itertools.product(
             MATRIX["memories"], MATRIX["mood"], MATRIX["core"], MATRIX["persona"],
             [None, "ask how it went"], MATRIX["self_notes"]):
-        kw = dict(core=core, persona=persona, intention=intent, self_notes=notes)
-        assert join_blocks(reachout_blocks(mem, mood, **kw)) == build_reachout_system(mem, mood, **kw)
-        assert join_blocks(followup_blocks(mem, mood, **kw)) == build_followup_system(mem, mood, **kw)
+        base = dict(core=core, persona=persona, self_notes=notes)
+        ro = dict(base, intention=intent)
+        assert join_blocks(reachout_blocks(mem, mood, **ro)) == build_reachout_system(mem, mood, **ro)
+        assert join_blocks(followup_blocks(mem, mood, **base)) == build_followup_system(mem, mood, **base)
 
 
 @case

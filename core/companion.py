@@ -337,7 +337,12 @@ class Companion:
         mood_prompt = self.emotion.as_prompt() if self.emotion is not None else None
         return extra, core, mood_prompt
 
-    async def _aside(self, blocks: list[tuple[str, str]], cue: str, kind: str) -> str | None:
+    def _recent_said(self, n: int = 6) -> list[str]:
+        """Her own last `n` messages — what a new one must not simply restate."""
+        return [m["content"] for m in self.history if m.get("role") == "assistant"][-n:]
+
+    async def _aside(self, blocks: list[tuple[str, str]], cue: str, kind: str,
+                     avoid_repeats: bool = False) -> str | None:
         """Generate one unprompted message. Returns None if she declines or says nothing.
 
         Also drops anything claiming a physical experience she didn't have. Staying
@@ -346,6 +351,14 @@ class Companion:
         through is a falsifiable lie, which is the thing that collapses trust. The
         prompt forbids this too; the filter exists because ~a quarter of the base
         model's dialogue prior is exactly these utterances.
+
+        `avoid_repeats` applies the same programmatic guard `reflect()` needed. The
+        asymmetry was never principled: reflection got its recent thoughts injected AND
+        a mechanical check, while reach-out and follow-up got neither — so she could not
+        see what she had just opened with. Measured in the real log: reach-outs
+        clustering on "i was just thinking…" / "i was just wondering…", and one era where
+        63% of messages opened with the same word. Staying quiet is a valid outcome, so a
+        near-duplicate costs nothing to drop.
 
         Takes labelled `blocks` rather than an assembled system string so the prompt
         inspector can attribute an out-of-nowhere message to the block that caused it;
@@ -368,6 +381,12 @@ class Companion:
             # the kind of invisible event the inspector should still show.
             record["reply"] = f"(discarded — claimed an experience she didn't have: {text})"
             return None
+        if avoid_repeats:
+            recent = self._recent_said()
+            if is_repeat(text, recent):
+                logger.info("%s discarded, restates something she just said: %s", kind, text[:80])
+                record["reply"] = f"(discarded — restates a recent message: {text})"
+                return None
         record["reply"] = text
         return text
 
@@ -401,7 +420,7 @@ class Companion:
                                  familiarity=self.familiarity())
 
         text = await self._aside(blocks, build_reachout_cue(_humanize_away(self.idle_seconds())),
-                                 "reach-out")
+                                 "reach-out", avoid_repeats=True)
         if text is None:
             logger.info("reach-out: stayed quiet")
             return None
@@ -440,16 +459,23 @@ class Companion:
             self._followups_left = 0  # she's no longer the last speaker; nothing to follow up
             return None
         extra, core, mood_prompt = await self._recall_context()
-        # A follow-up may fold in an intention if it connects; it doesn't explicitly fulfill one —
-        # form_intentions' resolution pass clears whatever the conversation actually covered.
-        pending = self.intentions.active(limit=1) if self.intentions is not None else []
+        # ⚠️ NO carried intention here (removed 2026-07-20). Riding the agenda along was
+        # what turned a double-text into an unrelated topic switch: measured in the real
+        # log, both double-texts pivoted to a fresh subject a moment after her last
+        # message ("i was just wondering how your interest in ai chatbots is going" —
+        # an intention discharged nearly verbatim), and one asserted an outcome she
+        # could not know. The prompt said "only fold it in if it genuinely connects";
+        # she folded it in regardless.
+        #
+        # An afterthought is about what she JUST SAID. The agenda already has a proper
+        # home — reach-out anchors on the longest-waiting intention and fulfils it — so
+        # nothing is lost by keeping this path for actual afterthoughts.
         blocks = followup_blocks(extra, mood_prompt, core=core,
                                  persona=self.meta.get(PERSONA_SELF_KEY),
-                                 intention=pending[0]["content"] if pending else None,
                                  self_notes=self.meta.get(SELF_NOTES_KEY),
                                  familiarity=self.familiarity())
 
-        text = await self._aside(blocks, FOLLOWUP_CUE, "follow-up")
+        text = await self._aside(blocks, FOLLOWUP_CUE, "follow-up", avoid_repeats=True)
         if text is None:
             self._followups_left = 0
             logger.info("follow-up: stayed quiet")

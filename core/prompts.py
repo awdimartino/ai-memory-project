@@ -479,28 +479,35 @@ FOLLOWUP_CUE = ("(You just messaged them and they haven't replied yet. Only if y
 
 def build_followup_system(memories: list[str], mood: str | None = None,
                           core: list[str] | None = None, persona: str | None = None,
-                          intention: str | None = None, self_notes: str | None = None,
+                          self_notes: str | None = None,
                           familiarity: float = 0.0) -> str:
-    """System prompt for a spontaneous follow-up: the normal chat context + follow-up framing,
-    optionally with an `intention` she may fold in if it connects to what she just said."""
+    """System prompt for a spontaneous follow-up: the normal chat context + follow-up
+    framing. Carries no intention on purpose — see `followup_blocks`."""
     return join_blocks(followup_blocks(memories, mood, core=core, persona=persona,
-                                       intention=intention, self_notes=self_notes,
-                                       familiarity=familiarity))
+                                       self_notes=self_notes, familiarity=familiarity))
 
 
 def followup_blocks(memories: list[str], mood: str | None = None,
                     core: list[str] | None = None, persona: str | None = None,
-                    intention: str | None = None,
                     self_notes: str | None = None,
                     familiarity: float = 0.0) -> list[tuple[str, str]]:
-    """`build_followup_system` as labelled blocks — see `system_blocks`."""
+    """`build_followup_system` as labelled blocks — see `system_blocks`.
+
+    ⚠️ Deliberately carries NO intention (removed 2026-07-20). It used to, guarded by
+    "only fold it in if it genuinely connects to what you just said" — and she folded it
+    in regardless. Both double-texts in the real log pivoted to an unrelated subject
+    seconds after her previous message, one of them discharging an intention nearly
+    verbatim ("i was just wondering how your interest in ai chatbots is going") and
+    another asserting an outcome she could not know.
+
+    An afterthought is about what she JUST SAID. The agenda has a proper home in
+    reach-out, which anchors on the longest-waiting intention and fulfils it on send.
+    The parameter is gone rather than merely unused, so the path cannot quietly come
+    back; `tests/test_intentions.py` guards it.
+    """
     blocks = system_blocks(memories, mood, core=core, persona=persona,
                            self_notes=self_notes, familiarity=familiarity)
     blocks.append(("follow-up framing", _FOLLOWUP_ADDENDUM))
-    if intention:
-        blocks.append(("carried intention",
-                       f"(You've also been meaning to: \"{intention}\". Only fold it in if it genuinely "
-                       f"connects to what you just said — otherwise ignore it and PASS as usual.)"))
     return blocks
 
 

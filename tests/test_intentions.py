@@ -145,10 +145,21 @@ async def main():
     check("ask how the jacket" not in build_system([], None, intentions=[]), "empty agenda injects nothing")
     check("ask how the jacket" not in build_system([], None), "no agenda arg injects nothing")
 
-    fu = build_followup_system([], None, intention="ask how the jacket turned out")
-    check("ask how the jacket turned out" in fu, "follow-up prompt can carry an intention")
-    check("only fold it in" in fu.lower(), "follow-up intention is optional, not forced")
-    check("been meaning to" not in build_followup_system([], None), "no intention -> no anchor block")
+    # A follow-up must NOT carry the agenda (2026-07-20). It used to, guarded by "only
+    # fold it in if it genuinely connects" — and she folded it in regardless: both
+    # double-texts in the real log pivoted to an unrelated subject, one discharging an
+    # intention nearly verbatim. An afterthought is about what she just said; reach-out
+    # is where the agenda belongs. This asserts the capability is GONE, not just unused,
+    # so it cannot quietly return.
+    fu = build_followup_system([], None)
+    check("been meaning to" not in fu, "follow-up carries no agenda anchor")
+    check("only fold it in" not in fu.lower(), "the fold-in guard is gone with the block")
+    import inspect
+    check("intention" not in inspect.signature(build_followup_system).parameters,
+          "build_followup_system no longer accepts an intention at all")
+    from core.prompts import followup_blocks as _fb
+    check("intention" not in inspect.signature(_fb).parameters,
+          "followup_blocks no longer accepts an intention at all")
 
     # --- 6) reach_out consumes the oldest intention ---
     st = _store()
