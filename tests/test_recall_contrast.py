@@ -122,5 +122,54 @@ async def empty_corpus_returns_nothing():
     assert MemoryManager._rank(QUERY, [], None, 5, 0.55, contrast_gap=GAP) == []
 
 
+# --- core facts must not come back from recall ------------------------------------
+# They are injected into the prompt unconditionally, so recalling them restates the
+# same fact twice AND spends limited top_k slots on facts the model can already see.
+# Measured on the live store 2026-07-21: a query about the user's *reading* returned
+# both core facts (name, city) alongside the single relevant hit.
+
+def rank_core(sims, core_flags, min_sim=0.55, top_k=5, **over):
+    """Like `rank`, but each row carries a core flag."""
+    mems = [{"content": f"fact {i}", "core": c} for i, c in enumerate(core_flags)]
+    mn = np.array(sims, dtype=np.float32).reshape(-1, 1)
+    kw = dict(contrast_gap=GAP, contrast_floor=FLOOR, contrast_min_corpus=MIN_CORPUS)
+    kw.update(over)
+    return MemoryManager._rank(QUERY, mems, mn, top_k, min_sim, **kw)
+
+
+@case
+async def core_facts_are_excluded_from_recall():
+    sims = [0.70, 0.65, 0.60]
+    both = rank_core(sims, [True, False, True], exclude_core=True)
+    assert [m["content"] for m, _ in both] == ["fact 1"], both
+    # Without the flag the old behaviour is preserved, for the relate path.
+    assert len(rank_core(sims, [True, False, True])) == 3
+
+
+@case
+async def core_facts_do_not_consume_top_k_slots():
+    """The real cost: two core facts outranking the relevant one would push it out
+    of a small top_k, so the model loses a fact it can ONLY get from recall."""
+    sims = [0.70, 0.68, 0.60]           # the two best are core
+    hits = rank_core(sims, [True, True, False], top_k=2, exclude_core=True)
+    assert [m["content"] for m, _ in hits] == ["fact 2"], (
+        f"non-core hit was crowded out of top_k: {hits}")
+
+
+@case
+async def a_corpus_of_only_core_recalls_nothing():
+    hits = rank_core([0.70, 0.65], [True, True], exclude_core=True)
+    assert hits == [], "nothing to recall when every fact is already injected"
+
+
+@case
+async def filtering_happens_before_top_k_not_after():
+    """Slicing argsort first and filtering after silently returns FEWER than top_k.
+    Three of five rows are rejected; the two survivors must still both come back."""
+    sims = [0.70, 0.69, 0.68, 0.60, 0.59]
+    hits = rank_core(sims, [True, True, True, False, False], top_k=3, exclude_core=True)
+    assert len(hits) == 2, f"expected both non-core survivors, got {hits}"
+
+
 if __name__ == "__main__":
     raise SystemExit(run())

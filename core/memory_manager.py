@@ -197,7 +197,8 @@ class MemoryManager:
     def _rank(vec: np.ndarray, mems: list[dict], mn: np.ndarray | None,
               top_k: int, min_sim: float,
               contrast_gap: float = 0.0, contrast_floor: float = 0.0,
-              contrast_min_corpus: int = 3) -> list[tuple[dict, float]]:
+              contrast_min_corpus: int = 3,
+              exclude_core: bool = False) -> list[tuple[dict, float]]:
         """Cosine KNN of `vec` against a preloaded corpus. Returns (memory, sim), best first.
 
         A hit is kept if it clears the absolute floor `min_sim`, OR (when
@@ -215,6 +216,13 @@ class MemoryManager:
         Callers that want pure absolute thresholding (the consolidation `relate`
         path, which asks a different question: "is this fact close enough to that
         one to merit a lifecycle decision?") simply leave `contrast_gap` at 0.
+
+        `exclude_core` drops always-injected core facts from the RESULTS (recall
+        only). They are already in the prompt unconditionally, so returning them
+        restates the same fact twice — and, worse, spends limited `top_k` slots on
+        facts the model can already see, crowding out ones reachable only by recall.
+        Measured on the live store: a query about the user's *reading* returned both
+        core facts (name, city) alongside the one relevant hit.
         """
         if mn is None:
             return []
@@ -224,9 +232,17 @@ class MemoryManager:
         if contrast_gap and len(sims) >= contrast_min_corpus:
             # Median over the whole corpus: a background level that barely moves
             # when one or two facts are genuinely relevant (the mean does).
+            # NOTE: the median stays over the FULL corpus even when excluding core
+            # from the results. It exists to cancel this query's baseline offset, so
+            # it wants every sample it can get; the gate's calibration was measured
+            # against the whole corpus and narrowing it would silently re-tune it.
             keep |= (sims >= contrast_floor) & (sims - np.median(sims) >= contrast_gap)
-        order = np.argsort(-sims)[:top_k]
-        return [(mems[i], float(sims[i])) for i in order if keep[i]]
+        if exclude_core:
+            keep &= np.array([not m.get("core") for m in mems], dtype=bool)
+        # Select among KEPT rows, then take top_k — not the reverse. Slicing first
+        # and filtering after lets rejected rows (now including core facts) occupy
+        # slots and silently shrink the result below top_k.
+        return [(mems[i], float(sims[i])) for i in np.argsort(-sims) if keep[i]][:top_k]
 
     async def _search(self, vec: np.ndarray, top_k: int, min_sim: float,
                       **contrast) -> list[tuple[dict, float]]:
@@ -239,10 +255,15 @@ class MemoryManager:
         # No count() pre-check: _corpus already short-circuits on an empty store, and
         # that guard cost an extra query on every single turn to learn nothing.
         qvec = np.asarray(await self.embedder.embed_query(text), dtype=np.float32)
+        # exclude_core: core facts are ALREADY in the prompt every turn. Recalling
+        # them restates them and burns top_k slots. Consolidation's `relate` path
+        # deliberately does NOT pass this — a new fact must still be able to
+        # supersede a core one, which needs core rows visible to the lifecycle.
         hits = await self._search(qvec, self.top_k, self.min_sim,
                                   contrast_gap=self.contrast_gap,
                                   contrast_floor=self.contrast_floor,
-                                  contrast_min_corpus=self.contrast_min_corpus)
+                                  contrast_min_corpus=self.contrast_min_corpus,
+                                  exclude_core=True)
         if hits:
             logger.info("recall: %d hit(s), top sim %.3f", len(hits), hits[0][1])
         return [(m["content"], s) for m, s in hits]
