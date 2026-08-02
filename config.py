@@ -94,7 +94,7 @@ LLM_MAX_RETRIES = _i("LLM_MAX_RETRIES", 3)
 # when MODEL is a reasoning model; harmless-but-pointless on non-reasoning ones.
 NO_THINK = _flag("NO_THINK", False)
 
-BOT_NAME = os.environ.get("BOT_NAME", "Mari")
+BOT_NAME = os.environ.get("BOT_NAME", "Companion")   # the companion's name; set your own in .env
 
 # Max number of prior messages (user+assistant) kept in the prompt / carried
 # across restarts as context.
@@ -238,17 +238,18 @@ REACHOUT_ENABLED = _flag("REACHOUT_ENABLED", True)
 REACHOUT_MIN_IDLE = _f("REACHOUT_MIN_IDLE", 900)    # 15 min away
 REACHOUT_COOLDOWN = _f("REACHOUT_COOLDOWN", 7200)   # >=2h between attempts
 
-# Phone push (self-hosted Bark, §8-D): when Mari *reaches out* (a proactive message) and NOTIFY_URL
+# Phone push (self-hosted Bark): when the companion *reaches out* (a proactive message) and NOTIFY_URL
 # is set, POST it to your Bark server so it pushes to your phone via APNs even with the tab closed.
 # Empty => disabled (no-op). NOTIFY_URL is the full Bark device endpoint, e.g.
-# http://alex-pi:8090/<device_key>. NOTIFY_UI_URL is an optional tap-to-open link (your Tailscale web
-# UI address) so tapping the notification opens Mari to reply. Follow-ups stay in-tab (not pushed).
+# http://<host>:8090/<device_key>. NOTIFY_UI_URL is an optional tap-to-open link (e.g. your reverse
+# proxy / VPN web-UI address) so tapping the notification opens the chat to reply. Follow-ups stay
+# in-tab (not pushed). The payload is a generic JSON webhook, so ntfy/Home-Assistant/etc. work too.
 NOTIFY_URL = os.environ.get("NOTIFY_URL", "")
 NOTIFY_UI_URL = os.environ.get("NOTIFY_UI_URL", "")
 NOTIFY_TITLE = os.environ.get("NOTIFY_TITLE", BOT_NAME)
 # Optional custom notification image (Bark `icon`): a URL the *phone* fetches when the push arrives,
-# so it must be reachable from your iPhone. Easiest: drop an image in web/static/ and point here at
-# the Tailscale web-UI, e.g. https://<pc>.<tailnet>.ts.net/static/mari.png. iOS caches it by URL.
+# so it must be reachable from your phone. Easiest: drop an image in web/static/ and point here at
+# your web-UI address, e.g. https://<host>/static/icon.png. iOS caches it by URL.
 NOTIFY_ICON = os.environ.get("NOTIFY_ICON", "")
 
 # Follow-up messages: after Mari replies, she may fire off a spontaneous second message a tick

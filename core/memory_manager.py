@@ -278,7 +278,7 @@ class MemoryManager:
         and bad/garbage-decision fallbacks all still hold.
         """
         transcript = "\n".join(
-            f"{'User' if m['role'] == 'user' else 'Mari'}: {m['content']}" for m in messages
+            f"{'User' if m['role'] == 'user' else config.BOT_NAME}: {m['content']}" for m in messages
         )
         facts = await self.llm.structured(
             [

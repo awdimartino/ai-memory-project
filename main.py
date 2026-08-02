@@ -7,7 +7,7 @@ Conversation is logged to the SQLite DB and carried across restarts.
 Commands:
   /exit            quit (flushes pending consolidation)
   /reset           clear in-memory context (the log on disk is kept)
-  /thoughts        show Mari's recent private journal entries
+  /thoughts        show the companion's recent private journal entries
   /core            show the always-injected core memories
   /persona         show familiarity + her evolving self-description
   /model [name]    show or switch the model
@@ -55,7 +55,7 @@ async def amain() -> int:
         if user == "/thoughts":
             recent = companion.thoughts.recent(10) if companion.thoughts else []
             if not recent:
-                print("(no thoughts yet — Mari reflects while you're away)\n")
+                print(f"(no thoughts yet — {config.BOT_NAME} reflects while you're away)\n")
             else:
                 print("(recent private thoughts, newest first)")
                 for t in recent:
@@ -78,7 +78,7 @@ async def amain() -> int:
             desc = companion.meta.get(PERSONA_SELF_KEY)
             fam = companion.familiarity()
             print(f"(familiarity {fam:.2f} — {familiarity_label(fam)})")
-            print(f"(self-description) {desc if desc else '— none yet; Mari develops one as you talk —'}\n")
+            print(f"(self-description) {desc if desc else f'— none yet; {config.BOT_NAME} develops one as you talk —'}\n")
             continue
         if user.startswith("/model"):
             parts = user.split(maxsplit=1)

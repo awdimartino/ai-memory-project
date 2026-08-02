@@ -136,9 +136,11 @@ _TEMPORAL = re.compile(
     re.I,
 )
 # Facts about the bot / the app / the current chat session — never durable user facts.
+# Keyed off BOT_NAME so renaming the companion doesn't silently weaken the leak guard.
+_BOT = re.escape(config.BOT_NAME.lower())
 _META = re.compile(
-    r"\bmari'?s\b|emotion system|backend|chatbot|language model|the chat\b|"
-    r"how mari|mari responds|mari'?s explanation|building (mari|your|the)|"
+    rf"\b{_BOT}'?s\b|emotion system|backend|chatbot|language model|the chat\b|"
+    rf"how {_BOT}|{_BOT} responds|{_BOT}'?s explanation|building ({_BOT}|your|the)|"
     r"servers|no real (code|feelings|servers)",
     re.I,
 )
@@ -146,7 +148,7 @@ _META = re.compile(
 
 def classify(fact: str, category: str) -> str:
     low = fact.lower()
-    if category == "self" or re.match(r"\s*mari\b", low):
+    if category == "self" or re.match(rf"\s*{_BOT}\b", low):
         if re.search(r"chatbot|\bai\b|program|language model|servers|no real", low):
             return "disclaim"
         return "self"

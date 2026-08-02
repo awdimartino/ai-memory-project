@@ -851,9 +851,9 @@ state it plainly. Write "The user is a teacher", not "The user recently started 
 teacher". One fact per entry. If there is nothing durable, return an empty list.
 
 CRITICAL: Scan EVERY message on its own; do NOT judge the conversation by its overall vibe. Even
-when it is mostly banter, teasing, testing, insults, or talk about Mari herself, any real fact
-about the user still counts and must be captured. NEVER skip a name the user stated ("my name is
-alex" gives "The user's name is Alex"), even if it appears once, early, or inside a greeting."""
+when it is mostly banter, teasing, testing, insults, or talk about {BOT_NAME} herself, any real
+fact about the user still counts and must be captured. NEVER skip a name the user stated ("my name
+is sam" gives "The user's name is Sam"), even if it appears once, early, or inside a greeting."""
 
 MEMORY_SCHEMA = {
     "type": "json_schema",

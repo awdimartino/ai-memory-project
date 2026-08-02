@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mari</title>
-  <link rel="icon" id="favicon" href="/static/mari.png" />
-  <link rel="apple-touch-icon" href="/static/mari.png" />
+  <title>Companion</title>
+  <!-- favicon is generated at runtime from the bot's initial by setFavicon(); this is just a
+       transparent placeholder so there's no 404 before the script runs. -->
+  <link rel="icon" id="favicon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>" />
   <style>
     :root {
       color-scheme: dark; background: var(--bg);
       --bg: #0d0f15; --bg2: #101320; --panel: #151926; --elev: #1b2130;
-      --user: #3d6bff; --user2: #5f86ff; --mari: #e0a458;
+      --user: #3d6bff; --user2: #5f86ff; --accent: #e0a458;
       --text: #e8eaf2; --muted: #8b90a4; --faint: #5c6274; --line: #242a3a;
       --ok: #4fbf8f; --warn: #e0a458; --bad: #e5534b;
       --r: 14px; --shadow: 0 6px 20px rgba(0,0,0,.28);
@@ -18,7 +19,7 @@
     :root[data-theme="light"] {
       color-scheme: light;
       --bg: #eef0f6; --bg2: #e7eaf2; --panel: #ffffff; --elev: #ffffff;
-      --user: #2b5cff; --user2: #4d78ff; --mari: #c07f2e;
+      --user: #2b5cff; --user2: #4d78ff; --accent: #c07f2e;
       --text: #1b2030; --muted: #646b7e; --faint: #9aa0b2; --line: #e0e4ee;
       --ok: #2e9e73; --warn: #bd8330; --bad: #cf4038;
       --shadow: 0 6px 20px rgba(30,40,80,.10);
@@ -47,7 +48,7 @@
     .avatar {
       width: 30px; height: 30px; border-radius: 50%; flex: none;
       display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #1a1205;
-      background: linear-gradient(145deg, var(--mari), #caa06a);
+      background: linear-gradient(145deg, var(--accent), #caa06a);
       box-shadow: 0 0 0 1px rgba(255,255,255,.08) inset;
     }
     header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .01em; }
@@ -122,7 +123,7 @@
     .row .mavatar {
       width: 26px; height: 26px; border-radius: 50%; flex: none; margin-bottom: 2px;
       display: grid; place-items: center; font-weight: 700; font-size: 12px; color: #1a1205;
-      background: linear-gradient(145deg, var(--mari), #caa06a);
+      background: linear-gradient(145deg, var(--accent), #caa06a);
     }
     .bubble {
       max-width: 74%; padding: 10px 14px; border-radius: var(--r); white-space: pre-wrap;
@@ -142,7 +143,7 @@
       align-self: flex-end; margin-bottom: 3px; font-variant-numeric: tabular-nums;
     }
     .row:hover .time { opacity: 1; }
-    .tag { font-size: 10px; color: var(--mari); letter-spacing: .04em; margin: 6px 0 -4px 35px; text-transform: uppercase; }
+    .tag { font-size: 10px; color: var(--accent); letter-spacing: .04em; margin: 6px 0 -4px 35px; text-transform: uppercase; }
     .bubble.typing { display: inline-flex; gap: 4px; padding: 14px; }
     .bubble.typing .d { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
     .bubble.typing .d:nth-child(2) { animation-delay: .2s; }
@@ -227,15 +228,15 @@
     .pill.unavailable { color: #c98a4b; } .pill.unavailable .pdot { background: #c98a4b; }
     .pill .pdot { width: 6px; height: 6px; border-radius: 50%; }
     .fam-track { height: 5px; background: var(--line); border-radius: 5px; overflow: hidden; margin-top: 8px; }
-    .fam-track > i { display: block; height: 100%; background: linear-gradient(90deg, var(--user), var(--mari)); transition: width .4s; }
+    .fam-track > i { display: block; height: 100%; background: linear-gradient(90deg, var(--user), var(--accent)); transition: width .4s; }
     .st-mem { font-size: 12.5px; padding: 3px 0; line-height: 1.4; }
     .st-mem.core { display: flex; gap: 6px; }
-    .st-mem.core::before { content: "★"; color: var(--mari); flex: none; }
+    .st-mem.core::before { content: "★"; color: var(--accent); flex: none; }
     .st-old { font-size: 11.5px; color: var(--muted); padding: 2px 0; }
     .st-old s { color: var(--faint); }
     .st-sub { color: var(--faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; margin: 9px 0 4px; }
     .st-thought { font-size: 12.5px; padding: 5px 0 5px 10px; border-left: 2px solid var(--line); margin: 6px 0; line-height: 1.45; }
-    .st-thought .m { color: var(--mari); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    .st-thought .m { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
     .st-empty { color: var(--muted); font-size: 12px; }
     .count-chip { font-size: 10px; color: var(--muted); background: var(--elev); border: 1px solid var(--line); border-radius: 20px; padding: 1px 8px; margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
@@ -254,7 +255,7 @@
     .mem-list { overflow-y: auto; padding: 8px 16px; display: flex; flex-direction: column; }
     .mem-row { display: flex; align-items: center; gap: 9px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
     .mem-row .star { background: transparent; border: 0; color: var(--faint); font-size: 16px; padding: 0 2px; cursor: pointer; flex: none; }
-    .mem-row .star.on { color: var(--mari); }
+    .mem-row .star.on { color: var(--accent); }
     .mem-row input.mc { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 13px; }
     .mem-row input.mc:focus { outline: none; border-color: var(--user); }
     .mem-row s { flex: 1; min-width: 0; color: var(--faint); font-size: 13px; }
@@ -280,7 +281,7 @@
     .pi-turn .k { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
     .pi-turn .kind { text-transform: uppercase; letter-spacing: .04em; font-size: 9px; padding: 1px 6px; border-radius: 20px; border: 1px solid var(--line); }
     .pi-turn .kind.chat { color: var(--user); }
-    .pi-turn .kind.reachout, .pi-turn .kind.followup { color: var(--mari); }
+    .pi-turn .kind.reachout, .pi-turn .kind.followup { color: var(--accent); }
     .pi-turn .t { font-size: 12px; color: var(--text); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pi-turn .t.quiet { color: var(--faint); font-style: italic; }
     .pi-detail { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 16px; }
@@ -298,9 +299,9 @@
     .pi-sec { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 7px; }
     /* Thinking reads as her interior, not as prompt data — dimmer and italic so it's
        visually distinct from the blocks we sent her. */
-    .pi-think > summary .lbl { color: var(--mari); }
+    .pi-think > summary .lbl { color: var(--accent); }
     .pi-think > pre { font-style: italic; opacity: .85; }
-    .pi-reply { border-left: 2px solid var(--mari); padding: 6px 0 6px 11px; font-size: 13px; margin-bottom: 4px; }
+    .pi-reply { border-left: 2px solid var(--accent); padding: 6px 0 6px 11px; font-size: 13px; margin-bottom: 4px; }
     .pi-reply.quiet { border-color: var(--faint); color: var(--faint); font-style: italic; }
     @media (max-width: 760px) {
       .pi-body { flex-direction: column; }
@@ -353,7 +354,7 @@
 <body>
   <header>
     <div class="avatar" id="avatar">M</div>
-    <h1 id="botname">Mari</h1>
+    <h1 id="botname">Companion</h1>
     <span class="conn" id="conn"><span class="cdot"></span><span id="connText">connecting</span></span>
     <span class="chip" id="model">…</span>
     <span class="spacer"></span>
@@ -374,7 +375,7 @@
       <div id="scroll">
         <div id="log"></div>
       </div>
-      <div id="empty"><div><div class="big">Say hi to Mari 👋</div>She's a friend, not an assistant.</div></div>
+      <div id="empty"><div><div class="big">Say hi 👋</div>A friend, not an assistant.</div></div>
       <button id="jump" type="button">↓ latest</button>
       <div id="composer">
         <form id="form">
@@ -427,7 +428,7 @@
     const avatarEl = document.getElementById("avatar");
     const emptyEl = document.getElementById("empty");
     const jumpBtn = document.getElementById("jump");
-    let botName = "Mari";
+    let botName = "Companion";   // placeholder until the server's "ready" frame sends the real BOT_NAME
     let current = null; // active assistant bubble while streaming
 
     function el(tag, cls, text) {
@@ -455,7 +456,7 @@
       x.beginPath(); x.arc(32, 32, 30, 0, 7); x.fill();
       x.fillStyle = curAsleep ? "#e8e6f5" : curUnavailable ? "#f5ece0" : "#1a1205";
       x.font = "bold 38px system-ui"; x.textAlign = "center"; x.textBaseline = "middle";
-      x.fillText((botName[0] || "M"), 32, 35);
+      x.fillText((botName[0] || "?"), 32, 35);
       if (unread > 0) { x.fillStyle = "#e5534b"; x.beginPath(); x.arc(50, 15, 13, 0, 7); x.fill(); }
       favEl.href = cv.toDataURL("image/png");
     }
@@ -490,7 +491,7 @@
     function addBubble(role, text, opts = {}) {
       const row = el("div", "row " + role);
       if (opts.proactive) log.appendChild(el("div", "tag", "· reached out"));
-      if (role === "bot") row.appendChild(el("div", "mavatar", botName[0] || "M"));
+      if (role === "bot") row.appendChild(el("div", "mavatar", botName[0] || "?"));
       const bubble = el("div", "bubble");
       bubble.textContent = text;
       if (role === "user") { row.appendChild(el("span", "time", opts.time || "")); row.appendChild(bubble); }
@@ -511,7 +512,7 @@
     }
 
     function addSys(text) { log.appendChild(el("div", "sys", text)); scrollDown(); }
-    function addSilent() { log.appendChild(el("div", "sys quiet", "· Mari stayed quiet")); scrollDown(); }
+    function addSilent() { log.appendChild(el("div", "sys quiet", `· ${botName} stayed quiet`)); scrollDown(); }
 
     function addStats(s) {
       const approx = s.estimated ? "~" : "";
@@ -590,7 +591,7 @@
         if (found.length) found.forEach((d) => det.appendChild(barRow(d.label, d.score)));
         else det.appendChild(el("div", "td-empty", "neutral / nothing notable"));
         body.appendChild(det);
-        const mood = section("Mari's mood");
+        const mood = section(`${botName}'s mood`);
         Object.entries(emotion.mood).forEach(([ch, v]) => mood.appendChild(barRow(ch, v, MOOD_COLORS[ch])));
         body.appendChild(mood);
       }
@@ -627,7 +628,8 @@
       const msg = JSON.parse(ev.data);
       if (msg.type === "ready") {
         botName = msg.bot; botnameEl.textContent = msg.bot;
-        avatarEl.textContent = (msg.bot || "M")[0]; modelEl.textContent = msg.model;
+        document.title = msg.bot; setFavicon();   // tab title + generated favicon now use the real name
+        avatarEl.textContent = (msg.bot || "?")[0]; modelEl.textContent = msg.model;
       } else if (msg.type === "conversations") {
         renderConversations(msg.list, msg.active);
       } else if (msg.type === "history_start") {
@@ -714,10 +716,10 @@
       document.documentElement.setAttribute("data-theme", t);
       themeBtn.textContent = t === "light" ? "☀" : "☾";
     }
-    applyTheme(localStorage.getItem("mari-theme") || "dark");
+    applyTheme(localStorage.getItem("app-theme") || "dark");
     themeBtn.onclick = () => {
       const t = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
-      localStorage.setItem("mari-theme", t); applyTheme(t);
+      localStorage.setItem("app-theme", t); applyTheme(t);
     };
 
     // --- Status panel ---
@@ -733,7 +735,7 @@
       return `~${Math.round(secs / 60)}m`;
     }
     function kvRow(k, v) { const r = el("div", "st-kv"); r.appendChild(el("span", "k", k)); r.appendChild(el("span", "v", v)); return r; }
-    const COLLAPSE_KEY = "mari-collapsed";
+    const COLLAPSE_KEY = "app-collapsed";
     const collapsedSet = () => new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"));
     function card(title, chip) {
       const c = el("div", "card");
@@ -757,7 +759,7 @@
       const away = s.unavailable && s.unavailable.active;
       const mode = away ? "unavailable" : (s.asleep ? "asleep" : "awake");
 
-      const ov = card("Mari");
+      const ov = card(botName);
       const state = el("div", "st-kv");
       state.appendChild(el("span", "k", "state"));
       const v = el("span", "v");
@@ -846,7 +848,7 @@
       } else if (s.asleep) {
         avatarEl.textContent = "😴"; avatarEl.classList.add("asleep"); avatarEl.style.boxShadow = "";
       } else {
-        avatarEl.textContent = (botName[0] || "M");
+        avatarEl.textContent = (botName[0] || "?");
         avatarEl.style.boxShadow = (topMood && topMood[1] > 0.15) ? `0 0 12px ${MOOD_COLORS[topMood[0]]}` : "";
       }
       setFavicon();
@@ -855,13 +857,13 @@
       try { const s = await (await fetch("/status")).json(); if (s.ready) renderStatus(s); }
       catch (e) { /* transient; keep last render */ }
     }
-    const savedPanel = localStorage.getItem("mari-panel");
+    const savedPanel = localStorage.getItem("app-panel");
     // Default the panel hidden on phones/tablets (it's an overlay there), shown on desktop.
     const statusHidden = savedPanel ? savedPanel === "off" : window.matchMedia("(max-width: 1080px)").matches;
     document.body.classList.toggle("no-status", statusHidden);
     document.getElementById("toggleStatus").onclick = () => {
       const off = document.body.classList.toggle("no-status");
-      localStorage.setItem("mari-panel", off ? "off" : "on");
+      localStorage.setItem("app-panel", off ? "off" : "on");
     };
     // On narrow screens, tapping outside the open overlay closes it.
     document.addEventListener("click", (e) => {
@@ -869,7 +871,7 @@
           !document.body.classList.contains("no-status") &&
           !e.target.closest("#status") && e.target.id !== "toggleStatus") {
         document.body.classList.add("no-status");
-        localStorage.setItem("mari-panel", "off");
+        localStorage.setItem("app-panel", "off");
       }
     });
     setInterval(pollStatus, 3000); pollStatus();
@@ -942,7 +944,7 @@
       alert(r.ok ? `Cleared ${r.cleared} memories.` : "clear failed"); loadMemories();
     };
     document.getElementById("memReset").onclick = async () => {
-      if (!confirm("FULL RESET\n\nWipe ALL memories, conversations, mood, drives, persona and thoughts — a factory-fresh Mari. This cannot be undone.\n\nContinue?")) return;
+      if (!confirm(`FULL RESET\n\nWipe ALL memories, conversations, mood, drives, persona and thoughts — a factory-fresh ${botName}. This cannot be undone.\n\nContinue?`)) return;
       const r = await postJSON("/admin/factory_reset", { confirm: true });
       if (r.ok) location.reload(); else alert("reset failed: " + (r.error || "unknown"));
     };
@@ -1078,7 +1080,7 @@
         del.title = "delete conversation";
         del.onclick = (e) => {
           e.stopPropagation();
-          if (confirm("Delete this conversation? (Mari's memories are kept.)")) wsSend({ type: "delete", id: c.id });
+          if (confirm(`Delete this conversation? (${botName}'s memories are kept.)`)) wsSend({ type: "delete", id: c.id });
         };
         item.appendChild(del);
         item.onclick = () => { if (c.id !== active) wsSend({ type: "switch", id: c.id }); };

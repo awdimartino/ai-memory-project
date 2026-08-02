@@ -178,7 +178,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/status")
 async def status(c: Live) -> dict:
-    """One aggregate view of Mari's whole state — for the web status panel."""
+    """One aggregate view of the companion's whole state — for the web status panel."""
     import time as _time
     from core.companion import PERSONA_SELF_KEY, SELF_NOTES_KEY, familiarity_label
     from core.emotion_manager import CHANNELS
@@ -319,7 +319,7 @@ async def test_notify() -> dict:
     # Report what the Bark server actually said. This used to return ok:True on any
     # completed request, so a wrong device key (HTTP 404) verified as working — which
     # defeats the only purpose this endpoint has.
-    delivered, detail = await phone.push("test push from Mari 👋")
+    delivered, detail = await phone.push(f"test push from {config.BOT_NAME} 👋")
     return {"ok": delivered} if delivered else {"ok": False, "error": detail}
 
 
