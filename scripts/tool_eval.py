@@ -24,7 +24,7 @@ os.environ.setdefault("TOOLS_ENABLED", "true")
 
 import bootstrap  # noqa: E402
 
-# Past conversation to seed (user line -> Mari line). Reminisce scenarios reference these.
+# Past conversation to seed (user line -> the companion line). Reminisce scenarios reference these.
 SEED = [
     ("I went to Japan for two weeks last spring, Tokyo and Kyoto were unreal", "sounds amazing"),
     ("my dog Rex is a german shepherd, he's almost ten now", "aw, a senior pup"),

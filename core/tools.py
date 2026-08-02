@@ -1,9 +1,9 @@
-"""Tool framework (pillar 4): a registry Mari can call during a turn.
+"""Tool framework (pillar 4): a registry the companion can call during a turn.
 
 A Tool pairs an OpenAI function schema (what the model sees) with an async
 handler (what actually runs). The ToolRegistry hands the LLM the specs and
 executes calls the model requests. It's the hot-swappable table the chat loop
-consults every turn — register a Tool and Mari can use it next message; no other
+consults every turn — register a Tool and the companion can use it next message; no other
 code changes.
 
 Robustness is the whole point (the user's ask: "make sure tool calling is robust

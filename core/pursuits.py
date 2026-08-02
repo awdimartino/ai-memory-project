@@ -1,6 +1,6 @@
 """The pursuit-tool registry (§A4: she can make herself unavailable).
 
-A "pursuit" is a tool call Mari chooses for HERSELF, not one the user (or the chat
+A "pursuit" is a tool call the companion chooses for HERSELF, not one the user (or the chat
 loop) invokes — deliberately NOT `core/tools.py`'s native function-calling registry,
 which is user-facing, exposed to the model mid-turn, and measured too unreliable
 (~23/30) to gate something as consequential as whether she goes silent on the user.

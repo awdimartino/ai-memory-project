@@ -1,4 +1,4 @@
-"""Detect fabricated physical experience in Mari's output.
+"""Detect fabricated physical experience in the companion's output.
 
 The persona's job is a three-tier rule:
 

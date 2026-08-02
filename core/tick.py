@@ -200,7 +200,7 @@ class TickLoop:
 
 
 class DriveDriftJob(Job):
-    """Integrate Mari's internal drives + energy each tick (multi-drive proactivity).
+    """Integrate the companion's internal drives + energy each tick (multi-drive proactivity).
 
     Away-drives rise while the user is away (connection scaled by mood, restlessness by boredom)
     and relax while present; energy depletes while awake and restores while asleep. Reach-out and
@@ -277,7 +277,7 @@ class ReachOutJob(DriveGatedJob):
 
 
 class FollowUpJob(Job):
-    """After Mari replies, maybe fire a spontaneous follow-up a tick or a few later — like
+    """After the companion replies, maybe fire a spontaneous follow-up a tick or a few later — like
     double-texting to add or elaborate on a thought.
 
     Distinct from reach-out (which is about long idle): this only fires in a short WINDOW right
@@ -322,7 +322,7 @@ LAST_REFLECT_KEY = "last_reflect_at"
 
 
 class ReflectionJob(DriveGatedJob):
-    """While the user is away, have Mari write a short private thought to her journal.
+    """While the user is away, have the companion write a short private thought to her journal.
 
     Same shape as reach-out but internal: nothing is pushed to the user, the thought is
     just stored via `companion.reflect()`. Gated on **`restlessness`** (mental idleness),
@@ -344,7 +344,7 @@ LAST_INTENTION_KEY = "last_intention_at"
 
 
 class IntentionJob(CooldownJob):
-    """While the user is away, note forward intentions from the recent conversation — things Mari
+    """While the user is away, note forward intentions from the recent conversation — things the companion
     means to bring up or find out next time. Idle + cooldown gated (its own cadence); internal (no
     surface push). Reach-out consumes these to make its messages purposeful (the "planning" pillar)."""
     name = "intention"
@@ -358,7 +358,7 @@ LAST_SELFNOTES_KEY = "last_self_notes_at"
 
 
 class SelfNotesJob(CooldownJob):
-    """While the user is away, distill what the last conversation taught Mari about HOW to be with
+    """While the user is away, distill what the last conversation taught the companion about HOW to be with
     them ("ease off the questions") into her operating-notes slot. Idle + cooldown gated; internal
     (no surface push). Sibling to PersonaEditJob: that one revises who she is, this one how she acts."""
     name = "self_notes"
@@ -372,7 +372,7 @@ LAST_PERSONA_EDIT_KEY = "last_persona_edit_at"
 
 
 class PersonaEditJob(CooldownJob):
-    """During idle, let Mari rewrite her own self-description (the self-modifying persona).
+    """During idle, let the companion rewrite her own self-description (the self-modifying persona).
 
     Slow and rare: needs a minimum amount of history first (`min_messages`), then a long
     cooldown between edits. `companion.edit_persona()` reads her thoughts + core memories and
@@ -492,7 +492,7 @@ class PursuitReturnJob(Job):
 
 
 class SleepJob(Job):
-    """Put Mari into standby: unload the LLM from VRAM to free the machine. Two triggers:
+    """Put the companion into standby: unload the LLM from VRAM to free the machine. Two triggers:
     a **long idle** (the practical VRAM-freeing one) OR **low energy** while briefly idle
     (the body-cycle one — she's tired, arc A2). The energy path still needs a small idle gap
     (`energy_min_idle`) so she never nods off mid-conversation; the busy guard already zeroes

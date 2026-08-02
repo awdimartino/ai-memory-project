@@ -61,7 +61,7 @@ class Demo:
         self.idle = 0.0
         self.comp.drives._last = self.clock.t  # anchor the away integration to "now"
         print(f"\n  you  › {text}")
-        print(f"  Mari › {r.text.strip().replace(chr(10), ' ')}")
+        print(f"  the companion › {r.text.strip().replace(chr(10), ' ')}")
         if r.recalled:
             print(f"        recall: " + "; ".join(f"“{c}” ({s:.0%})" for c, s in r.recalled[:2]))
         if r.emotion and r.emotion["detected"]:
@@ -120,7 +120,7 @@ async def main() -> int:
           f"restlessness ≥ {config.DRIVE_RESTLESSNESS_THRESHOLD}")
 
     print("\n----- a warm, emotional evening chat -----")
-    await demo.turn("hey Mari. i'm Alex — i work as an ER nurse here in Seattle")
+    await demo.turn("hey the companion. i'm Alex — i work as an ER nurse here in Seattle")
     await demo.turn("honestly today gutted me. we lost a patient i'd really connected with")
     await demo.turn("thanks for listening. i just needed to say it out loud to someone")
 

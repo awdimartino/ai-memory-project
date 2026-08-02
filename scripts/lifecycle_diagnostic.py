@@ -63,7 +63,7 @@ async def trace(llm, embedder, seed: str, said: str, expect: str | None) -> None
 
     # -- stage 1: extraction ---------------------------------------------------
     # Mirrors MemoryManager.consolidate's extraction call exactly.
-    transcript = "\n".join(f"{'User' if m['role'] == 'user' else 'Mari'}: {m['content']}"
+    transcript = "\n".join(f"{'User' if m['role'] == 'user' else 'the companion'}: {m['content']}"
                            for m in messages)
     facts = await llm.structured(
         [{"role": "system", "content": MEMORY_EXTRACTION_SYSTEM},

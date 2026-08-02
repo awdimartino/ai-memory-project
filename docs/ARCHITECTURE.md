@@ -255,6 +255,6 @@ Writes go through `asyncio.to_thread`; the one large read (`store.active()`) doe
 
 ## Conversations
 
-Sessions are named threads you can create, switch, rename and delete. **Mari is one companion
+Sessions are named threads you can create, switch, rename and delete. **the companion is one companion
 across all of them** — memory, mood, thoughts, persona, familiarity and the consolidation
 machinery are global. Only the message thread is per-tab.

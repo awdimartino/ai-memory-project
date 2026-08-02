@@ -55,8 +55,8 @@ build log.
 
 ## 1. What the project is
 
-A **personal, local-first AI companion** named **Mari** — a friend, not an assistant — for a
-single user, running fully local via **LM Studio**. Guiding principle (validated in v1): make the
+A **personal, local-first AI companion** — a friend, not an assistant — for a
+single user, running fully local via **LM Studio**. Its name is configurable (`BOT_NAME`). Guiding principle (validated in v1): make the
 **brain** (memory + emotion + conversation) trustworthy *before* the **delivery layer**
 (proactivity + tools + voice).
 
@@ -126,7 +126,7 @@ REPL: `/exit` (flushes pending consolidation), `/reset`, `/model <name>`, `/temp
   nomic resident — no second big model, no load/unload thrash).
 - **Embedding: `text-embedding-nomic-embed-text-v1.5`.**
 - **Emotion: `SamLowe/roberta-base-go_emotions`** (~125M) on **CPU** (`device=-1`), ~0.5 GB RAM.
-- `.env`: `MODEL=qwen/qwen3.5-9b`, `BOT_NAME=Mari`, `FREQUENCY_PENALTY=0.4`,
+- `.env`: `MODEL=qwen/qwen3.5-9b`, `BOT_NAME=the companion`, `FREQUENCY_PENALTY=0.4`,
   `PRESENCE_PENALTY=0.3`, `LLM_MAX_RETRIES=3`.
 
 ⚠️ **Thinking configuration is currently contradictory — see START HERE item 1 before changing it.**

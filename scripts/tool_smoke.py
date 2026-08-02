@@ -1,6 +1,6 @@
 """Live end-to-end smoke for the tool loop, through the REAL stack.
 
-Builds the companion via bootstrap (Mari's real persona + system prompt) against
+Builds the companion via bootstrap (the companion's real persona + system prompt) against
 a throwaway DB and drives a few turns to confirm tool-calling holds up in-persona
 (the probe used a neutral "assistant" prompt; this checks the companion voice):
   1. seed a fact to reminisce about later
@@ -35,7 +35,7 @@ async def turn(companion, label, text):
     reply = "".join(parts).strip() or result.text
     tools = result.tools or []
     print(f"\n[{label}] you: {text}")
-    print(f"  Mari: {reply}")
+    print(f"  the companion: {reply}")
     if tools:
         for t in tools:
             print(f"  🔧 {t['name']}({t['args']}) -> {t['result']!r}")

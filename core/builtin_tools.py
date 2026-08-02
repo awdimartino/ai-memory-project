@@ -2,7 +2,7 @@
 
 Each returns a ready-to-register Tool, closing over whatever dependencies it
 needs (stores, clock) so the ToolRegistry stays a plain table and handlers stay
-testable. Descriptions are written in Mari's second person ("you") because the
+testable. Descriptions are written in the companion's second person ("you") because the
 model reads them as its own capabilities, and framed as things a friend does
 (knowing the time, remembering past talks) rather than assistant functions.
 """
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def make_time_tool() -> Tool:
-    """Local wall-clock. Lets Mari answer 'what time is it' and be time-of-day aware."""
+    """Local wall-clock. Lets the companion answer 'what time is it' and be time-of-day aware."""
 
     async def handler(_args: dict) -> str:
         now = datetime.now().astimezone()
@@ -48,7 +48,7 @@ _TIME_FORMAT = ("It is %A, %B %-d %Y, %-I:%M %p" if _supports_dash()
 
 
 def make_reminisce_tool(thoughts, store) -> Tool:
-    """Look back over past conversations + Mari's private journal to recall something.
+    """Look back over past conversations + the companion's private journal to recall something.
 
     `thoughts` is the ThoughtStore (her reflections), `store` the ConversationStore
     (the episodic log). Given a topic, it keyword-searches past messages and pulls

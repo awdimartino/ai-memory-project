@@ -46,7 +46,7 @@ async def main() -> int:
     await say(companion, "Cool, and a good drink to go with it?")
     reply, tools = await say(companion, "hey, remember when I told you about my dog earlier?")
 
-    print(f"\n  Mari: {reply}")
+    print(f"\n  the companion: {reply}")
     for t in tools:
         print(f"  🔧 {t['name']}({t['args']}) -> {t['result']!r}")
     print("\n--- scorecard ---")

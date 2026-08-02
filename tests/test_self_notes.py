@@ -80,24 +80,27 @@ async def main():
     check(meta.get(SELF_NOTES_KEY) == "keep me", "empty reply does not clobber")
 
     # --- 2b) a note written in the wrong voice is dropped, not injected backwards ---
-    # The model occasionally addresses the note to the USER ("You get annoyed when Mari asks
-    # questions"), which would teach her the inverse of the lesson. Her name is the tell.
-    for backwards in ("You get annoyed when Mari asks questions — push back on her gently.",
-                      "mari should stop asking so many questions.",
-                      "He likes it when Mari has an opinion."):
+    # The model occasionally addresses the note to the USER ("You get annoyed when <bot> asks
+    # questions"), which would teach her the inverse of the lesson. Her name is the tell, so the
+    # fixtures are built from config.BOT_NAME rather than a hardcoded name — the guard keys off it.
+    bot = config.BOT_NAME
+    for backwards in (f"You get annoyed when {bot} asks questions — push back on them gently.",
+                      f"{bot.lower()} should stop asking so many questions.",
+                      f"They like it when {bot} has an opinion."):
         meta = InMemoryMeta({SELF_NOTES_KEY: "keep me"})
         check(await _companion(FakeLLM(backwards), meta).update_self_notes() is None,
               f"inverted note rejected: {backwards[:40]!r}")
         check(meta.get(SELF_NOTES_KEY) == "keep me", "a rejected note leaves the good notes in place")
 
     meta = InMemoryMeta()
-    ok_note = "He gets annoyed when you ask questions — react with an opinion instead."
+    ok_note = "They get annoyed when you ask questions — react with an opinion instead."
     check(await _companion(FakeLLM(ok_note), meta).update_self_notes() == ok_note,
           "a correctly-voiced note still passes the guard")
-    check("marinade" not in config.BOT_NAME.lower(), "guard is word-bounded, not a substring match")
+    # A word that merely EMBEDS the bot name must not trip the guard — it is word-bounded.
+    embeds = f"{bot.lower()}ade"   # e.g. "companionade": contains the name but isn't the name
     meta = InMemoryMeta()
-    check(await _companion(FakeLLM("He likes marinades on everything."), meta).update_self_notes(),
-          "a word containing her name as a substring is not a false positive")
+    check(await _companion(FakeLLM(f"They like {embeds} on everything."), meta).update_self_notes(),
+          "a word containing the name as a substring is not a false positive")
 
     # --- 3) hard cap keeps the injected block small ---
     meta = InMemoryMeta()

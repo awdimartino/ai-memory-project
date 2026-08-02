@@ -113,7 +113,7 @@ async def build(db_path: str | None = None) -> tuple[Companion, str]:
     watermark = meta_store.get_int(CONSOLIDATED_WATERMARK_KEY, 0)
     unconsolidated = conv_store.messages_after(watermark)
 
-    # Tool table (pillar 4): the hot-swappable set of things Mari can call mid-turn.
+    # Tool table (pillar 4): the hot-swappable set of things the companion can call mid-turn.
     # Add a Tool here (or at runtime via companion.tools.register) and she can use it
     # next message — the chat loop consults this table every turn, nothing else changes.
     tools = None

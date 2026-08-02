@@ -1,4 +1,4 @@
-# ROADMAP — ai-memory-project (Mari)
+# ROADMAP — ai-memory-project
 
 **What this file is:** the at-a-glance view of what's built and what's next.
 **Pre-3.0** is everything shipped, folded back into the phases it belongs to.

@@ -1,9 +1,9 @@
 """Phone push notifier — self-hosted Bark (HANDOFF §8-D).
 
-When Mari reaches out on her own, POST the message to a self-hosted Bark server so it
+When the companion reaches out on her own, POST the message to a self-hosted Bark server so it
 relays to the user's iPhone via APNs (the one unavoidable online hop; content can be
 E2E-encrypted by Bark so only the phone reads it). Everything else stays on the user's
-own machines: Mari → their Bark server → APNs → phone; replies come back through the
+own machines: the companion → their Bark server → APNs → phone; replies come back through the
 web UI over Tailscale.
 
 Fully optional: a no-op when `url` is empty. A push that fails (server down, no network)

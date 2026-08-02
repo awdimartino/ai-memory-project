@@ -363,7 +363,7 @@ async def ws(websocket: WebSocket) -> None:
                     continue
                 async with state.lock:
                     if companion.is_unavailable():
-                        # §A4: it's fine to make Alex wait — hold the message and ack
+                        # §A4: it's fine to make the user wait — hold the message and ack
                         # WITHOUT a model call (works even with VRAM unloaded);
                         # PursuitReturnJob delivers the real reply once she's back.
                         companion.queue_pending_message(text)

@@ -185,8 +185,8 @@ MEMORY_RELATE_SIMILARITY = _f("MEMORY_RELATE_SIMILARITY", 0.6)
 # the score unevenly — nurse/healthcare is 0.844 bare but 0.735 expanded, welder/
 # welder 0.943 bare but 0.835 expanded. Applying this threshold to expanded vectors
 # lets real duplicates through. Lexical overlap (core/textsim) does NOT work here
-# either: measured, the two classes overlap completely ("The user is called Alex"
-# vs "The user's name is Alex" is a true duplicate scoring only 0.200).
+# either: measured, the two classes overlap completely ("The user is called Sam"
+# vs "The user's name is Sam" is a true duplicate scoring only 0.200).
 MEMORY_DUPLICATE_MIN_SIMILARITY = _f("MEMORY_DUPLICATE_MIN_SIMILARITY", 0.92)
 MEMORY_RELATE_TOP_K = _i("MEMORY_RELATE_TOP_K", 5)
 # Consolidation batches all lifecycle decisions into ONE model call (speed). Two facts in the
@@ -231,7 +231,7 @@ TICK_IDLE_SECONDS = _f("TICK_IDLE_SECONDS", 90)  # "user is away" threshold
 IDLE_CONSOLIDATE_AFTER = _f("IDLE_CONSOLIDATE_AFTER", 180)
 
 # Proactive reach-out: after the user has been away REACHOUT_MIN_IDLE seconds, the
-# tick may generate an unprompted message (Mari decides whether it's worth it and can
+# tick may generate an unprompted message (the companion decides whether it's worth it and can
 # decline). REACHOUT_COOLDOWN throttles attempts (persisted across restarts) so she's
 # a companion, not a nag. Only the web UI surfaces these; the REPL runs internal jobs only.
 REACHOUT_ENABLED = _flag("REACHOUT_ENABLED", True)
@@ -252,7 +252,7 @@ NOTIFY_TITLE = os.environ.get("NOTIFY_TITLE", BOT_NAME)
 # your web-UI address, e.g. https://<host>/static/icon.png. iOS caches it by URL.
 NOTIFY_ICON = os.environ.get("NOTIFY_ICON", "")
 
-# Follow-up messages: after Mari replies, she may fire off a spontaneous second message a tick
+# Follow-up messages: after the companion replies, she may fire off a spontaneous second message a tick
 # or a few later (an afterthought / "double-text"), if she genuinely has something to add — she
 # decides and can PASS. A per-tick CHANCE spreads the timing so it isn't clockwork; it only fires
 # within a short WINDOW after her reply (long idle is reach-out's job) and is capped per turn.
@@ -263,14 +263,14 @@ FOLLOWUP_MIN_DELAY = _f("FOLLOWUP_MIN_DELAY", 0)    # min secs after her reply
 FOLLOWUP_WINDOW = _f("FOLLOWUP_WINDOW", 60)         # must land soon or the moment's gone
 FOLLOWUP_MAX_PER_TURN = _i("FOLLOWUP_MAX_PER_TURN", 1)  # follow-ups per user turn
 
-# Self-reflection: while the user is away, Mari writes a short private thought (a journal
+# Self-reflection: while the user is away, the companion writes a short private thought (a journal
 # to herself, never shown in chat) about how she's doing and the conversations. Internal
 # cognition — the substrate for reminisce and, later, the self-modifying persona.
 REFLECT_ENABLED = _flag("REFLECT_ENABLED", True)
 REFLECT_MIN_IDLE = _f("REFLECT_MIN_IDLE", 120)      # think after 2 min away
 REFLECT_COOLDOWN = _f("REFLECT_COOLDOWN", 600)      # at most every ~10 min
 
-# Intentions (the "planning" pillar): during idle, Mari notes forward intentions — things she means to
+# Intentions (the "planning" pillar): during idle, the companion notes forward intentions — things she means to
 # bring up or find out next time — which reach-out then draws on to be purposeful. Its own idle cadence.
 INTENTION_ENABLED = _flag("INTENTION_ENABLED", True)
 INTENTION_MIN_IDLE = _f("INTENTION_MIN_IDLE", 180)   # note them a few min after a chat
@@ -279,7 +279,7 @@ INTENTION_MAX_ACTIVE = _i("INTENTION_MAX_ACTIVE", 8)   # cap the open agenda (dr
 # Stale intentions expire so the agenda doesn't linger on things that stopped mattering (0 = never).
 INTENTION_MAX_AGE_DAYS = _f("INTENTION_MAX_AGE_DAYS", 7)
 
-# Learned operating-notes (the self-improvement loop): during idle, Mari distills short notes on HOW to be
+# Learned operating-notes (the self-improvement loop): during idle, the companion distills short notes on HOW to be
 # with this person from recent experience ("ease off the questions"), injected live into her prompt. Slower
 # than reflection (a lesson, not a mood) but faster than the persona rewrite (behavior, not identity).
 SELFNOTES_ENABLED = _flag("SELFNOTES_ENABLED", True)
@@ -287,7 +287,7 @@ SELFNOTES_MIN_IDLE = _f("SELFNOTES_MIN_IDLE", 300)    # 5 min away
 SELFNOTES_COOLDOWN = _f("SELFNOTES_COOLDOWN", 1800)   # at most ~every 30 min
 SELFNOTES_MAX_CHARS = _i("SELFNOTES_MAX_CHARS", 400)    # keep the injected block small
 
-# Self-modifying persona: during idle ticks Mari rewrites a bot-owned "who you've become"
+# Self-modifying persona: during idle ticks the companion rewrites a bot-owned "who you've become"
 # slot in her system prompt, reading her thought journal + core memories. How far it may
 # drift is gated by a familiarity meter (derived from message count) so a stranger doesn't
 # rewrite herself into a close friend on day one. Slow and rare (a personality shifts gradually).
@@ -299,7 +299,7 @@ PERSONA_MAX_CHARS = _i("PERSONA_MAX_CHARS", 600)               # keep the slot s
 # Messages of interaction to reach full familiarity (stranger -> close friend), roughly.
 FAMILIARITY_MESSAGES = _i("FAMILIARITY_MESSAGES", 400)
 
-# Sleep / standby (§2.8): after a long idle, Mari unloads the LLM from VRAM to free the
+# Sleep / standby (§2.8): after a long idle, the companion unloads the LLM from VRAM to free the
 # machine (the brain sleeps; the heartbeat keeps ticking). The next message wakes her,
 # reloading the model ("waking up…"). Model-using tick jobs pause while she's asleep.
 # Requires the LM Studio `lms` CLI; auto-disables if it isn't found.
@@ -378,7 +378,7 @@ PURSUIT_SIT_MIN = _f("PURSUIT_SIT_MIN", 180)
 PURSUIT_SIT_MAX = _f("PURSUIT_SIT_MAX", 600)
 
 # Tools (pillar 4): native function-calling. When enabled, the chat turn streams
-# through a tool loop so Mari can call registered tools (clock, reminisce, more
+# through a tool loop so the companion can call registered tools (clock, reminisce, more
 # later). Verified 100% reliable on the chat model (scripts/tool_probe.py). The
 # loop is capped at TOOL_MAX_ITERS tool round-trips per turn so it can never hang.
 TOOLS_ENABLED = _flag("TOOLS_ENABLED", True)

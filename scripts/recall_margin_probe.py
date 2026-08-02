@@ -38,7 +38,7 @@ FACTS = [
 
 # (query, substring that SHOULD be the top hit, or None if nothing should match).
 # The positives are the gold set's recall cases plus paraphrases in the same spirit;
-# the negatives are deliberately varied -- chit-chat, a question about Mari, an
+# the negatives are deliberately varied -- chit-chat, a question about the companion, an
 # adjacent-but-absent topic -- because precision is the entire risk of loosening.
 QUERIES = [
     ("do I have any pets?", "Pip"),

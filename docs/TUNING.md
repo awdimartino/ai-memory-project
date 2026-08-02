@@ -34,9 +34,9 @@ Work down this list — the causes are quite different:
 
 1. **Was it ever extracted?** Check the memory inspector (header → "memory"), or
    `scripts/eval_extraction.py`. Extraction deliberately ignores transient states ("tired
-   today"), anything about Mari or the app, and one-off plans.
+   today"), anything about the companion or the app, and one-off plans.
 2. **Was it a *big, noisy* window?** A lone durable fact drowns in banter — this is the
-   documented "name Alex was dropped" bug. `CONSOLIDATE_WINDOW` (10) is small for this reason;
+   documented "name the user was dropped" bug. `CONSOLIDATE_WINDOW` (10) is small for this reason;
    don't raise it much.
 3. **Is recall failing to surface it?** This was the most likely cause until 2026-07-20, when a
    **contrast gate** fixed it (`RECALL_CONTRAST_GAP`). If you're tuning recall, read this first —
@@ -73,7 +73,7 @@ Work down this list — the causes are quite different:
    separates those from true positives; the fix is lexical evidence (**hybrid BM25 + vector**, the
    documented next step), since "brother" shares no words with the fact while "I should call my
    sister" shares two. Note the cost is bounded: recalled facts are injected as *"things that
-   might be relevant… use them when they fit"*, so a false positive is a true fact Mari can
+   might be relevant… use them when they fit"*, so a false positive is a true fact the companion can
    ignore — a possible non-sequitur, not a fabrication.
 4. **Should it be core?** Toggle the star in the inspector, or raise `CORE_MEMORY_MAX` (12).
 

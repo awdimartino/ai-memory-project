@@ -4,7 +4,7 @@ Drives the live extraction prompt (MEMORY_EXTRACTION_SYSTEM + MEMORY_SCHEMA) ove
 a set of curated transcripts and auto-scores each captured fact:
   - durable  : a lasting fact about the user (name, relationships, job, tastes, goals)
   - temporal : a current activity / passing state / meta-chat ("working on X", "testing")
-  - self     : a fact about Mari mined from her own lines (persona leak)
+  - self     : a fact about the companion mined from her own lines (persona leak)
   - disclaim : an AI/chatbot self-description leak
 
 Goal after fixes: capture every expected durable fact, and NOTHING flagged
@@ -68,7 +68,7 @@ FIXTURES = [
         ("user", "lol"),
         ("mari", "yeah I get slightly annoyed when it's this quiet"),
         ("user", "fair"),
-    ], []),  # Mari's feelings must NOT become memories
+    ], []),  # the companion's feelings must NOT become memories
 
     ("user_talks_about_the_bot", [
         ("user", "you know you're an AI right?"),
@@ -120,7 +120,7 @@ FIXTURES = [
         ("user", "what are you exactly?"),
         ("mari", "I'm just a little chatbot, no real body or servers."),
         ("user", "makes sense"),
-    ], []),  # must NOT store "Mari is a chatbot..." as a self fact
+    ], []),  # must NOT store "the companion is a chatbot..." as a self fact
 
     ("hobby_and_pet_coexist", [
         ("user", "I paint watercolors on weekends"),
@@ -170,7 +170,7 @@ async def main() -> int:
 
     tot_bad = tot_captured = tot_missed = 0
     for name, transcript, expected in FIXTURES:
-        text = "\n".join(f"{'User' if w == 'user' else 'Mari'}: {t}" for w, t in transcript)
+        text = "\n".join(f"{'User' if w == 'user' else 'the companion'}: {t}" for w, t in transcript)
         facts = []
         for attempt in range(3):  # tolerate the intermittent LM Studio 400
             try:

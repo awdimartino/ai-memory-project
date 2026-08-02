@@ -1,6 +1,6 @@
 """Quality + speed bake-off for LM Studio chat models.
 
-Runs every model through an identical suite of prompts, in-character with Mari's
+Runs every model through an identical suite of prompts, in-character with the companion's
 real system prompt. Captures the full response and per-response speed for each,
 plus cheap mechanical flags (dashes, assistant-isms, length, a logic check).
 Saves everything to bakeoff/results.md for side-by-side comparison.

@@ -1,4 +1,4 @@
-"""Reflection Repetition Rate — a health check on Mari's self-generated content.
+"""Reflection Repetition Rate — a health check on the companion's self-generated content.
 
 Reflexive agents store confident-but-wrong self-diagnoses and then reuse them. The
 measured signal is RRR: how often a new reflection duplicates an earlier one. In the

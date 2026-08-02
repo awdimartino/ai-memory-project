@@ -5,7 +5,7 @@ UTF-8 stdout, a throwaway DB + jobs-off environment, an LLMClient, and the `lms`
 unload helper. The copies had drifted in ways that mattered: two incompatible
 temp-DB styles, three different client timeouts, and (the one that actually cost
 something) an `LLMClient` built without the sampling penalties production uses, so
-an eval scored a configuration Mari never runs.
+an eval scored a configuration the companion never runs.
 
 **Import this first, before `config`.** Two of the helpers only work if they run
 before config is imported:

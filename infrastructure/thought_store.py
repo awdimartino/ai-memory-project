@@ -1,4 +1,4 @@
-"""SQLite implementation of the ThoughtStore contract: Mari's private journal.
+"""SQLite implementation of the ThoughtStore contract: the companion's private journal.
 
 Self-reflections written during idle ticks — the bot's own thoughts, kept separate
 from the conversation log (the `messages` table) so they never leak into chat or

@@ -106,7 +106,7 @@ MIGRATIONS = [
     INSERT INTO meta (key, value)
     VALUES ('last_consolidated_msg_id', (SELECT COALESCE(MAX(id), 0) FROM messages));
     """,
-    # v5 — Mari's private thought journal (self-reflection during idle ticks)
+    # v5 — the companion's private thought journal (self-reflection during idle ticks)
     """
     CREATE TABLE thoughts (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +124,7 @@ MIGRATIONS = [
     """
     ALTER TABLE sessions ADD COLUMN title TEXT;
     """,
-    # v8 — intentions: Mari's private forward agenda (the Generative-Agents "planning"
+    # v8 — intentions: the companion's private forward agenda (the Generative-Agents "planning"
     # pillar) — things she means to bring up or find out, minted during idle reflection
     # and drawn on by reach-out. fulfilled_at is set when she acts on one.
     """

@@ -1,6 +1,6 @@
 """Model-lifecycle manager: unload/load LM Studio models to free VRAM (§2.8).
 
-Sleep/standby drives this — when Mari goes to sleep the LLM is unloaded from VRAM
+Sleep/standby drives this — when the companion goes to sleep the LLM is unloaded from VRAM
 so the machine is free for other work; on wake it's reloaded. Implemented over the
 LM Studio `lms` CLI (the same commands we drive by hand: `lms unload --all`,
 `lms load <model> --gpu max -y`), run off the event loop in a threadpool.

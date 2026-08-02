@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 # Key for the consolidation checkpoint in the MetaStore. Shared with bootstrap,
 # which reads it on startup to recover the unconsolidated tail.
 CONSOLIDATED_WATERMARK_KEY = "last_consolidated_msg_id"
-# Mari's own evolving self-description (the self-modifying persona slot), in the MetaStore.
+# the companion's own evolving self-description (the self-modifying persona slot), in the MetaStore.
 PERSONA_SELF_KEY = "persona_self"
 # Learned operating-notes: what she's worked out about HOW to be with this user (vs. who she is).
 SELF_NOTES_KEY = "self_notes"
@@ -119,7 +119,7 @@ async def _sink(_token: str) -> None:
 
 
 def _is_pass(text: str) -> bool:
-    """True when a generation is Mari declining to speak — the PASS convention.
+    """True when a generation is the companion declining to speak — the PASS convention.
 
     Shared by every path that offers her the choice (chat silence, reach-out,
     follow-up, persona edit, self-notes). Tolerates what the model actually returns:
@@ -151,7 +151,7 @@ class Companion:
         self.drives = drives
         self.model_manager = model_manager  # unload/reload the LLM for sleep, or None
         # ToolRegistry (pillar 4), or None/empty to run plain streaming turns. When
-        # non-empty, send() streams through the tool loop so Mari can call tools.
+        # non-empty, send() streams through the tool loop so the companion can call tools.
         self.tools = tools
         self.tool_max_iters = tool_max_iters
         self._asleep = False  # True while the LLM is unloaded from VRAM (§2.8)
@@ -297,7 +297,7 @@ class Companion:
                 gate["open"] = True
                 await on_token(gate["buf"])
 
-            # With tools registered, stream through the tool loop (Mari may call one
+            # With tools registered, stream through the tool loop (the companion may call one
             # mid-turn); otherwise a plain streaming turn with zero tool overhead.
             if self.tools:
                 text, stats = await self.llm.stream_with_tools(
@@ -432,7 +432,7 @@ class Companion:
     async def reach_out(self) -> str | None:
         """Generate an unprompted message from recent context, or None to stay quiet.
 
-        Mari decides: the prompt lets her reply "PASS" when nothing feels natural. A real
+        the companion decides: the prompt lets her reply "PASS" when nothing feels natural. A real
         message is logged as an assistant turn (so it also shows up on reconnect) and
         folded into history/the consolidation buffer, just like a normal reply.
         """
@@ -466,7 +466,7 @@ class Companion:
         return self._busy
 
     def followups_pending(self) -> int:
-        """Spontaneous follow-ups Mari may still send for the current turn."""
+        """Spontaneous follow-ups the companion may still send for the current turn."""
         return self._followups_left
 
     def seconds_since_reply(self) -> float:
@@ -832,7 +832,7 @@ class Companion:
         return await self.send(pending, on_token)
 
     async def edit_persona(self) -> str | None:
-        """Rewrite Mari's own self-description slot from her thoughts + core memories, gated by
+        """Rewrite the companion's own self-description slot from her thoughts + core memories, gated by
         familiarity. Runs during idle ticks; the new text colors later turns via build_system.
 
         The "too early to have a developed self" gate used to live ONLY in
@@ -884,7 +884,7 @@ class Companion:
             logger.info("self-notes: no change")
             return None
         # These notes are addressed TO her, so a correct one never names her. When her name shows up
-        # the model has written the note to the USER instead ("You get annoyed when Mari asks
+        # the model has written the note to the USER instead ("You get annoyed when the companion asks
         # questions"), which injects the lesson backwards — drop the pass and keep the old notes.
         if re.search(rf"\b{re.escape(config.BOT_NAME)}\b", text, re.IGNORECASE):
             logger.info("self-notes: discarded, written in the wrong voice: %s", text[:80])

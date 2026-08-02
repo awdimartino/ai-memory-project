@@ -165,7 +165,7 @@ class MemoryStore(Protocol):
 
 
 class ThoughtStore(Protocol):
-    """Persistence for Mari's private thought journal (self-reflections)."""
+    """Persistence for the companion's private thought journal (self-reflections)."""
 
     def add(self, content: str, mood: str | None) -> int:
         """Store one reflection (optionally tagged with the dominant mood); return its id."""
@@ -185,7 +185,7 @@ class ThoughtStore(Protocol):
 
 
 class IntentionStore(Protocol):
-    """Persistence for Mari's private forward agenda (the "planning" pillar): short
+    """Persistence for the companion's private forward agenda (the "planning" pillar): short
     notes of things she means to bring up or find out, minted during reflection and
     consumed by reach-out.
 

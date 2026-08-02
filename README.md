@@ -1,8 +1,9 @@
-# Mari — a local-first AI companion
+# ai-memory-project
 
-A personal AI companion for a single user, running fully local against
-[LM Studio](https://lmstudio.ai/). Not an assistant — a friend. She remembers you, has moods
-that persist, thinks while you're away, and occasionally messages first.
+A local-first AI companion for a single user, running fully local against
+[LM Studio](https://lmstudio.ai/). Not an assistant — a friend. It remembers you, has moods
+that persist, thinks while you're away, and occasionally messages first. Give it any name you
+like via `BOT_NAME` in `.env` (the default is `Companion`).
 
 Everything runs on one machine: a 9B chat model, a small embedding model, and a ~125M emotion
 classifier on CPU, inside a 16 GB VRAM budget.
@@ -22,13 +23,13 @@ loaded. Config comes from a git-ignored `.env` — see `.env.example`.
 
 | If you want to… | Read |
 |---|---|
-| **Pick up where the last session left off** | [`HANDOFF.md` §9](HANDOFF.md) — current state, next steps, what to watch |
+| **Pick up where the last session left off** | [`HANDOFF.md`](HANDOFF.md) — current state, next steps, what to watch |
+| Know what's built and what's next | [`ROADMAP.md`](ROADMAP.md) — pre-3.0 phases + post-3.0 backlog |
 | Understand how the code fits together | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
-| Change how she behaves | [`docs/TUNING.md`](docs/TUNING.md) — symptom → knob |
+| Change how it behaves | [`docs/TUNING.md`](docs/TUNING.md) — symptom → knob |
 | Add a tool, a job, a store, a migration | [`docs/EXTENDING.md`](docs/EXTENDING.md) |
 | Know what to run and when | [`docs/TESTING.md`](docs/TESTING.md) |
 | Measure whether a change helped | [`evals/README.md`](evals/README.md) — the gold set |
-| Know the roadmap, and what NOT to build | [`HANDOFF.md` §8](HANDOFF.md) — incl. §G and §H |
 | Understand *why* it's built this way | [`V2_PLAN.md`](V2_PLAN.md) — design decisions + full build log |
 | Avoid relearning v1's lessons | [`V1_RETROSPECTIVE.md`](V1_RETROSPECTIVE.md) |
 
@@ -131,6 +132,8 @@ Built for an AMD Radeon 9070XT (16 GB). Consequences that shaped real decisions:
 
 ## Security
 
-`archive/v1/infrastructure/config.py` contains a **real hardcoded HuggingFace token**. It is
-git-ignored deliberately and must never be committed — it should be rotated on HuggingFace.
-`.env` and `companion.db` are git-ignored too. There is no git remote; this is local-only.
+If you fork or self-host this: put all secrets in `.env` (git-ignored) — never in tracked code.
+The old v1 code under `archive/` once carried a hardcoded HuggingFace token; it has been scrubbed
+from git history, but **rotate any token that was ever committed** regardless, since history
+rewrites don't reach clones or caches. `.env` and `companion.db` (your real conversation history)
+are git-ignored and must stay that way.

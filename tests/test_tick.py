@@ -297,7 +297,7 @@ async def reach_out_fires_and_pushes():
 
 @case
 async def reach_out_decline_still_sets_cooldown():
-    comp = ReachCompanion(idle=1000.0, reach_result=None)  # Mari stays quiet
+    comp = ReachCompanion(idle=1000.0, reach_result=None)  # the companion stays quiet
     pushes = []
     await _reach_job(comp, WallClock(), pushes).run()
     assert comp.reach_calls == 1, "should have attempted"

@@ -95,7 +95,7 @@ def main() -> int:
     print(f"Writing: {out_path}\n", flush=True)
 
     lines = [f"# tryout — {model}", "",
-             f"Efforts: {', '.join(efforts)} | persona: Mari SYSTEM_PROMPT | temp 0.8 | "
+             f"Efforts: {', '.join(efforts)} | persona: the companion SYSTEM_PROMPT | temp 0.8 | "
              f"max_tokens {MAX_TOKENS}", ""]
 
     try:

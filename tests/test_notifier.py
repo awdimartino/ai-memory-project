@@ -27,7 +27,7 @@ def _capturing():
 @case
 async def noop_when_url_empty():
     transport, captured = _capturing()
-    p = PhonePush("", "Mari", transport=transport)
+    p = PhonePush("", "the companion", transport=transport)
     assert not p.enabled()
     await p.push("hi")
     assert captured == [], "disabled notifier must not POST"
@@ -36,7 +36,7 @@ async def noop_when_url_empty():
 @case
 async def posts_bark_payload_with_url():
     transport, captured = _capturing()
-    p = PhonePush("http://bark-host:8090/devkey", "Mari",
+    p = PhonePush("http://bark-host:8090/devkey", "the companion",
                   ui_url="https://pc.tail.ts.net", transport=transport)
     assert p.enabled()
     await p.push("hey, no rush, was thinking about you")
@@ -45,16 +45,16 @@ async def posts_bark_payload_with_url():
     assert str(req.url) == "http://bark-host:8090/devkey"
     assert req.method == "POST"
     body = json.loads(req.content)
-    assert body["title"] == "Mari"
+    assert body["title"] == "the companion"
     assert body["body"] == "hey, no rush, was thinking about you"
-    assert body["group"] == "Mari"
+    assert body["group"] == "the companion"
     assert body["url"] == "https://pc.tail.ts.net"
 
 
 @case
 async def strips_trailing_slash():
     transport, captured = _capturing()
-    p = PhonePush("http://bark-host:8090/devkey/", "Mari", transport=transport)
+    p = PhonePush("http://bark-host:8090/devkey/", "the companion", transport=transport)
     await p.push("hi")
     assert str(captured[0].url) == "http://bark-host:8090/devkey", "trailing slash must be trimmed"
 
@@ -62,7 +62,7 @@ async def strips_trailing_slash():
 @case
 async def omits_url_when_ui_unset():
     transport, captured = _capturing()
-    p = PhonePush("http://bark-host:8090/devkey", "Mari", transport=transport)
+    p = PhonePush("http://bark-host:8090/devkey", "the companion", transport=transport)
     await p.push("hi")
     body = json.loads(captured[0].content)
     assert "url" not in body, "no tap-to-open link when NOTIFY_UI_URL is unset"
@@ -72,7 +72,7 @@ async def omits_url_when_ui_unset():
 @case
 async def includes_icon_when_set():
     transport, captured = _capturing()
-    p = PhonePush("http://bark-host:8090/devkey", "Mari",
+    p = PhonePush("http://bark-host:8090/devkey", "the companion",
                   icon="https://pc.tail.ts.net/static/mari.png", transport=transport)
     await p.push("hi")
     body = json.loads(captured[0].content)
@@ -83,7 +83,7 @@ async def includes_icon_when_set():
 async def swallows_push_errors():
     def handler(request):
         raise httpx.ConnectError("pi unreachable")
-    p = PhonePush("http://bark-host:8090/devkey", "Mari", transport=httpx.MockTransport(handler))
+    p = PhonePush("http://bark-host:8090/devkey", "the companion", transport=httpx.MockTransport(handler))
     # The assertion is that this returns at all — a dead Pi must not break a reach-out.
     delivered, detail = await p.push("hi")
     assert delivered is False, "a transport error is not a delivery"
@@ -97,7 +97,7 @@ async def swallows_push_errors():
 @case
 async def reports_success_on_2xx():
     transport, _ = _capturing()
-    p = PhonePush("http://bark-host:8090/devkey", "Mari", transport=transport)
+    p = PhonePush("http://bark-host:8090/devkey", "the companion", transport=transport)
     assert await p.push("hi") == (True, "ok")
 
 
@@ -105,7 +105,7 @@ async def reports_success_on_2xx():
 async def reports_failure_on_http_error():
     def handler(request):
         return httpx.Response(404, text="failed to get device token")
-    p = PhonePush("http://bark-host:8090/badkey", "Mari", transport=httpx.MockTransport(handler))
+    p = PhonePush("http://bark-host:8090/badkey", "the companion", transport=httpx.MockTransport(handler))
     delivered, detail = await p.push("hi")
     assert delivered is False, "a 404 from Bark is a FAILED push, not a successful one"
     assert "404" in detail and "device token" in detail, detail
@@ -113,7 +113,7 @@ async def reports_failure_on_http_error():
 
 @case
 async def disabled_push_is_not_a_delivery():
-    p = PhonePush("", "Mari")
+    p = PhonePush("", "the companion")
     assert await p.push("hi") == (False, "disabled")
 
 
@@ -130,7 +130,7 @@ def _wire_phone(handler):
         captured.append(json.loads(request.content))
         return handler(request)
 
-    app.state.phone = PhonePush("http://bark-host:8090/devkey", "Mari",
+    app.state.phone = PhonePush("http://bark-host:8090/devkey", "the companion",
                                 transport=httpx.MockTransport(_h))
     app.state.connections.clear()
     app.state.visible.clear()      # nobody looking -> away -> push

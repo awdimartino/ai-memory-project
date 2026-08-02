@@ -1,4 +1,4 @@
-"""SQLite implementation of the IntentionStore: Mari's private forward agenda.
+"""SQLite implementation of the IntentionStore: the companion's private forward agenda.
 
 Intentions are short first-person notes of things she means to bring up or find out
 next time — the "planning" pillar of the Generative-Agents loop. Minted during idle
