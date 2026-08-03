@@ -13,3 +13,8 @@ __pycache__/
 
 # v1 archived config holds a hardcoded token; must never be committed
 /archive/v1/infrastructure/config.py
+/.claude
+
+# local git-history backups (bundles). NEVER publish — these hold the pre-scrub
+# history, including the old hardcoded token.
+/backups/
